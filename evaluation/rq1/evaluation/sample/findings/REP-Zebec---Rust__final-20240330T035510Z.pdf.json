@@ -1,0 +1,191 @@
+{
+    "path": "reports/REP-Zebec---Rust__final-20240330T035510Z.pdf",
+    "project_info": {
+        "url": "https://github.com/Zebec-protocol/migration-program/tree/938b8d6e58860f210ac1110ce6850399329e68ba",
+        "commit_id": "938b8d6e58860f210ac1110ce6850399329e68ba",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-03-30",
+        "project_path": "contracts/REP-Zebec---Rust__final-20240330T035510Z.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "SRC-02 : Centralization Related Risks and Upgradability",
+            "description": "This finding highlights major centralization risks in the migration_program, where privileged roles such as `admin` and `ZBCN mint::authority` have significant control over critical functions. The `admin` can maliciously pause the ZBC migration service or transfer admin privileges to a malicious account, while the `ZBCN mint::authority` can mint unlimited ZBCN tokens to any account. The root cause is the centralized design that relies on single, privileged accounts without safeguards like multi-signature or timelock mechanisms. An attacker who compromises any of these privileged keys could disrupt service, manipulate token supply, or cause financial losses. The impact includes potential loss of user funds, manipulation of cross-chain transfers, and erosion of trust in the protocol.\n",
+            "severity": "high",
+            "files": [
+                "programs/migration-program/src/instructions/init_config.rs",
+                "programs/migration-program/src/instructions/migrate_token.rs"
+            ],
+            "location": [
+                "migrate_token.rs#114-115",
+                "lib.rs#25-29"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "MIG-01 : Missing `ZBC` and `ZBCN` Token Decimal Conversion",
+            "description": "The vulnerability arises because the `amount` parameter passed to the `migrate_token` function is used directly for both burning ZBC and minting ZBCN tokens without applying decimal conversion. Since ZBC and ZBCN may have different decimal precisions, this leads to incorrect minting amounts, breaking the intended economic model. The root cause is the lack of explicit decimal normalization logic in the migration process. An attacker could exploit this by initiating migrations when exchange rates are favorable due to the mismatch, potentially gaining unfair advantages or causing user losses. The impact is incorrect token valuation during migration, leading to economic imbalance and user fund loss.\n",
+            "severity": "medium",
+            "files": [
+                "programs/migration-program/src/instructions/migrate_token.rs"
+            ],
+            "location": [
+                "migrate_token.rs#97-98",
+                "migrate_token.rs#114-115"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "INS-01 : Missing Mint Authority Validation",
+            "description": "The contract fails to validate that the `zbcn_mint` account's mint authority is correctly set to the `mint_authority` PDA during initialization and migration. Although comments indicate this should be the case, no runtime check enforces it, allowing a misconfiguration or malicious setup where the mint authority is not the expected PDA. The root cause is the omission of a validation check in the instruction logic. If exploited, an attacker could set a rogue mint authority, enabling unauthorized minting of ZBCN tokens. The impact is uncontrolled inflation of ZBCN supply, leading to severe financial and reputational damage.\n",
+            "severity": "low",
+            "files": [
+                "programs/migration-program/src/instructions/init_config.rs",
+                "programs/migration-program/src/instructions/migrate_token.rs"
+            ],
+            "location": [
+                "init_config.rs#19-28",
+                "init_config.rs#32",
+                "migrate_token.rs#39-48"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "INI-02 : Assignee and Assigning Time for `zbcn_mint` Mint Authority Role",
+            "description": "The code assumes that the `mint_authority` PDA is the mint authority for the ZBCN token, but it does not include logic to actually assign this role during initialization. The comment states the account has mint authority, but the actual permission assignment is missing in the code. The root cause is a gap between documentation and implementation. If not addressed, the migration process may fail or operate with an incorrect mint authority, leading to a denial of service. The impact is functional disruption of the migration mechanism, preventing legitimate users from converting tokens.\n",
+            "severity": "informational",
+            "files": [
+                "programs/migration-program/src/instructions/init_config.rs"
+            ],
+            "location": [
+                "init_config.rs#19-28",
+                "init_config.rs#32"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "LIB-01 : Potential Front-Running Risk with Initialize Instructions",
+            "description": "The `init_config` instruction can be called by any party, creating a risk that a malicious actor could front-run the legitimate deployment by initializing the program first. The root cause is the lack of access control on the initialization function. Although Solana has low front-running risk due to its architecture, a well-resourced attacker could still exploit this during deployment. The impact is loss of control over the program initialization, potentially leading to theft of privileged roles or sabotage of the protocol setup.\n",
+            "severity": "informational",
+            "files": [
+                "programs/migration-program/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#17-19"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "MIG-02 : `ZBCN` Max Minted Amount",
+            "description": "The contract enforces a hard cap of 10 billion ZBCN tokens to be minted, which corresponds to the migration limit. The finding is informational, requesting confirmation that the ZBC supply does not exceed 10 billion. The root cause is the need for external validation of economic parameters. If the ZBC supply were larger, some users would be unable to migrate, leading to dissatisfaction and potential disputes. The impact is limited to economic design clarity and user expectations, not direct security risk.\n",
+            "severity": "informational",
+            "files": [
+                "programs/migration-program/src/instructions/migrate_token.rs"
+            ],
+            "location": [
+                "migrate_token.rs#84-88"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1099"
+                ]
+            },
+            "title": "MIG-03 : Meaningless Variable Name",
+            "description": "The variable `mint_zbc` is used to mint ZBCN tokens, which is misleading and reduces code readability. The root cause is poor naming convention. While this does not affect functionality, it increases the risk of developer errors during maintenance or audits. The impact is reduced code maintainability and potential confusion leading to logic mistakes in future updates.\n",
+            "severity": "informational",
+            "files": [
+                "programs/migration-program/src/instructions/migrate_token.rs"
+            ],
+            "location": [
+                "migrate_token.rs#103",
+                "migrate_token.rs#111"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "SRC-01 : `ZBC` and `ZBCN` Token Price",
+            "description": "The migration uses a 1:1 amount conversion between ZBC and ZBCN, which could misrepresent value if their market prices differ. The root cause is the lack of price oracle or dynamic rate mechanism. Users might lose value if ZBCN's price is lower than ZBC's during migration. The impact is potential economic loss for users due to unfavorable conversion rates, undermining trust in the migration process.\n",
+            "severity": "informational",
+            "files": [
+                "programs/migration-program/src/instructions/migrate_token.rs",
+                "programs/migration-program/src/lib.rs"
+            ],
+            "location": [
+                "migrate_token.rs#97-98",
+                "migrate_token.rs#114-115",
+                "lib.rs#21"
+            ]
+        }
+    ]
+}

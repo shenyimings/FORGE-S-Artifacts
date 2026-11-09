@@ -1,0 +1,291 @@
+{
+    "path": "reports/zenith/Meteora DBC (r.0.2.0) - Zenith Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/MeteoraAg/dynamic-bonding-curve/pull/193",
+            "https://github.com/MeteoraAg/dynamic-bonding-curve/pull/196",
+            "https://github.com/MeteoraAg/dynamic-bonding-curve/pull/198"
+        ],
+        "commit_id": [
+            "5c9b0b14b54446357dc11467f7ab248ba6c0f62b",
+            "5c3ad521c8847984bc1ed739c37e1f6a50be2610",
+            "3114aeb355087abeb217a1e64a347e6f5466b616",
+            "15e98f293059d0b14f2e8bf86a334c3454b602c2"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-05-20",
+        "project_path": "contracts/Meteora DBC (r.0.2.0) - Zenith Audit Report.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Creator quote-fee claims can be blocked by a malicious zero-amount base hook",
+            "description": "The claim_creator_trading_fee function transfers accrued creator fees from pool vaults to the creator's token accounts. However, it calls transfer_token_from_pool_authority for the base token even when the amount is zero, which triggers transfer hooks regardless of the transfer amount. A malicious base token transfer hook can reject this zero-amount transfer, causing the entire transaction to revert before the quote token transfer occurs. This prevents the creator from claiming their valid, non-zero quote token fees. The root cause is the lack of a zero-amount check before initiating the base token transfer. As a result, a malicious actor controlling the base token's transfer hook can indefinitely block fee claims, leading to denial of service for fee collection.\n",
+            "severity": "low",
+            "location": [
+                "ix_claim_creator_trading_fee.rs#92"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/instructions/creator/ix_claim_creator_trading_fee.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Base protocol fees can remain unclaimable for incomplete transfer-hook pools",
+            "description": "Transfer-hook pools configured with CollectFeeMode::OutputToken accrue protocol fees in the base token during QuoteToBase swaps. However, the claim_protocol_fee2 function requires the pool to be curve-complete before allowing base token fee claims. If the pool never completes its curve, the accrued base-denominated protocol fees remain permanently locked in the pool and cannot be claimed by the protocol. This occurs because the fee claim path enforces a completeness check only for base token claims, while quote-denominated fees are unaffected. The root cause is the asymmetric handling of fee claims based on token type and pool completion status. This leads to potential permanent loss of protocol revenue if pools are abandoned, especially in cases where the curve cannot or will not be completed.\n",
+            "severity": "low",
+            "location": [
+                "src/instructions/operator/ix_claim_protocol_fee2.rs#L116-L128",
+                "src/state/fee.rs#L120-L143",
+                "src/state/virtual_pool.rs#L940-L977"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/instructions/operator/ix_claim_protocol_fee2.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-1265"
+                ]
+            },
+            "title": "Fee claim and swap handlers hold pool borrows across transfer-hook CPIs",
+            "description": "The fee claim and swap handlers (e.g., claim_partner_trading_fee, claim_creator_trading_fee, and process_swap) maintain mutable borrows of the pool state and configuration across token transfer CPIs that may invoke transfer hooks. Since these borrows are held during external CPIs, any transfer hook that attempts to read the same pool or config account will fail due to Rust's borrowing rules, resulting in a runtime error. The root cause is improper scoping of mutable references, where the borrow is not dropped before making external calls. This can prevent legitimate transfer hook integrations from functioning correctly during fee claims or swaps, leading to transaction failures and reduced composability. Attackers could potentially exploit this by deploying hooks that trigger these borrow conflicts to disrupt normal operations.\n",
+            "severity": "low",
+            "location": [
+                "ix_claim_partner_trading_fee.rs#L81",
+                "ix_claim_creator_trading_fee.rs#L70",
+                "process_swap.rs#L114",
+                "process_swap.rs#L298",
+                "process_swap.rs#L311",
+                "process_swap.rs#L330"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/instructions/partner/ix_claim_partner_trading_fee.rs",
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/instructions/swap/process_swap.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-222"
+                ]
+            },
+            "title": "Protocol fee claim event in claim_protocol_fee2 uses truncatable emit!()",
+            "description": "The claim_protocol_fee2 instruction uses the `emit!` macro to emit the EvtClaimProtocolFee2 event, which can result in event log truncation under certain conditions. The `emit!` macro writes events directly to the program log, which has size limitations and may truncate long logs. In contrast, `emit_cpi!` is designed for cross-program invocation contexts and avoids truncation by using a more reliable event emission mechanism. The root cause is the use of an inappropriate event emission method for the execution context. While this does not affect the correctness of the on-chain state, it can hinder off-chain indexing and monitoring systems that rely on complete event logs, potentially leading to incorrect or incomplete data interpretation by frontends and analytics tools.\n",
+            "severity": "informational",
+            "location": [
+                "ix_claim_protocol_fee2.rs#L159"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/instructions/operator/ix_claim_protocol_fee2.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "SDK quote helpers require VirtualPool instead of PoolState",
+            "description": "The SDK quote helper functions (quote_exact_in, quote_exact_out, quote_partial_fill) require a &VirtualPool reference, even though they only use methods and fields defined on the shared PoolState struct. This creates a type mismatch for TransferHookPool instances, which also contain a PoolState but cannot be directly passed to these functions. The root cause is a failure to abstract the SDK interface to match the on-chain design, where both VirtualPool and TransferHookPool dereference to a common PoolState. As a result, SDK users must perform unnecessary type conversions or unsafe reinterpretings to use quote functions with transfer-hook pools, increasing integration complexity and risk of errors. This inconsistency reduces code reusability and undermines the design principle of wrapper-agnostic shared logic.\n",
+            "severity": "informational",
+            "location": [
+                "src/quote_exact_in.rs#L5-L10",
+                "src/quote_exact_out.rs#L5-L10",
+                "src/quote_partial_fill.rs#L5-L10"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/dynamic-bonding-curve-sdk/src/quote_exact_in.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Protocol surplus is not capped by the maximum quote claim amount",
+            "description": "The claim_protocol_fee2 function accepts a max_amount parameter intended to limit the amount of quote tokens claimed. However, after applying this limit to the protocol fee buckets (protocol_quote_fee and protocol_migration_quote_fee_amount), it unconditionally adds the full protocol surplus amount if available, potentially exceeding the caller-specified max_amount. The root cause is the lack of a final cap on the total amount after including surplus. While this does not allow unauthorized withdrawals—since the surplus is legitimately owned by the protocol and the function is authority-gated—it violates the expected semantics of the max_amount parameter. Integrators relying on max_amount as a hard upper bound may receive larger transfers than expected, leading to incorrect accounting or integration bugs in wrapper programs and frontends.\n",
+            "severity": "informational",
+            "location": [
+                "src/state/virtual_pool.rs#L1071-L1086",
+                "src/instructions/operator/ix_claim_protocol_fee2.rs#L116-L128"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/instructions/operator/ix_claim_protocol_fee2.rs",
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/state/virtual_pool.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Transfer-hook pool metadata is not distinguishable from ordinary pool metadata",
+            "description": "The create_virtual_pool_metadata instruction and the resulting VirtualPoolMetadata account and EvtVirtualPoolMetadata event do not indicate whether the associated pool is a VirtualPool or a TransferHookPool. The instruction accepts the pool as an UncheckedAccount and stores only the pool key without any type discriminator. The emitted event and metadata account structure are identical for both pool types. The root cause is the lack of subtype tagging in the metadata creation path. This forces external consumers (e.g., indexers, frontends) to perform additional on-chain queries to determine the pool type, increasing complexity and potentially leading to incorrect assumptions or presentation. It breaks the isolation boundary intended by the transfer-hook design and can result in transfer-hook pools being processed through ordinary-pool pipelines, risking incorrect behavior or security assumptions.\n",
+            "severity": "informational",
+            "location": [
+                "src/instructions/creator/ix_create_virtual_pool_metadata.rs#L18-L56",
+                "src/event.rs#L20-L24"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/instructions/creator/ix_create_virtual_pool_metadata.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "QuoteToBase trade direction documentation is incorrect",
+            "description": "The TradeDirection enum incorrectly documents the QuoteToBase variant with the same comment as BaseToQuote: \"Input base token, output quote token\". In reality, QuoteToBase uses quote token as input and base token as output, as implemented in the process_swap function. The root cause is a copy-paste error in the documentation comments. This can mislead developers, auditors, and integrators who rely on the code comments to understand the swap logic, potentially leading to incorrect implementations in SDKs, frontends, or smart contracts that interact with the system. Misunderstanding the trade direction can result in flawed fee calculations, incorrect UI displays, or erroneous event interpretations.\n",
+            "severity": "informational",
+            "location": [
+                "src/params/swap.rs#L6-L10"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/params/swap.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Mint-authority comments misstate transfer-hook support",
+            "description": "The comments for TokenAuthorityOption::CreatorUpdateAndMintAuthority and TokenAuthorityOption::PartnerUpdateAndMintAuthority state that using these options will cause config creation or pool initialization to fail. However, this is only true for non-transfer-hook pools. For transfer-hook pools, these options are explicitly allowed and used to set the mint authority on Token-2022 mints. The root cause is outdated and overly broad documentation that fails to distinguish between transfer-hook and non-transfer-hook contexts. This can mislead developers into thinking these options are entirely deprecated, when in fact they are essential for certain transfer-hook configurations. As a result, maintainers may avoid valid use cases or incorrectly assume security restrictions that do not apply in the transfer-hook context.\n",
+            "severity": "informational",
+            "location": [
+                "src/state/config.rs#L379-L382"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/state/config.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "Config loader panics on short config account data",
+            "description": "The ConfigAccountLoader's try_from function attempts to slice the first eight bytes of account data to read the discriminator before validating the data length. This creates a scenario where an account owned by the DBC program but containing fewer than eight bytes of data will cause a panic due to an out-of-bounds slice operation. The root cause is the incorrect order of validation checks—ownership is verified first, but data length is checked only after the slice. An attacker could exploit this by providing a specially crafted account with insufficient data, leading to a transaction failure due to a panic rather than a graceful error. The impact is limited to denial of service for that specific transaction, as the panic prevents further execution, but it undermines the robustness of the account validation process, which should handle invalid inputs gracefully.\n",
+            "severity": "informational",
+            "location": [
+                "src/utils/config_account_loader.rs#L16-L40"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/utils/config_account_loader.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-228"
+                ],
+                "3": [
+                    "CWE-167"
+                ]
+            },
+            "title": "Transfer-hook handlers accept unconsumed or unused remaining accounts",
+            "description": "The transfer-hook handlers in various instructions (e.g., claim_trading_fee2, swap2_with_transfer_hook) parse remaining accounts into structured slices but do not enforce that all provided accounts are consumed or that only expected slices are present. The cause is the lack of validation that the remaining_accounts list is empty after parsing and that unused slices (like transfer_hook_base_referral) are not provided when not needed. An attacker or misconfigured client could supply extra or irrelevant accounts, which are silently ignored, leading to successful execution of malformed transactions. This can obscure bugs in client logic and create a non-canonical interface, reducing clarity and increasing the risk of integration errors. While the immediate security impact is low, it can lead to confusion and potential misuse in complex integrations.\n",
+            "severity": "informational",
+            "location": [
+                "ix_claim_partner_trading_fee.rs#L100",
+                "ix_claim_creator_trading_fee.rs#L85",
+                "remaining_accounts.rs#L29",
+                "process_swap.rs#L286"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/instructions/partner/ix_claim_partner_trading_fee.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "README omits the transfer-hook-only restriction for mint-authority options",
+            "description": "The README.md incorrectly states that token_update_authority options 3 and 4 allow the creator or partner to mint tokens without specifying that this functionality is restricted to transfer-hook configurations only. The actual code enforces this restriction via require! checks in ConfigParameters::validate, rejecting mint authority for non-transfer-hook configs. The root cause is outdated or incomplete documentation. An integrator relying solely on the README may attempt to use these options in non-transfer-hook contexts, leading to failed transactions during config creation. This creates a poor developer experience and potential integration delays. The impact is limited to usability and clarity, not direct fund loss, but it can mislead developers and cause deployment failures.\n",
+            "severity": "informational",
+            "location": [
+                "README.md#L49-L49"
+            ],
+            "files": [
+                "5c9b0b14b54446357dc11467f7ab248ba6c0f62b/dynamic-bonding-curve/README.md"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,212 @@
+{
+    "path": "reports/oaksecurity/2021-10-18 Audit Report - Anchor Liquidation Queue.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/Anchor-Protocol/money-market-contracts/"
+        ],
+        "commit_id": [
+            "fed70a085d233625466745e1697043ca0e7eaaa0"
+        ],
+        "address": [],
+        "chain": "terra",
+        "compiler_version": "n/a",
+        "audit_date": "2021-10-18",
+        "project_path": "contracts/2021-10-18 Audit Report - Anchor Liquidation Queue.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Liquidation execution is permissionless and not tied to Anchor contracts, which may cause depletion of the liquidation queue",
+            "description": "1. **Description:** The `ExecuteLiquidation` function in the liquidation queue is permissionless, allowing any external protocol to trigger liquidations using Anchor's bid liquidity.\n2. **Cause:** The lack of access control on the `ExecuteLiquidation` function enables arbitrary callers to deplete the liquidation queue.\n3. **Exploitation:** In a black swan event, external protocols could aggressively trigger liquidations, exhausting the available bids in the queue.\n4. **Impact:** This could prevent Anchor's own liquidations from executing, leading to undercollateralized loans not being liquidated, potentially resulting in systemic risk and loss of user funds.\n",
+            "severity": "critical",
+            "location": [
+                "liquidation_queue/src/bid.rs::ExecuteLiquidation#273"
+            ],
+            "files": [
+                "money-market-contracts/contracts/liquidation_queue/src/bid.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Triggering of liquidations has no economic incentives or gas compensation, which can cause slower liquidations and make the admin team a single point of failure",
+            "description": "1. **Description:** The `ExecuteLiquidation` call is expected to be initiated by the Custody contract, which is triggered by the Overseer. However, there is no economic incentive or gas compensation for external liquidators to perform this action.\n2. **Cause:** The design does not allocate any fee or reward to the caller of the liquidation function, making it economically unattractive.\n3. **Exploitation:** Attackers could delay or prevent liquidations during volatile market conditions by overwhelming the system, knowing that no external actors have an incentive to act.\n4. **Impact:** This creates a reliance on the Anchor team to manually trigger liquidations, introducing a single point of failure and increasing the risk of delayed liquidations, which could lead to undercollateralized positions and potential insolvency.\n",
+            "severity": "high",
+            "location": [
+                "liquidation_queue/src/bid.rs::ExecuteLiquidation#273",
+                "contracts/custody_bluna/src/collateral.rs::LiquidateCollateral#156"
+            ],
+            "files": [
+                "money-market-contracts/contracts/liquidation_queue/src/bid.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Sent tokens other than in stable denom are lost",
+            "description": "1. **Description:** When a user sends tokens other than the stable denomination during a bid submission, those tokens are not rejected or refunded.\n2. **Cause:** The contract lacks validation to check the denomination of incoming tokens and does not include logic to return unsupported tokens.\n3. **Exploitation:** A user could accidentally or maliciously send non-stable tokens to the contract, resulting in permanent loss of those funds.\n4. **Impact:** Users may lose funds due to human error or confusion, leading to financial loss and reduced trust in the system.\n",
+            "severity": "high",
+            "location": [
+                "contracts/liquidation_queue/src/bid.rs#31-42"
+            ],
+            "files": [
+                "money-market-contracts/contracts/liquidation_queue/src/bid.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Users can activate any number of bids with any amount when available_bids is lower than bid_threshold",
+            "description": "1. **Description:** During bid activation, the `available_bids` value is read once before a loop, causing the same initial value to be used in all iterations of the activation check.\n2. **Cause:** The `available_bids` variable is not updated within the loop, allowing users to bypass intended limits when the initial `available_bids` is just below the threshold.\n3. **Exploitation:** An attacker could activate an excessive number of bids when `available_bids` is slightly below `bid_threshold`, potentially overwhelming the system or distorting the bidding process.\n4. **Impact:** This could lead to an inconsistent state in bid management, unfair advantages for certain bidders, and potential disruption of the liquidation mechanism.\n",
+            "severity": "low",
+            "location": [
+                "contracts/liquidation_queue/src/bid.rs#105",
+                "contracts/liquidation_queue/src/bid.rs#147"
+            ],
+            "files": [
+                "money-market-contracts/contracts/liquidation_queue/src/bid.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing validations on UpdateConfig parameters may lead to inconsistent state",
+            "description": "1. **Description:** The `update_config` function allows the owner to modify critical parameters such as `stable_denom` and `waiting_period` without proper validation.\n2. **Cause:** The absence of input validation or migration logic for existing bids when configuration changes are applied.\n3. **Exploitation:** A malicious or misconfigured owner update could set invalid values, leading to unexpected behavior in bid processing or liquidation logic.\n4. **Impact:** This could result in an inconsistent contract state, affecting the correctness of bid execution and potentially disrupting the liquidation process.\n",
+            "severity": "low",
+            "location": [
+                "src/contract.rs::update_config#137"
+            ],
+            "files": [
+                "money-market-contracts/contracts/liquidation_queue/src/contract.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack of validation of bid fee, as well as max slot and premium rate per slot, might lead to panics during liquidation execution",
+            "description": "1. **Description:** The `bid_fee`, `max_slot`, and `premium_rate_per_slot` parameters are not validated upon configuration, which could lead to arithmetic panics during liquidation.\n2. **Cause:** If `bid_fee > 1`, a subtraction may underflow; if `max_slot * premium_rate_per_slot >= 1`, a division by zero or underflow may occur.\n3. **Exploitation:** An attacker with configuration rights could set invalid values, causing the contract to panic during liquidation attempts.\n4. **Impact:** This would halt liquidation execution, preventing the system from liquidating undercollateralized positions, increasing the risk of protocol insolvency.\n",
+            "severity": "low",
+            "location": [
+                "contracts/liquidation_queue/src/bid.rs#347",
+                "contracts/liquidation_queue/src/bid.rs#502",
+                "contracts/liquidation_queue/src/bid.rs#508"
+            ],
+            "files": [
+                "money-market-contracts/contracts/liquidation_queue/src/bid.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1120"
+                ]
+            },
+            "title": "LiquidationAmount query implies a nonlinear dependency tree",
+            "description": "1. **Description:** The `LiquidationAmount` query depends on multiple configuration parameters and interacts with the Overseer contract, creating a complex, non-linear dependency graph.\n2. **Cause:** The query logic is centralized in the liquidation queue but relies on external state and multiple config values, violating separation of concerns.\n3. **Exploitation:** While not directly exploitable, this design increases the risk of logic errors and makes the system harder to audit and maintain.\n4. **Impact:** Reduced code clarity and maintainability, potentially leading to undetected bugs or incorrect liquidation calculations in the future.\n",
+            "severity": "informational",
+            "location": [
+                "contracts/liquidation_queue/src/query.rs"
+            ],
+            "files": [
+                "money-market-contracts/contracts/liquidation_queue/src/query.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Any collateral could be whitelisted which may negatively impact user experience",
+            "description": "1. **Description:** The `WhitelistCollateral` function does not verify that the collateral is already registered in the Overseer contract.\n2. **Cause:** Missing validation check against the Overseer's collateral list before whitelisting.\n3. **Exploitation:** An admin could whitelist a collateral not supported by Anchor, leading to confusion and clutter in the collateral list.\n4. **Impact:** While not affecting core functionality, this degrades user experience and may mislead users into thinking unsupported assets are valid.\n",
+            "severity": "informational",
+            "location": [
+                "contracts/liquidation_queue/src/bid.rs"
+            ],
+            "files": [
+                "money-market-contracts/contracts/liquidation_queue/src/bid.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ]
+            },
+            "title": "Bid and bids by user query responses mixes stored and current values which might confuse users",
+            "description": "1. **Description:** The `BidResponse` includes both current calculated values (`bid_amount`, `bid_pending_liquidated_collateral`) and the snapshot values used to compute them.\n2. **Cause:** The query returns redundant and potentially conflicting data by exposing internal calculation inputs alongside outputs.\n3. **Exploitation:** Users or frontends may misinterpret the data, using snapshot values incorrectly in their calculations.\n4. **Impact:** This could lead to user confusion, incorrect UI representations, and potential errors in third-party integrations relying on bid state.\n",
+            "severity": "informational",
+            "location": [
+                "contracts/liquidation_queue/src/query.rs#209",
+                "contracts/liquidation_queue/src/query.rs#259"
+            ],
+            "files": [
+                "money-market-contracts/contracts/liquidation_queue/src/query.rs"
+            ]
+        }
+    ]
+}

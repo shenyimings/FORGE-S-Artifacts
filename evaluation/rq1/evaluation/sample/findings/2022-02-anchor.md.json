@@ -1,0 +1,404 @@
+{
+    "path": "reports/2022-02-anchor.md",
+    "project_info": {
+        "url": "https://github.com/code-423n4/2022-02-anchor",
+        "commit_id": "7af353e3234837979a19ddc8093dc9ad3c63ab6b",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-01-18",
+        "project_path": "contracts/2022-02-anchor.md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Spend limit on owner can be bypassed",
+            "description": "The spend limit set on the owner in the distributor and community contracts can be bypassed because the config.spend_limit value is never decreased after a successful spend operation. This lack of decrement logic allows the owner to repeatedly call the spend function with amounts up to the spend limit, effectively spending an unlimited total amount. The root cause is the missing state update to reduce the spend limit after each transaction. An attacker (or malicious owner) could exploit this by sending multiple transactions, each for the full spend limit, thereby bypassing the intended restriction. The impact includes potential loss of funds from the contract due to unbounded spending by the owner, undermining the security model that relies on spend limits for protection.\n",
+            "severity": "high",
+            "files": [
+                "contracts/anchor-token-contracts/contracts/distributor/src/contract.rs",
+                "contracts/anchor-token-contracts/contracts/community/src/contract.rs"
+            ],
+            "location": [
+                "distributor.contract.rs#140",
+                "community.contract.rs#69"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "money-market-contracts/oracle#feed_prices() delayed transaction may disrupt price feeds",
+            "description": "The feed_prices function in the oracle contract does not validate the freshness of price updates, accepting any price data as long as it comes from an authorized feeder. Because the function only checks the sender and sets the last_updated_time to the current block time regardless of the actual data timestamp, stale prices can be accepted during network congestion or service delays. This creates a scenario where outdated price information is treated as current, potentially leading to incorrect liquidation decisions. The root cause is the absence of validation logic to compare the provided price timestamp against the current block time within a reasonable validity window. An attacker could exploit network latency or manipulate message queues to inject stale prices, especially during volatile market conditions. The impact includes wrongful liquidation of user positions, leading to financial losses and erosion of trust in the protocol's price oracle system.\n",
+            "severity": "high",
+            "files": [
+                "contracts/money-market-contracts/contracts/oracle/src/contract.rs"
+            ],
+            "location": [
+                "money-market-contracts/oracle/src/contract.rs#106-113"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Missing Access Control for FabricateMIRClaim and FabricateANCClaim",
+            "description": "The execute_fabricate_anchor_claim and execute_fabricate_mir_claim functions in the anchor_airdrop_registry contract lack proper access control, allowing any external caller to invoke them. These functions are intended to be restricted to the Hub contract, which manages minted bLuna through Lido, but no authorization check is performed to enforce this requirement. The root cause is the absence of a permission check that verifies the caller's address against the configured hub_contract in the contract state. An attacker could exploit this by directly calling these functions to fabricate claims without authorization. While the exact impact is not fully detailed in the report, unauthorized claim fabrication could lead to improper distribution of tokens or rewards, potentially resulting in financial loss or inflation of claimable assets.\n",
+            "severity": "high",
+            "files": [
+                "contracts/anchor-bAsset-contracts/contracts/anchor_airdrop_registry/src/contract.rs"
+            ],
+            "location": [
+                "anchor_airdrop_registry/src/contract.rs#109",
+                "anchor_airdrop_registry/src/contract.rs#71"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "When transferring tokens not in whitelist on Ethereum to Terra with CrossAnchorBridge.depositStable(), the funds may get frozen",
+            "description": "The CrossAnchorBridge contract on Ethereum has critical whitelist checks commented out in multiple functions, including handleStableToken, redeemStable, and lockCollateral. This allows users to transfer non-whitelisted tokens through the bridge, which cannot be properly processed on the Terra side. The root cause is the deliberate disabling of require statements that would otherwise enforce token whitelisting. An attacker or regular user could exploit this by sending unsupported tokens through the bridge, knowing they will not be handled correctly on the destination chain. The impact is that such funds may become permanently frozen either in the bridge contract or on the Terra side, leading to irreversible loss of user assets and damage to the bridge's reliability.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/cross-chain-contracts/ethereum/CrossAnchorBridge.sol"
+            ],
+            "location": [
+                "CrossAnchorBridge.sol#167-175",
+                "CrossAnchorBridge.sol#250-253",
+                "CrossAnchorBridge.sol#255-258"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "bEth Rewards May Be Depleted By Flashloans or Whales",
+            "description": "The bEth reward distribution mechanism does not account for sudden, large balance changes caused by flashloans or whale transactions. Rewards are calculated based on a user's share of the total balance at the time of calling claim functions, but the global index is updated without considering whether the balance increase is temporary. The root cause is the lack of time-weighted or block-based reward accrual that would prevent manipulation through short-term balance inflation. An attacker can exploit this by flashloaning a large amount of wormhole ETH, converting it to bEth, triggering a reward deposit, claiming a disproportionately large share of rewards, and then unwinding the position. The impact is the depletion of the reward pool by malicious actors who contribute no long-term value to the system, reducing available rewards for legitimate stakers.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/anchor-bEth-contracts/contracts/anchor_beth_reward/src/user.rs"
+            ],
+            "location": [
+                "anchor_beth_reward/src/user.rs#187-212"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Governance Voting Dis-proportionally Favours Users Who Stake And Vote After A Poll Has Been Created And Had Its Snapshot Taken",
+            "description": "The governance voting system allows users to increase their voting power by staking tokens after a poll's snapshot has been taken. The snapshot only records the total staked amount but does not checkpoint individual user balances at that block height. The root cause is the absence of a mechanism to lock or record user balances at the time of snapshot, enabling users to stake additional tokens during the voting period and gain disproportionate influence. An attacker or strategic voter can exploit this by waiting until after the snapshot to stake tokens, thereby achieving a higher voting weight relative to their actual stake at the decision point. The impact is a distortion of democratic governance outcomes, favoring late stakers over early participants and potentially leading to unfair or manipulated voting results.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/anchor-token-contracts/contracts/gov/src/contract.rs",
+                "contracts/anchor-token-contracts/contracts/gov/src/staking.rs"
+            ],
+            "location": [
+                "gov/src/contract.rs#543-580",
+                "gov/src/contract.rs#582-665",
+                "gov/src/staking.rs#15-57",
+                "gov/src/contract.rs#364-455"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Sandwich attack on astroport sweep",
+            "description": "The collector contract's sweep function allows anyone to swap an asset to ANC via Astroport without setting a belief_price or enforcing a strict max_spread limit. This exposes the trade to front-running and back-running by malicious actors who can observe the pending transaction and sandwich it with their own trades. The root cause is the lack of price slippage protection and oracle-based pricing in the sweep call. An attacker can exploit this by deploying a contract that first buys the asset, lets the sweep execute at a worse price due to increased demand, then sells the asset for profit. The impact is that the protocol receives fewer ANC tokens than fair market value during sweeps, resulting in financial loss over time, especially for larger or more frequent sweeps.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/anchor-token-contracts/contracts/collector/src/contract.rs"
+            ],
+            "location": [
+                "collector/src/contract.rs#130-137"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "anchor_basset_reward pending yields can be stolen",
+            "description": "The execute_increase_balance function in the anchor_basset_reward contract fails to update the global index before processing new deposits, allowing a malicious user to claim a disproportionate share of pending rewards. When a new deposit is made, the pending yield that belongs to existing users is instead partially allocated to the new depositor because the reward calculation uses the old global index. The root cause is the incorrect order of operations—failing to call update_global_index before increasing the user's balance. An attacker can exploit this by depositing a large amount of tokens immediately after a yield harvest event, capturing a significant portion of the accumulated rewards that should have been distributed only to prior stakeholders. This can be executed in a single transaction using a flash loan to amplify the stolen rewards, leading to direct financial loss for honest stakers. The impact is a redistribution of rewards from loyal users to opportunistic attackers, undermining the fairness of the yield distribution system.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/anchor-bAsset-contracts/contracts/anchor_basset_reward/src/user.rs"
+            ],
+            "location": [
+                "anchor_basset_reward/src/user.rs#80-123"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Simple interest calculation is not exact",
+            "description": "The borrow rate in the market contract uses a simple interest formula instead of a compounding one, leading to inaccuracies in interest accrual depending on update frequency. The root cause is the use of a linear interest factor (passed_blocks * borrow_rate) without compounding, which deviates from standard financial models. An attacker or passive user could exploit low market activity to receive less accurate interest payouts, especially in inactive markets where updates are infrequent. This results in suppliers losing out on expected interest, though the impact is reduced in highly active markets.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/money-market-contracts/contracts/market/src/borrow.rs"
+            ],
+            "location": [
+                "market.compute_interest_raw#304"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Updating the hub’s token contract address may lead to incorrect undelegation amount",
+            "description": "The hub contract allows updates to the `token_contract` configuration, which can lead to incorrect calculation of undelegation amounts when `requested_with_fee` is non-zero. The root cause is the lack of validation during config updates, allowing the token address to be changed while pending undelegations exist. An attacker with admin privileges could change the token contract address and manipulate the accounting of unbonded tokens, leading to incorrect amounts being processed during undelegation. This could result in financial loss for users relying on accurate token redemption, especially during batched unbonding operations.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/anchor-bAsset-contracts/contracts/anchor_basset_hub/src/config.rs"
+            ],
+            "location": [
+                "anchor_basset_hub.execute_update_config#90-97"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-330"
+                ],
+                "3": [
+                    "CWE-335"
+                ],
+                "4": [
+                    "CWE-337"
+                ]
+            },
+            "title": "Unbonding validator random selection can be predicted",
+            "description": "The `pick_validator` function uses block height and a simple iteration index to seed a random number generator, making the selection of validators for unbonding predictable. The root cause is the use of `block_height + iteration_index` as a seed for `XorShiftRng`, which is not cryptographically secure and easily manipulated. An attacker, particularly a validator, could precompute the randomness and repeatedly bond and unbond to ensure their own validator is favored, thereby capturing disproportionate rewards. This leads to centralization of staking power and unfair reward distribution, undermining the fairness of the unbonding mechanism.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/anchor-bAsset-contracts/contracts/anchor_basset_hub/src/unbond.rs"
+            ],
+            "location": [
+                "anchor_basset_hub.pick_validator"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-636"
+                ]
+            },
+            "title": "Potential lock of rewards in the custody contracts",
+            "description": "The `swap_to_stable_denom` function in custody contracts only handles replies when the last sub-message succeeds, using `ReplyOn::Success`. The root cause is the lack of error handling for failed swaps, particularly when the last sub-message fails. If the final swap fails, no reply is received, and the swapped rewards remain locked in the contract. This means users cannot access their rewards until another successful call is made with the last swap succeeding. As a result, rewards can be temporarily or indefinitely locked, especially if the failing swap condition persists, leading to loss of access to user funds.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/money-market-contracts/contracts/custody_beth/src/distribution.rs",
+                "contracts/money-market-contracts/contracts/custody_bluna/src/distribution.rs"
+            ],
+            "location": [
+                "custody_beth.swap_to_stable_denom#110-115",
+                "custody_bluna.swap_to_stable_denom#109-114"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Possible Wrong bAsset Rewards/Borrow limits Calculation",
+            "description": "The `execute_epoch_operations` function is not triggered after updating certain configuration parameters like `anc_purchase_factor`, leading to outdated reward calculations. The root cause is the absence of a call to `execute_epoch_operations` in the `update_config` function, which is necessary to refresh state based on new config values. An admin updating the config could inadvertently cause the system to operate with stale data, resulting in incorrect reward distributions or borrow limits. This leads to financial discrepancies and potential loss of yield for users relying on up-to-date epoch-based calculations.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/money-market-contracts/contracts/overseer/src/contract.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "money-market-contracts/contracts/market claim_rewards may revert due to spend_limit set on distributor",
+            "description": "The `claim_rewards` function in the market contract calls `distributor_contract#spend()`, which reverts if the requested amount exceeds the `spend_limit`. The root cause is the hard cap enforced by the distributor contract without dynamic adjustment or user-controlled partial claims. An attacker cannot directly exploit this, but users may be unable to claim rewards once the limit is reached, especially after large accruals. This results in a denial of service for reward claiming, leading to loss of yield until the limit is increased by an admin.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/money-market-contracts/contracts/market/src/contract.rs",
+                "contracts/anchor-token-contracts/contracts/distributor/src/contract.rs"
+            ],
+            "location": [
+                "market.claim_rewards#216-234",
+                "distributor.spend#153-155"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Staking tokens can be stolen",
+            "description": "The staking contract calculates shares during withdrawal using integer division that rounds down, and although it attempts to mitigate by setting a minimum of 1 share, this does not prevent exploitation in non-zero cases. The root cause is the flawed rounding logic in `withdraw_voting_tokens`, where `amount.multiply_ratio(total_share, total_balance)` is truncated. An attacker can repeatedly stake a minimal amount to get one share and then withdraw with a higher amount that still maps to one share due to rounding, profiting from the difference. This allows gradual theft of staked tokens, especially when performed in bulk transactions, undermining the integrity of the staking mechanism.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/anchor-token-contracts/contracts/gov/src/staking.rs"
+            ],
+            "location": [
+                "gov.withdraw_voting_tokens#88"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "gov contract :: cast_vote",
+            "description": "1. **Description:** The `cast_vote` function in the governance contract allows users to cast votes with a specified voting weight (amount). If the provided amount is zero, the vote has no effect on the outcome.\n2. **Cause:** The function does not validate whether the `amount` parameter is non-zero before proceeding with vote processing.\n3. **Exploitation:** A user may inadvertently or intentionally submit a vote with zero weight, leading to unnecessary transaction execution.\n4. **Impact:** This results in wasted gas fees for the user and unnecessary computation on the network, reducing efficiency and increasing costs without any functional benefit.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/anchor-token-contracts/contracts/gov/src/contract.rs"
+            ],
+            "location": [
+                "gov.cast_vote#582"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "community contract :: execute function",
+            "description": "1. **Description:** The `execute` function in the community contract handles governance actions such as `UpdateConfig` and `Spend`. Currently, governance authorization checks are implemented separately within each handler.\n2. **Cause:** Redundant access control checks are performed inside individual functions instead of being centralized at the entry point (`execute`).\n3. **Exploitation:** While not directly exploitable, this design increases code complexity and the risk of inconsistent permission enforcement.\n4. **Impact:** It leads to code duplication and reduced maintainability. Centralizing the governance check in `execute` would improve code clarity and reduce the likelihood of future security flaws due to missing checks.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/anchor-token-contracts/contracts/community/src/contract.rs"
+            ],
+            "location": [
+                "community.execute#35"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "anchor_basset_reward :: execute_increase_balance/execute_decrease_balance",
+            "description": "1. **Description:** The `execute_increase_balance` and `execute_decrease_balance` functions in the anchor_basset_reward contract process balance adjustments without validating the `amount` parameter.\n2. **Cause:** There is no check to ensure that the `amount` is non-zero before processing the transaction.\n3. **Exploitation:** Users could call these functions with zero amounts, resulting in valid but meaningless transactions.\n4. **Impact:** This causes unnecessary gas consumption for both the user and the network, degrading overall system efficiency. Adding a non-zero check would prevent wasteful executions.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/anchor-bAsset-contracts/contracts/anchor_basset_reward/src/user.rs"
+            ],
+            "location": [
+                "anchor_basset_reward.execute_increase_balance#80",
+                "anchor_basset_reward.execute_decrease_balance#125"
+            ]
+        }
+    ]
+}

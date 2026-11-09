@@ -1,0 +1,98 @@
+{
+    "path": "reports-without-source/SolanaEndpoint-Halborn-24MAY2024.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/LayerZero-Labs/monorepo/"
+        ],
+        "commit_id": [
+            "aa8cd2e"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-05-08",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Limited interoperability",
+            "description": "The Solana runtime limits call stack depth to 5, and log messages are capped at 10kB per transaction and are not part of consensus. To mitigate risks, the LayerZero program uses CPI-based log messages via the Anchor framework. However, CPI size is limited to about 1.2kB, restricting outbound message size and reducing interoperability with other chains. Additionally, since the call stack depth tracking starts with the externally owned account (EOA), only 3 additional levels are available, limiting composability with other programs.\nThe root cause is the reliance on CPI-based events within Solana's architectural constraints. An attacker could potentially exploit this by crafting transactions that exceed stack depth or message size limits, leading to failed message relays.\nThe impact is a reduction in system availability for cross-chain communication, especially for large or deeply nested transactions, which could result in failed or undelivered messages across chains.\n",
+            "severity": "low",
+            "location": [
+                "monorepo/packages/layerzero-v2/solana/programs/endpoint/src/instructions/oapp/quote.rs",
+                "monorepo/packages/layerzerov2/solana/programs/endpoint/src/instructions/oapp/send_compose.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Single step ownership transfer process",
+            "description": "The transfer_admin function allows the current admin to directly set a new admin without validating that the new admin address is valid or that it can sign transactions. This creates a risk where admin privileges could be transferred to an invalid or inaccessible address (e.g., a zero address or non-wallet address), resulting in permanent loss of administrative control.\nThe root cause is the lack of a two-step ownership transfer mechanism, which is a well-known best practice. The function applies the change immediately upon a signed transaction from the current admin, without requiring acceptance from the new admin.\nAn attacker or mistaken user could exploit this by setting the admin to a malformed or compromised address, leading to irreversible loss of governance capabilities.\nThe impact is critical loss of integrity in administrative control, with no possibility of recovery, effectively freezing critical administrative functions of the contract.\n",
+            "severity": "low",
+            "location": [
+                "monorepo/packages/layerzerov2/solana/programs/endpoint/src/instructions/admin/transfer_admin.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1093"
+                ]
+            },
+            "title": "Redundant account state data",
+            "description": "The program stores the \"bump\" value for Program Derived Addresses (PDAs) in account state, even though the bump is deterministically derived using the Anchor framework's default (first valid bump). Since users cannot specify custom bumps, the stored bump values are redundant and do not vary across instances.\nThe root cause is inefficient state design—persisting a value that can be recomputed at runtime. This increases the size of stored data and thus the cost of transactions involving these accounts.\nWhile not directly exploitable, this inefficiency increases gas costs for all users and governance operations, leading to unnecessary economic burden.\nThe impact is increased transaction and storage costs for both users and protocol maintainers, reducing economic efficiency without security benefit.\n",
+            "severity": "informational",
+            "location": [
+                "monorepo/packages/layerzero-v2/solana/programs/endpoint/src/state/mod.rs",
+                "monorepo/packages/layerzero-v2/solana/programs/endpoint/src/state/endpoint.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Potentially weak constraint",
+            "description": "The MessageLibType enum has three variants: Send, Receive, and SendAndReceive. When registering libraries, the program checks that a library is *not* of an undesired type (e.g., ensuring a receive library is not marked as Send), rather than affirmatively requiring it to be of the correct type.\nThe root cause is the use of negative validation logic instead of positive (whitelist-style) validation. If new variants are added to the enum in the future and the constraints are not updated, incorrect library types could be registered, leading to potential misrouting of messages or privilege escalation.\nAn attacker could exploit this in a future upgrade where new types are introduced but validation logic is not updated, allowing registration of a library with unintended capabilities.\nThe impact is a potential integrity issue in message routing and security enforcement, especially in future versions, due to fragile validation logic.\n",
+            "severity": "informational",
+            "location": [
+                "monorepo/packages/layerzerov2/solana/programs/endpoint/src/instructions/admin/init_default_receive_library.rs"
+            ],
+            "files": []
+        }
+    ]
+}

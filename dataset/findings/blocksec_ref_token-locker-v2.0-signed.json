@@ -1,0 +1,131 @@
+{
+    "path": "reports/blocksec_ref_token-locker-v2.0-signed.pdf",
+    "project_info": {
+        "url": "https://github.com/ref-finance/token_locker",
+        "commit_id": "1da97ead5c0d9243aba5a129b165e713b4663efb",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-07-08",
+        "project_path": "contracts/blocksec_ref_token-locker-v2.0-signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Lack of token whitelist check",
+            "description": "The contract allows users to lock tokens without validating whether the incoming token complies with the NEP-141 standard. This occurs in the `ft_on_transfer()` function, which does not enforce a whitelist of allowed tokens. The absence of a token whitelist validation mechanism enables malicious actors to lock arbitrary or invalid tokens. An attacker can lock a non-compliant or malicious token, consuming a slot in the user's lock limit (up to 64 tokens), thereby preventing legitimate users from locking their intended tokens. Users may be blocked from locking their desired tokens due to the exhaustion of available lock slots by invalid tokens, leading to a denial-of-service condition.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/contract/src/token_receiver.rs"
+            ],
+            "location": [
+                "accounts.rs#58-74",
+                "token_receiver.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-138"
+                ],
+                "3": [
+                    "CWE-140"
+                ]
+            },
+            "title": "Potential incorrect parsing of mft token id",
+            "description": "The `parse_token_id()` function uses the `@` character (MFT_TAG) as a delimiter to split the token ID into components. However, if the original MFT token ID itself contains the `@` character, the parsing logic will incorrectly interpret it as the delimiter. The use of a simple string split without escaping or encoding for the delimiter leads to ambiguous parsing when the token ID contains the same character used as a separator. A user could create an MFT token ID containing the `@` symbol, which would cause the system to misparse the token ID upon withdrawal, potentially leading to transfer failures or incorrect routing. Users may be unable to withdraw their locked MFT tokens due to parsing errors, resulting in loss of access to funds until manually resolved.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/contract/src/utils.rs"
+            ],
+            "location": [
+                "utils.rs#14-16",
+                "utils.rs#18-29",
+                "token_receiver.rs",
+                "account.rs#177-200"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-405"
+                ],
+                "4": [
+                    "CWE-408"
+                ]
+            },
+            "title": "Lack of charging NEAR in function withdraw",
+            "description": "The `withdraw()` function initiates token transfers via `transfer_token()`, which requires attaching 1 yocto NEAR. However, the contract\u2014not the user\u2014bears this cost because no NEAR is required from the caller. The `withdraw()` function does not enforce the user to attach a minimal amount of NEAR, leaving the contract to cover transaction fees for token transfers. An attacker could repeatedly call `withdraw()` to drain the contract\u2019s NEAR balance, especially in scenarios with high gas costs or frequent withdrawals. The contract may deplete its NEAR balance, preventing future token transfers and disrupting service for all users.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/contract/src/account.rs"
+            ],
+            "location": [
+                "accounts.rs#94-126",
+                "account.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Incorrect update on unlock_time_sec in function after_token_burn()",
+            "description": "In the `after_token_burn()` callback function, when a token transfer fails and the system rolls back the state, the `unlock_time_sec` is incorrectly set to the current timestamp if all tokens were burned. The rollback logic fails to preserve the original `unlock_time_sec` value, instead overwriting it with the current time, which breaks the intended lock-up duration. An attacker could trigger a failed burn transaction (e.g., by making the recipient reject funds), causing the unlock time to reset to the present, thereby bypassing the time lock. Users could prematurely withdraw locked assets by exploiting the incorrect state rollback, undermining the core time-locking functionality of the contract.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/contract/src/account.rs"
+            ],
+            "location": [
+                "account.rs",
+                "Listing 2.9",
+                "Listing 2.10",
+                "Listing 2.11"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Incorrect error message",
+            "description": "In the `storage_deposit()` function, the error message returned is misspelled as \"insufficient depost\" instead of \"insufficient deposit\". A typographical error in the hardcoded error string within the function implementation. This cannot be exploited for security gain but may confuse users or developers during debugging or integration. Reduced clarity in error reporting, potentially leading to integration issues or support overhead. No direct security impact.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/contract/src/storage.rs"
+            ],
+            "location": [
+                "storage.sol"
+            ]
+        }
+    ]
+}

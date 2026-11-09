@@ -1,0 +1,426 @@
+{
+    "path": "reports/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf",
+    "project_info": {
+        "url": "https://github.com/fragmetric-labs/fragmetric-contracts",
+        "commit_id": "581422f0aeafd991a4ee4b06d4dc66f6d8c753f1",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-07-18",
+        "project_path": "contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "Array index mismatch causes withdrawal processing panic",
+            "description": "The vulnerability arises in cmd6_process_withdrawal_batch.rs where the code incorrectly assumes that array indices align with token iteration indices, leading to runtime panics when certain token types (e.g., PeggedToken) are skipped during processing. The root cause is a logic flaw in index management: the counter is only incremented for specific token types, but the array is later accessed using enumerate(), which iterates over all tokens. This misalignment causes out-of-bounds access when attempting to access elements in a smaller array using a larger index. An attacker could exploit this by crafting a fund configuration with interleaved supported and unsupported tokens, triggering a panic during withdrawal processing. The impact is a denial of service for withdrawal operations, as the transaction reverts entirely, preventing users from withdrawing funds.\n",
+            "severity": "medium",
+            "location": [
+                "cmd6_process_withdrawal_batch.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/fund/commands/cmd6_process_withdrawal_batch.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "The OrcaDEXLiquidityPool pricing source is vulnerable to price manipulation",
+            "description": "The TokenPricingSource::OrcaDEXLiquidityPool directly uses the pool's sqrt_price for price calculations without any manipulation resistance mechanisms such as TWAP. The root cause is the lack of safeguards against oracle manipulation. While currently mitigated by the use of pegged tokens that share the same price source, this creates a latent risk: if a non-pegged token is added in the future, an attacker could manipulate the Orca DEX pool price to create artificial arbitrage opportunities. Exploitation would involve manipulating the liquidity pool price to deviate significantly from the true market price, leading to incorrect valuation within the protocol. The impact could be critical, including financial loss due to incorrect asset pricing and potential exploitation of fund accounting mechanisms.\n",
+            "severity": "medium",
+            "location": [
+                "orca_dex_liquidity_pool_value_provider.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/swap/orca_dex_liquidity_pool_value_provider.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Incorrect assert in set_supported_token_redelegating_amount allows for wrong redelegating amount setting",
+            "description": "In fund_account_restaking_vaults.rs, the set_supported_token_redelegating_amount function contains a logic error in its validation check. The require_gte! macro incorrectly enforces that the redelegating amount must be greater than or equal to the currently delegated amount, which is logically backwards—redelegating cannot exceed delegated. The root cause is a parameter inversion in the validation logic. An attacker (or misconfigured system) could set an invalid redelegating amount, leading to accounting inconsistencies. This could disrupt downstream operations that rely on accurate delegated/redelegating relationships. The impact includes potential fund accounting errors and incorrect state transitions in restaking workflows.\n",
+            "severity": "medium",
+            "location": [
+                "fund_account_restaking_vaults.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/fund/fund_account_restaking_vault.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing validation allows same token swap strategy registration leading to DoS",
+            "description": "The add_token_swap_strategy function in fund_account.rs does not validate that from_token_mint and to_token_mint are different. The root cause is the absence of a require_keys_neq! check or equivalent. An attacker could register a swap strategy with identical source and destination tokens. When the system attempts to execute this swap, it will fail at the system program level, causing the entire transaction to revert. This creates a denial-of-service vector where a malicious fund manager or compromised account could disrupt fund operations by registering invalid strategies. The impact is operational disruption and potential blocking of automated fund management workflows.\n",
+            "severity": "medium",
+            "location": [
+                "fund_account.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/fund/fund_account.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1099"
+                ]
+            },
+            "title": "Inconsistent command discriminants and module file numbering",
+            "description": "There is a mismatch between command discriminants and module file names in mod.rs: StakeSOL is assigned discriminant 10 but located in cmd11_stake_sol.rs, while HarvestReward is discriminant 11 but in cmd10_harvest_reward.rs. The root cause is inconsistent naming and numbering during development. While this does not break functionality due to internal consistency in serialization, it increases the risk of developer errors when extending the codebase. The impact is reduced code maintainability and potential bugs during future development, especially when adding new commands or debugging execution flow.\n",
+            "severity": "low",
+            "location": [
+                "mod.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/fund/commands/mod.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Users can lose rewards when settlement blocks exceed maximum capacity",
+            "description": "The reward settlement system limits storage to 64 settlement blocks. When exceeded, the oldest block is cleared and its amount moved to remaining_amount, but user_update_reward_pools does not credit settled amounts from force-cleared blocks to total_settled_amount. The root cause is incomplete state transition logic during block rotation. Users who do not update within 64 blocks lose access to rewards from cleared blocks because claimable rewards are based only on total_settled_amount. The impact is permanent loss of accrued rewards for inactive users, undermining trust in the reward system.\n",
+            "severity": "low",
+            "location": [
+                "user_reward_settlement.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/reward/user_reward_settlement.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "Token swap strategies cannot be updated or removed",
+            "description": "The fund_manager_add_token_swap_strategy function allows adding strategies but provides no mechanism to update or remove them. The root cause is incomplete administrative functionality. This creates operational inflexibility: incorrect or outdated strategies cannot be corrected, and deprecated DEX pools cannot be removed. The impact is reduced protocol adaptability and potential long-term inefficiencies or risks from obsolete configurations. Although the maximum of 30 strategies limits exposure, the lack of lifecycle management remains a limitation.\n",
+            "severity": "low",
+            "location": [
+                "fund_account.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/fund/fund_account.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Missing mint account validation for distributing reward token",
+            "description": "The fund_manager_add_restaking_vault_distributing_reward_token function accepts a mint account without validating it is a valid mint (e.g., owned by token program or correctly structured). The root cause is missing deserialization or ownership checks. A fund manager could register a non-mint account, causing reward distribution to fail at runtime. The impact is disruption of reward flows and potential locking of accumulated rewards, with errors only surfacing during distribution rather than at configuration time.\n",
+            "severity": "low",
+            "location": [
+                "fund_configuration_service.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/fund/fund_configuration_service.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Missing account ownership validation for vault operator delegation",
+            "description": "The vault operator delegation account in jito_restaking_vault_service.rs is not validated for ownership by the Jito program. The root cause is missing require_keys_eq! or equivalent check. Although only callable by a trusted fund manager, this violates security best practices and opens a vector for spoofing if trust assumptions change. The impact is potential state corruption or manipulation of delegation data through forged accounts, undermining system integrity.\n",
+            "severity": "low",
+            "location": [
+                "jito_restaking_vault_service.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/restaking/jito_restaking_vault_service.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-547"
+                ]
+            },
+            "title": "Undocumented magic values for minimum operation thresholds",
+            "description": "Hardcoded threshold values (e.g., 1_000_000, 1_000_000_000) are used in various commands without documentation. The root cause is lack of named constants and comments. These values represent minimum operation sizes (e.g., 1 SOL), but their undocumented nature makes it difficult to assess correctness across tokens with different decimals. The impact is reduced code clarity and maintainability, increasing the risk of misconfiguration when integrating new tokens.\n",
+            "severity": "informational",
+            "location": [
+                "cmd7_unstake_lst.rs",
+                "cmd11_stake_sol.rs",
+                "cmd13_restake_vst.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/fund/commands/cmd7_unstake_lst.rs",
+                "programs/restaking/src/modules/fund/commands/cmd11_stake_sol.rs",
+                "programs/restaking/src/modules/fund/commands/cmd13_restake_vst.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unused command imports in DenormalizeNT module",
+            "description": "The DenormalizeNT module imports ClaimUnstakedSOL and UndelegateVST commands but does not use them. The root cause is leftover imports from refactoring. While Rust optimizes these away, they create confusion about dependencies and module responsibilities. The impact is reduced code clarity and potential misdirection during maintenance or security reviews.\n",
+            "severity": "informational",
+            "location": [
+                "modules/fund/commands/cmd4_denormalize_nt.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/fund/commands/cmd4_denormalize_nt.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1106"
+                ]
+            },
+            "title": "Hardcoded seeds string should use SPL library constant for extra account metas",
+            "description": "The seed string b\"extra-account-metas\" is hardcoded in multiple contexts instead of using the SPL library constant EXTRA_ACCOUNT_METAS_SEED. The root cause is manual string repetition. This reduces maintainability and increases the risk of inconsistency if the seed ever changes. The impact is potential future bugs and deviation from standard practices, making audits and upgrades more error-prone.\n",
+            "severity": "informational",
+            "location": [
+                "AdminReceiptTokenMintExtraAccountMetaListInitialContext",
+                "AdminReceiptTokenMintExtraAccountMetaListUpdateContext",
+                "UserReceiptTokenTransferContext"
+            ],
+            "files": [
+                "programs/restaking/src/instructions/admin_receipt_token_mint_context.rs",
+                "programs/restaking/src/instructions/user_receipt_token_transfer_context.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Unused desired_account_size parameter for user_create_fund_account_idempotent",
+            "description": "The user_create_fund_account_idempotent function accepts a desired_account_size parameter that is ignored and marked as reserved. The root cause is incomplete or abandoned feature implementation. This misleads API users into thinking account size can be customized. The impact is API confusion and potential integration errors, reducing developer experience and trust in parameter semantics.\n",
+            "severity": "informational",
+            "location": [
+                "user_create_fund_account_idempotent"
+            ],
+            "files": [
+                "programs/restaking/src/lib.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "Inconsistent event emission across the codebase",
+            "description": "Event emission is inconsistent, especially for admin and fund manager operations. Many critical instructions emit no events, while others do. The root cause is lack of a unified event strategy. This hampers monitoring, frontend updates, and compliance tracking. The impact is reduced observability and difficulty in building reliable external tooling, affecting user experience and security monitoring.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "programs/restaking/src/instructions/",
+                "programs/restaking/src/events/"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-390"
+                ]
+            },
+            "title": "Unimplemented vault types create silent failures",
+            "description": "Vault types like SolvBTCVault are present in match statements but have placeholder implementations that skip execution. The root cause is incomplete feature implementation. Operations involving these vaults appear to succeed but perform no action, leading to silent failures. The impact is user confusion and potential loss of functionality expectations, as funds may not be processed as intended without any error indication.\n",
+            "severity": "informational",
+            "location": [
+                "modules/fund/commands/cmd1_initialize.rs",
+                "modules/restaking/mod.rs",
+                "modules/fund/commands/cmd13_restake_vst.rs",
+                "modules/fund/commands/cmd14_delegate_vst.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/fund/commands/cmd1_initialize.rs",
+                "programs/restaking/src/modules/restaking/mod.rs",
+                "programs/restaking/src/modules/fund/commands/cmd13_restake_vst.rs",
+                "programs/restaking/src/modules/fund/commands/cmd14_delegate_vst.rs"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-193"
+                ]
+            },
+            "title": "Insufficient vector capacity reservation in resolve_underlying_assets",
+            "description": "The resolve_underlying_assets method reserves capacity for 33 items but may need up to 34 (1 SOL + 16 tokens + 1 normalized token + 16 restaking vaults). The root cause is an off-by-one miscalculation in capacity estimation. When the 34th item is added, the vector reallocates, causing unnecessary memory copying. The impact is increased compute cost and inefficiency, which could contribute to transaction failures under tight compute limits.\n",
+            "severity": "informational",
+            "location": [
+                "fund_receipt_token_value_provider.rs"
+            ],
+            "files": [
+                "programs/restaking/src/modules/fund/fund_receipt_token_value_provider.rs"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant error handling in ClaimUnstakedSOLCommand::execute_prepare",
+            "description": "The execute_prepare function has a second match statement with error arms for pricing sources that are already filtered out by the first match. The root cause is duplicated validation logic. These error arms are unreachable, creating dead code. The impact is reduced code clarity and maintainability, making it harder to audit and modify the logic safely.\n",
+            "severity": "informational",
+            "location": [
+                "ClaimUnstakedSOLCommand::execute_prepare"
+            ],
+            "files": [
+                "programs/restaking/src/modules/fund/commands/cmd5_claim_unstaked_sol.rs"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1099"
+                ]
+            },
+            "title": "Typos in variable and function names",
+            "description": "The word \"micro\" is consistently misspelled as \"mirco\" in identifiers like token_value_as_mirco_lamports and get_token_value_as_mirco_lamports, despite correct usage in local variables. The root cause is a typographical error propagated during development. While functionally harmless, it reduces code readability and consistency. The impact is developer confusion and potential errors when referencing these functions or fields.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "programs/restaking/src/modules/pricing/pricing_service.rs"
+            ]
+        }
+    ]
+}

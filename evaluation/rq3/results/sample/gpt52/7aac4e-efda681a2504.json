@@ -1,0 +1,170 @@
+{
+    "project": "07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json",
+    "files": [
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd14_delegate_vst.rs",
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd13_restake_vst.rs",
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd11_stake_sol.rs",
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/restaking/mod.rs",
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd1_initialize.rs",
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd7_unstake_lst.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-755",
+        "CWE-390",
+        "CWE-547",
+        "CWE-1078",
+        "CWE-703",
+        "CWE-710",
+        "CWE-1076"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-431",
+        "CWE-190",
+        "CWE-682",
+        "CWE-691",
+        "CWE-284",
+        "CWE-346",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Undocumented magic values for minimum operation thresholds",
+            "description": "Hardcoded threshold values (e.g., 1_000_000, 1_000_000_000) are used in various commands without documentation. The root cause is lack of named constants and comments. These values represent minimum operation sizes (e.g., 1 SOL), but their undocumented nature makes it difficult to assess correctness across tokens with different decimals. The impact is reduced code clarity and maintainability, increasing the risk of misconfiguration when integrating new tokens.\n"
+        },
+        {
+            "title": "Unimplemented vault types create silent failures",
+            "description": "Vault types like SolvBTCVault are present in match statements but have placeholder implementations that skip execution. The root cause is incomplete feature implementation. Operations involving these vaults appear to succeed but perform no action, leading to silent failures. The impact is user confusion and potential loss of functionality expectations, as funds may not be processed as intended without any error indication.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The reviewed command implementations perform security-sensitive CPIs (staking/unstaking/restaking/delegation) that move value on behalf of the fund using PDA signer seeds. Across these flows, several checks rely on “required_accounts” planning but are not enforced at execution time. This can allow an attacker (if they can invoke the instruction/operation runner) to substitute destination token accounts and receive minted receipt/LST tokens while the fund pays with its SOL or supported tokens. Additionally, many accounting updates use unchecked u64 arithmetic (+=/-=) which can wrap in BPF release builds and corrupt fund state. Finally, the UnstakeLST “pause/resume” control flow builds a resume entry that omits pricing-source accounts even though the resumed execution later instantiates a pricing service from the remaining accounts; this cross-transaction interaction can cause resumed execution failures or inconsistent validations.\n",
+            "findings": [
+                {
+                    "title": "Token-account substitution in staking/restaking execution (minted tokens can be redirected)",
+                    "description": "Multiple execution paths accept critical token accounts from `accounts` without re-deriving/validating that they are the fund’s canonical reserve/receipt accounts. The code often only checks the pool/vault address and mint, but not that destination token accounts belong to the fund.\n\nExamples:\n- `StakeSOLCommand::spl_stake_pool_deposit_sol`: does not verify that `fund_supported_token_reserve_account` equals\n  `fund_account.find_supported_token_reserve_account_address(&item.token_mint)` (or that it is owned by the fund’s expected authority).\n  If an attacker supplies their own token account for `fund_supported_token_reserve_account` (with correct mint),\n  the stake-pool deposit CPI can mint pool tokens to the attacker while SOL is taken from the fund reserve PDA (which the program signs for).\n- `RestakeVSTCommandState::Execute` (Jito path): does not validate that\n  `from_vault_supported_token_account` is the expected fund reserve token account for `item.supported_token_mint`, nor that\n  `to_vault_receipt_token_account` is the expected fund receipt-token reserve for `restaking_vault.vault`.\n  This can redirect minted vault receipt tokens to an attacker-controlled token account.\n\nImpact: theft of newly minted staking/restaking receipt tokens (LST/pool tokens or vault receipt tokens) while the fund pays the input assets.\nNote: whether this is exploitable depends on whether the outer instruction/operation-runner restricts who can supply accounts and invoke these commands.\n",
+                    "category": "CWE-707",
+                    "severity": "critical",
+                    "confidence": 0.83
+                },
+                {
+                    "title": "Potential missing/implicit access control on privileged operation execution",
+                    "description": "These command handlers perform privileged state updates and CPIs using fund PDAs as signers, but the shown code does not locally enforce\nthat the caller/operator is authorized (e.g., no explicit `is_signer` / role checks in these snippets).\n\nExamples where `ctx.operator` is used as payer/authority without an explicit local authorization check:\n- `InitializeCommand::execute_execute_restaking_vault_update_command`: initializes/closes vault update state tracker using `ctx.operator`.\n- `UnstakeLSTCommand::marinade_stake_pool_order_unstake`: operator pays rent for ticket accounts.\n- Other commands mutate fund accounting and trigger CPIs with PDA signer seeds.\n\nIf the surrounding instruction entrypoint does not strictly enforce an authorized operator/manager, any user could trigger these operations,\nleading to loss of funds or malicious reconfiguration/processing (especially in combination with account substitution issues).\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Unchecked u64 arithmetic in accounting/state sync can wrap and corrupt fund state",
+                    "description": "The code updates many security-relevant balances using unchecked `+=` / `-=` on `u64` values.\nIn Solana BPF release builds, Rust integer overflow wraps (does not reliably trap), which can corrupt accounting and bypass invariants.\n\nExamples:\n- `DelegateVSTCommand::execute_execute`:\n  `delegation.supported_token_delegated_amount += item.allocated_supported_token_amount;`\n- `RestakeVSTCommandState::Execute`:\n  `normalized_token.operation_reserved_amount -= deposited_supported_token_amount;`\n  `restaking_vault.receipt_token_operation_reserved_amount += minted_vault_receipt_token_amount;`\n- `StakeSOLCommand::execute_execute`:\n  `fund_account.sol.operation_reserved_amount -= item.allocated_sol_amount;`\n  `fund_account.sol.operation_receivable_amount += deducted_sol_fee_amount;`\n  `supported_token.token.operation_reserved_amount += minted_pool_token_amount;`\n- `UnstakeLSTCommand::execute_execute`:\n  `fund_account.sol.operation_reserved_amount += unstaked_sol_amount;`\n  `fund_account.sol.operation_receivable_amount += unstaking_sol_amount + deducted_sol_fee_amount;`\n  `supported_token.token.operation_reserved_amount -= burnt_token_amount;`\n- `modules/restaking/mod.rs::validate_vault_operator_delegation`:\n  `undelegation_requested_amount + undelegating_amount` can overflow.\n\nIf an attacker can induce extreme values (or if values accumulate over long periods), wraparound can produce underflows/overflows that\ninvalidate reserve checks and lead to incorrect minting/burning or solvency reporting.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Paused UnstakeLST resume entry omits pricing-source accounts (resume may fail or validate incorrectly)",
+                    "description": "In `UnstakeLSTCommand::spl_stake_pool_withdraw_sol_or_stake`, when withdraw-stake is paused due to `WITHDRAW_STAKE_LIMIT`,\nthe code constructs a resume `OperationCommandEntry` whose `required_accounts` include:\n- the first 13 execution accounts (up to `stake_program`)\n- remaining fund stake accounts and validator stake accounts for the resume portion\nbut it does NOT include the `pricing_sources` accounts.\n\nHowever, after CPIs, the function unconditionally constructs a pricing service using:\n`new_pricing_service(pricing_sources.iter().copied(), false)?;`\nOn resume, `pricing_sources` will be empty/missing, which can:\n- cause the resumed transaction to error (DoS of the operation), or\n- cause fee/amount validations to run with incomplete pricing context if `new_pricing_service` tolerates missing sources.\n\nThis is an interaction/control-flow issue across multiple transactions: each component may work in isolation,\nbut the “pause/resume” integration can break invariants or execution.\n",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.72
+                }
+            ]
+        },
+        {
+            "reasoning": "The reviewed command implementations mostly rely on implicit invariants about fund accounting state and downstream program behavior. Two concrete issue classes stand out from the provided code:\n\n1) Multiple places update critical accounting fields using unchecked `u64` arithmetic (`+=` / `-=`). If any upstream state is inconsistent, or if a downstream CPI returns values larger than expected (e.g., “burnt amount” > “allocated amount”), these operations can underflow/overflow and wrap, corrupting fund accounting. This can lead to incorrect reserve/receivable/reserved-token tracking and potentially enable loss of funds or permanent denial of service due to broken invariants.\n\n2) `validate_vault()` treats any account owned by `SOLV_PROGRAM_ID` as a `SolvBTCVault` without validating the account’s structure, mints, or relationship to the fund. The code explicitly notes SOLV handling is TODO, yet still accepts SOLV-owned vault accounts as valid pricing sources. This is a form of origin/structure validation weakness and a “missing handler” situation: the program accepts a configuration it cannot safely operate on, potentially enabling malicious or misconfigured vault registrations that later break workflows or accounting.\n",
+            "findings": [
+                {
+                    "title": "Unchecked u64 underflow in fund and token accounting updates",
+                    "description": "Multiple state transitions subtract from `u64` fields without checked arithmetic. If the subtrahend exceeds the current value due to inconsistent state, rounding/strategy mismatch, or unexpected downstream CPI behavior, the subtraction will underflow and wrap to a very large number, corrupting accounting.\n\nExamples:\n- `cmd11_stake_sol.rs`: `fund_account.sol.operation_reserved_amount -= item.allocated_sol_amount;`\n- `cmd13_restake_vst.rs` (Execute): \n  - `normalized_token.operation_reserved_amount -= deposited_supported_token_amount;`\n  - `supported_token.token.operation_reserved_amount -= deposited_supported_token_amount;`\n- `cmd7_unstake_lst.rs` (Execute): `supported_token.token.operation_reserved_amount -= burnt_token_amount;`\n- `cmd7_unstake_lst.rs` (withdraw path): `total_token_amount_to_burn -= burnt_pool_token_amount;` (also vulnerable if CPI returns more than requested)\n\nImpact: wrapped accounting can inflate reserves/receivables, break `require_gte!` invariants in later steps, misprice shares, or brick operations.\n",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Unchecked u64 overflow in delegation and reserve accounting",
+                    "description": "Multiple places add to `u64` counters using unchecked `+=`. If these counters approach `u64::MAX` (e.g., long-lived fund, attacker-induced pathological updates, or corrupted earlier state), they can overflow and wrap, again corrupting accounting and potentially bypassing sanity checks that assume monotonic growth.\n\nExamples:\n- `cmd14_delegate_vst.rs`: `delegation.supported_token_delegated_amount += item.allocated_supported_token_amount;`\n- `cmd13_restake_vst.rs`: `restaking_vault.receipt_token_operation_reserved_amount += minted_vault_receipt_token_amount;`\n- `cmd11_stake_sol.rs`: `fund_account.sol.operation_receivable_amount += deducted_sol_fee_amount;`\n- `modules/restaking/mod.rs`: `undelegation_requested_amount + undelegating_amount` (can overflow before returning)\n\nImpact: incorrect totals can lead to invalid allocation decisions, incorrect solvency calculations, and possible fund loss/DoS.\n",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.84
+                },
+                {
+                    "title": "SOLV vault accepted without structural validation (TODO handler)",
+                    "description": "In `modules/restaking/mod.rs::validate_vault`, any `vault_account` owned by `SOLV_PROGRAM_ID` is accepted and converted into `TokenPricingSource::SolvBTCVault { address: vault_account.key() }` without validating:\n- the expected account data layout / discriminator,\n- that `vault_supported_token_mint` and `vault_receipt_token_mint` match the vault’s configuration,\n- any linkage/authorization with the `fund_account`.\n\nAdditionally, SOLV support is explicitly marked TODO in multiple command paths, meaning the program may accept a configuration it cannot correctly operate, leading to broken workflows or unsafe assumptions elsewhere.\n",
+                    "category": "CWE-346",
+                    "severity": "medium",
+                    "confidence": 0.81
+                },
+                {
+                    "title": "Missing handler for SolvBTC vault operations while allowing configuration",
+                    "description": "The codebase repeatedly notes SOLV vault support is TODO (e.g., `cmd13_restake_vst.rs`, `cmd14_delegate_vst.rs`, `cmd1_initialize.rs`) and effectively skips execution for `TokenPricingSource::SolvBTCVault { .. }` while still allowing such vaults to be validated/registered (see `validate_vault`).\n\nThis is a “missing handler” condition: the system accepts an object/state that it cannot process securely or correctly, which can be abused to create stuck states, incomplete epoch processing, or inconsistent accounting (e.g., funds reserved for a vault that is never acted upon).\n",
+                    "category": "CWE-431",
+                    "severity": "medium",
+                    "confidence": 0.77
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-431",
+            "CWE-1267",
+            "CWE-287",
+            "CWE-116",
+            "CWE-1339",
+            "CWE-369",
+            "CWE-749",
+            "CWE-170",
+            "CWE-1280",
+            "CWE-240",
+            "CWE-285",
+            "CWE-286",
+            "CWE-191",
+            "CWE-841",
+            "CWE-269",
+            "CWE-1270",
+            "CWE-346",
+            "CWE-282",
+            "CWE-1335",
+            "CWE-670",
+            "CWE-228",
+            "CWE-834",
+            "CWE-463",
+            "CWE-1426",
+            "CWE-172",
+            "CWE-190",
+            "CWE-20",
+            "CWE-362",
+            "CWE-662",
+            "CWE-1265",
+            "CWE-1283",
+            "CWE-768",
+            "CWE-923",
+            "CWE-193",
+            "CWE-128",
+            "CWE-705",
+            "CWE-135",
+            "CWE-138",
+            "CWE-74",
+            "CWE-430",
+            "CWE-799"
+        ]
+    ]
+}

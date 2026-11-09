@@ -1,0 +1,195 @@
+{
+    "path": "reports/certora/12_13_2024_Jito_Interceptor-FV-MR.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/exo-tech-xyz/stake-deposit-interceptor",
+            "https://github.com/jito-foundation/stake-deposit-interceptor"
+        ],
+        "commit_id": [
+            "82e0c41",
+            "62ca755"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-11-24",
+        "project_path": "contracts/12_13_2024_Jito_Interceptor-FV-MR.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Cooldown end time might overflow",
+            "description": "1. **Description:** The vulnerability involves a potential integer overflow when calculating the cooldown end time by adding deposit_time and cool_down_seconds. The result is cast from u64 to i64 without proper bounds checking, which can lead to a negative value if the sum exceeds i64::MAX.\n2. **Cause:** The root cause is the unsafe cast using `as` from a u64 sum to i64, which does not prevent overflow. Since both deposit_time and cool_down_seconds can be large u64 values, their sum may exceed 2^63 - 1, resulting in a negative i64 value upon truncation.\n3. **Exploitation:** An attacker could set a very large cool_down_seconds value, causing the computed cool_down_end_time to overflow into a negative number when cast to i64. This could manipulate time-based logic, potentially allowing premature redemption or bypassing cooldown restrictions.\n4. **Impact:** A successful exploit could disrupt the intended cooldown mechanism, leading to incorrect state transitions and potential loss of funds or unfair advantages in the staking system.\n",
+            "severity": "high",
+            "location": [
+                "processor.rs"
+            ],
+            "files": [
+                "62ca755/stake-deposit-interceptor/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Max fee bps is not applied when updating the deposit stake authority",
+            "description": "1. **Description:** When updating the deposit stake authority via `process_update_deposit_stake_authority`, there is no validation to ensure that initial_fee_bps is less than the denominator (10,000), unlike during initialization.\n2. **Cause:** The missing check allows potentially invalid fee basis points to be set during updates, violating the expected invariant that fees must be less than 100%.\n3. **Exploitation:** An authorized caller could update the stake authority with an initial_fee_bps value equal to or exceeding 10,000, which would result in incorrect or excessive fee calculations.\n4. **Impact:** This could lead to incorrect fee assessments, potentially causing financial loss or system instability due to invalid fee configurations.\n",
+            "severity": "medium",
+            "location": [
+                "processor.rs"
+            ],
+            "files": [
+                "62ca755/stake-deposit-interceptor/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Precision Loss in Fee Calculation Due to Multiple Integer Divisions",
+            "description": "1. **Description:** The fee calculation performs two sequential integer divisions—first by cool_down_seconds and then by FEE_BPS_DENOMINATOR—leading to truncation errors and precision loss.\n2. **Cause:** Intermediate integer division discards fractional parts, resulting in a lower final fee than mathematically correct.\n3. **Exploitation:** While not directly exploitable for gain, this systematic under-calculation can lead to consistent revenue loss over time, especially with small or uneven values.\n4. **Impact:** The protocol may collect less fees than intended, leading to economic inefficiency and potential discrepancies in expected vs. actual revenue.\n",
+            "severity": "medium",
+            "location": [
+                "state.rs"
+            ],
+            "files": [
+                "62ca755/stake-deposit-interceptor/program/src/state.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "When a receipt is closed/claimed with a transferred owner, the rent will not be paid to the former owner",
+            "description": "1. **Description:** When a deposit receipt owner is changed and the receipt is later claimed or closed, the rent is paid to the current owner, not the original rent payer.\n2. **Cause:** The system does not track who originally paid the rent for the account, so upon closure, the rent refund goes to the current owner regardless of prior ownership.\n3. **Exploitation:** A user could transfer ownership of a receipt and later close it, claiming rent they did not pay, effectively stealing rent from the original payer.\n4. **Impact:** This results in unfair redistribution of rent fees and potential financial loss for users who paid for account storage but do not receive refunds upon closure.\n",
+            "severity": "low",
+            "location": [
+                "processor.rs"
+            ],
+            "files": [
+                "62ca755/stake-deposit-interceptor/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Lack of validation might allow using a stake pool not allowed by the program",
+            "description": "1. **Description:** The `process_deposit_stake` function does not validate that the stake pool program being used is one authorized by the system.\n2. **Cause:** Missing access control checks allow any stake pool program to be referenced, potentially leading to integration with unauthorized or malicious contracts.\n3. **Exploitation:** An attacker could craft a malicious stake pool and trick users or the system into depositing stake into it, leading to fund loss.\n4. **Impact:** This could result in loss of user funds or compromise of system integrity due to interaction with untrusted programs.\n",
+            "severity": "low",
+            "location": [
+                "processor.rs"
+            ],
+            "files": [
+                "62ca755/stake-deposit-interceptor/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "process_claim_pool_tokens does not check that the vaults are distinct",
+            "description": "1. **Description:** The `process_claim_pool_tokens` function transfers tokens from a vault to a destination and a fee account but does not ensure these accounts are distinct.\n2. **Cause:** The absence of equality checks between account keys allows for self-transfers, which are unnecessary and could mask logic errors.\n3. **Exploitation:** While not directly harmful, a self-transfer could be used to manipulate internal accounting or obscure malicious behavior in transaction logs.\n4. **Impact:** This reduces code safety and auditability, increasing the risk of undetected bugs or misuse in edge cases.\n",
+            "severity": "informational",
+            "location": [
+                "processor.rs"
+            ],
+            "files": [
+                "62ca755/stake-deposit-interceptor/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Usage of saturating_sub in process_claim_pool_tokens",
+            "description": "1. **Description:** The function uses `saturating_sub` to compute the amount transferred to the destination, which silently underflows to zero if fee_amount exceeds lst_amount.\n2. **Cause:** Using `saturating_sub` instead of `checked_sub` hides arithmetic errors, allowing invalid states to proceed without reverting.\n3. **Exploitation:** If clock behavior causes incorrect fee computation (e.g., fee_amount > lst_amount), the vault could transfer zero tokens to the user while still deducting the full amount, effectively draining user funds.\n4. **Impact:** Users may lose their entitled tokens without transaction failure, leading to silent fund loss.\n",
+            "severity": "informational",
+            "location": [
+                "processor.rs"
+            ],
+            "files": [
+                "62ca755/stake-deposit-interceptor/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "calculate_fee_amount may return fee amount greater than the total_amount",
+            "description": "1. **Description:** If `current_timestamp < self.deposit_time`, the remaining cooldown time exceeds the total cooldown period, causing the calculated fee to exceed the total staked amount.\n2. **Cause:** The function does not validate that the current timestamp is greater than or equal to the deposit time, allowing negative time differences to inflate the fee.\n3. **Exploitation:** An attacker could manipulate the system clock (if possible) or exploit a race condition to trigger an invalid timestamp, resulting in a fee greater than the available balance.\n4. **Impact:** This could lead to incorrect fee deductions, potentially causing over-withdrawal from user balances or system accounting errors.\n",
+            "severity": "informational",
+            "location": [
+                "state.rs"
+            ],
+            "files": [
+                "62ca755/stake-deposit-interceptor/program/src/state.rs"
+            ]
+        }
+    ]
+}

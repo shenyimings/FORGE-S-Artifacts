@@ -1,0 +1,119 @@
+{
+    "project": "Gameyoo Programs Smart Contract Audit Report - QuillAudits.pdf.json",
+    "files": [
+        "dataset/contracts/Gameyoo Programs Smart Contract Audit Report - QuillAudits.pdf.json/programs/token-faucet/src/lib.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2,
+        "recall": 0.25,
+        "f1": 0.22222222222222224
+    },
+    "cwe_ground_truth": [
+        "CWE-346",
+        "CWE-345",
+        "CWE-693"
+    ],
+    "cwe_detected": [
+        "CWE-1339",
+        "CWE-682",
+        "CWE-285",
+        "CWE-284",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Missing address verification",
+            "description": "The vulnerability involves the lack of verification for critical system account addresses such as the system program, clock, and rent sysvars in certain instructions. The root cause is the absence of explicit address checks for these well-known Solana system accounts, which are assumed to be passed correctly by callers. An attacker could potentially pass a maliciously crafted account instead of the genuine system account, leading to unexpected behavior or denial of service by disrupting normal program execution. While this does not directly lead to fund loss, it may compromise the reliability and availability of the program's functionality.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract contains several security issues stemming from the provided CWE root causes. First, the `drip` function can be called by anyone without any access control, allowing arbitrary users to trigger token minting as long as timing and supply conditions are met. This constitutes improper access control. Second, the calculation of token distribution uses floating-point arithmetic (f64) in a blockchain environment where integer arithmetic is preferred and required for precision; this can lead to truncation errors and miscalculations due to type casting from f64 to u64, resulting in loss of precision and potential token supply drift. Third, the use of floating-point percentages introduces rounding errors that may cause the sum of distributed tokens to differ from the intended total, violating conservation of minted amounts and potentially leading to inflation or deflation bugs.\n\nAdditionally, the contract does not validate ownership or correctness of the mint authority PDA during the `drip` call beyond its derivation — but since the `mint_authority` is derived using the config's bump and used as a signer via `CpiContext::new_with_signer`, there is an implicit trust in the config account's integrity. However, because the `initialize` function allows setting arbitrary receiver accounts without validating they are valid associated token accounts (only checking `data_is_empty`), it opens up potential for incorrect initialization leading to failed mints or fund locks.\n\nThe combination of unchecked floating-point math and truncation leads to incorrect calculation (CWE-682), and the lack of access control on `drip` enables unauthorized actors to manipulate block timing perception and extract value — a critical economic risk.\n",
+            "findings": [
+                {
+                    "title": "Lack of Access Control on Drip Function",
+                    "description": "The `drip` function can be invoked by any external user without authentication or authorization checks. This allows any actor to trigger token minting as long as the time interval and supply cap conditions are satisfied, potentially leading to abuse, spam, or manipulation of downstream systems that rely on predictable emission schedules.",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.99
+                },
+                {
+                    "title": "Incorrect Calculation Due to Floating-Point Arithmetic and Truncation",
+                    "description": "The contract uses `f64` for percentage-based distribution calculations and casts the results to `u64` via `as u64`, which truncates decimal portions. This leads to precision loss and potential miscalculation of token amounts distributed. The sum of distributed tokens may not equal the intended total due to rounding down, causing discrepancies in supply distribution and possible inflation or deflation bugs.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Potential Mismatch in Token Distribution Due to Unverified Percentage Sum",
+                    "description": "The sum of the defined percentage constants (ARENA_PERCENTAGE, NFT_MINING_PERCENTAGE, etc.) should total 1.0, but this is not verified at compile-time or runtime. Due to floating-point representation and rounding, the actual sum may deviate, leading to under- or over-distribution of tokens. This introduces an incorrect calculation risk that affects the integrity of the token emission mechanism.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.95
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract has several security issues stemming from the provided CWE list. First, the `drip` function allows any user to trigger token minting without proper authorization checks, leading to improper privilege management and potential abuse. Second, the use of floating-point arithmetic (`f64`) for calculating token distribution introduces precision loss due to type casting from `f64` to `u64`, which can result in miscalculations and unfair distribution—this is a known issue when using real numbers in blockchain contexts where exactness is required. Third, the sum of the defined percentages (ARENA_PERCENTAGE, NFT_MINING_PERCENTAGE, etc.) should add up to 1.0, but due to floating-point representation and truncation during casting, the actual distributed amount may not equal `distribution_amounts`, potentially causing token supply leakage or inflation discrepancies. These issues are rooted in improper use of floating-point arithmetic and lack of access control.\n",
+            "findings": [
+                {
+                    "title": "Improper Authorization in drip Function",
+                    "description": "The `drip` function can be called by any external user without verifying if the caller is authorized. This allows arbitrary users to trigger token minting as long as the time interval condition is met, leading to potential abuse and manipulation of token distribution timing.",
+                    "category": "CWE-285",
+                    "severity": "high",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Insufficient Precision in Token Distribution Calculations",
+                    "description": "The contract uses `f64` floating-point values to define percentage shares and casts the resulting multiplication directly to `u64` without rounding or handling truncation. This leads to precision loss during the calculation of recipient amounts (e.g., `((distribution_amounts as f64) * ARENA_PERCENTAGE) as u64`), causing miscalculations in token distribution. Over time, this can accumulate into significant discrepancies between expected and actual minted amounts.",
+                    "category": "CWE-1339",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Integer Truncation Leading to Token Supply Inconsistencies",
+                    "description": "Due to truncation when casting from `f64` to `u64`, the sum of distributed tokens may not equal `distribution_amounts`. The difference (remainder) is effectively discarded, leading to permanent loss of mintable tokens per drip cycle. This results in an inconsistent and potentially unfair distribution mechanism and could prevent full utilization of the max supply cap.",
+                    "category": "CWE-191",
+                    "severity": "medium",
+                    "confidence": 0.9
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-193",
+            "CWE-269",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-191",
+            "CWE-1270",
+            "CWE-190",
+            "CWE-923",
+            "CWE-1267",
+            "CWE-135",
+            "CWE-369",
+            "CWE-128",
+            "CWE-1339",
+            "CWE-282",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-1335"
+        ]
+    ]
+}

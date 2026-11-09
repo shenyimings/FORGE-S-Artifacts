@@ -1,0 +1,273 @@
+{
+    "path": "reports/04_10_2025_Texture2.0-MR-FV.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/texture-fi/super-lendy",
+            "https://github.com/texture-fi/vault",
+            "https://github.com/texture-fi/price-proxy",
+            "https://github.com/texture-fi/curvy"
+        ],
+        "commit_id": [
+            "9c563f740786f2ad740c9f27e265337381210e4d",
+            "b5dd945a833e4bc11d642ee071bc7e1d40e851e4",
+            "615aa790bac44ba26c8593eb17354e5950e2d8af",
+            "c47699a1c2bf751648f9f796b5aa5da8da2108a0"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-11-22",
+        "project_path": "contracts/04_10_2025_Texture2.0-MR-FV.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "reserve_data.lp_market_price() might be stale when called",
+            "description": "1. **Description:** The function that fetches reserve data does not validate whether the price data is stale by checking `self.lastUpdate.stale == 1`, even though staleness checks are implemented for other operations like liquidity addition and borrowing.\n\n2. **Cause:** The absence of a staleness validation check when fetching reserve data allows potentially outdated or manipulated price data to be used in critical financial calculations.\n\n3. **Exploitation:** An attacker could manipulate or provide stale price data that bypasses standard checks, leading the system to use incorrect prices during reserve calculations.\n\n4. **Impact:** This could result in incorrect valuation of assets, leading to financial losses, incorrect lending decisions, or exploitation via price manipulation in lending and borrowing operations.\n",
+            "severity": "critical",
+            "location": [
+                "price-proxy/program/src/processor/mod.rs"
+            ],
+            "files": [
+                "price-proxy/program/src/processor/mod.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-636"
+                ]
+            },
+            "title": "Vault reward system can lead to locked user funds",
+            "description": "1. **Description:** When a user attempts to withdraw from the vault, the system tries to accrue rewards first. However, if there are no free reward slots, the accrual fails, preventing withdrawal. Similarly, claiming rewards also triggers accrual, which can fail for the same reason.\n\n2. **Cause:** Both the withdrawal and reward claiming functions call `accrue_rewards`, which fails when no free reward slots are available. There is no mechanism to bypass accrual or selectively claim rewards.\n\n3. **Exploitation:** A user with expired but unclaimed rewards and no free slots cannot withdraw or claim rewards, creating a deadlock. An admin must intervene to resolve it.\n\n4. **Impact:** Users can become permanently locked out of their funds unless the admin modifies the reward system, violating user autonomy and trust in fund accessibility.\n",
+            "severity": "critical",
+            "location": [
+                "vault/program/src/processor/position.rs"
+            ],
+            "files": [
+                "vault/program/src/processor/position.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Using partially verified price updates is dangerous, as it lowers the threshold of guardians that need to collude to produce a malicious price update",
+            "description": "1. **Description:** The system uses `VerificationLevel::Partial` when fetching Pyth price updates, requiring fewer guardian signatures than the recommended full verification level.\n\n2. **Cause:** The code explicitly sets a custom verification level with only 5 signatures instead of requiring the full set (e.g., 13 out of 18 guardians), increasing the risk of accepting malicious price updates.\n\n3. **Exploitation:** If an attacker compromises the smaller number of required guardians, they can submit fraudulent price data that the system will accept.\n\n4. **Impact:** This could lead to incorrect asset pricing, enabling manipulation of lending, borrowing, or liquidation mechanisms, potentially resulting in significant financial loss.\n",
+            "severity": "high",
+            "location": [
+                "price-proxy/program/src/processor/mod.rs"
+            ],
+            "files": [
+                "price-proxy/program/src/processor/mod.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ]
+            },
+            "title": "Anyone can DOS another user from receiving a rewards",
+            "description": "1. **Description:** The reward system recalculates and accrues rewards whenever a position is refreshed. Due to rounding down in calculations, frequent refreshes can result in zero rewards being accrued.\n\n2. **Cause:** The position refresh is permissionless and triggers reward accrual, which rounds down fractional rewards. An attacker can repeatedly refresh another user’s position before rewards accumulate meaningfully.\n\n3. **Exploitation:** An attacker can call `refresh_position` on a victim’s account at intervals that ensure rewards always round down to zero, effectively denying them any reward income.\n\n4. **Impact:** Users can be griefed or financially harmed with minimal cost to the attacker, undermining the fairness and reliability of the reward distribution system.\n",
+            "severity": "high",
+            "location": [
+                "superlendy/program/src/state/position.rs"
+            ],
+            "files": [
+                "super-lendy/program/src/state/position.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Changing rule start date after it has started will result in a loss of rewards for the user",
+            "description": "1. **Description:** The reward accrual logic uses the minimum of slots since last accrual and the rule’s age (current_slot - start_slot). If the start date is moved forward, the rule age decreases, reducing the number of accrueable slots.\n\n2. **Cause:** The `set_reward_rules` function allows updating the `start_slot` of an existing rule to a later date without validation, which shortens the effective accrual window.\n\n3. **Exploitation:** An admin (or malicious actor with admin rights) can retroactively change the start date of a reward rule, causing users to lose rewards they would have otherwise earned.\n\n4. **Impact:** Users lose accrued rewards without consent, breaking the expectation that earned rewards are immutable and claimable at any time, leading to loss of trust and potential financial harm.\n",
+            "severity": "high",
+            "location": [
+                "superlendy/program/src/state/position.rs"
+            ],
+            "files": [
+                "super-lendy/program/src/state/position.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Lack of price/expo validation for Pyth price result",
+            "description": "1. **Description:** The system does not validate whether the Pyth price is positive or whether the exponent (expo) is within a safe range, unlike the EVM SDK implementation.\n\n2. **Cause:** Missing checks for `price < 0`, `expo > 0`, or `expo < -255` in the Solana implementation allow potentially invalid or malformed price data to be used.\n\n3. **Exploitation:** In the event of an oracle malfunction or misconfiguration (e.g., subscribing to the wrong feed), negative prices or extreme exponents could be processed, leading to incorrect valuations.\n\n4. **Impact:** This could result in incorrect asset pricing, flawed accounting, or unintended behavior in lending and liquidation logic, especially during black swan events.\n",
+            "severity": "medium",
+            "location": [
+                "price-proxy/program/src/processor/mod.rs"
+            ],
+            "files": [
+                "price-proxy/program/src/processor/mod.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "In case of a black swan event or malfunctioning oracle, writing off bad debt can occur before liquidations",
+            "description": "1. **Description:** If the oracle returns a price of zero or malfunctions, the deposited value of a position is set to zero, which allows the `write_off_bad_debt` function to proceed without prior liquidation.\n\n2. **Cause:** The `write_off_bad_debt` function only checks if deposited value is zero before allowing debt write-off, but does not verify whether liquidation was attempted or required.\n\n3. **Exploitation:** An attacker could manipulate or trigger a scenario where the oracle returns zero, then call `write_off_bad_debt` to erase debt without liquidating collateral.\n\n4. **Impact:** This breaks the economic model by allowing bad debt to be written off prematurely, leading to reserve insolvency and loss of funds for liquidity providers.\n",
+            "severity": "low",
+            "location": [
+                "superlendy/program/src/processor/position.rs"
+            ],
+            "files": [
+                "super-lendy/program/src/processor/position.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Conflicting checks in alter texture config",
+            "description": "1. **Description:** The configuration update function allows arbitrary values for boolean-like fields such as `flash_loans_enabled`, but downstream logic assumes they are only 0 or 1.\n\n2. **Cause:** The `alter_reserve` function accepts `u8` values for `mode` and `flash_loans_enabled` without validation, enabling configuration states that the logic cannot handle correctly.\n\n3. **Exploitation:** Setting `flash_loans_enabled` to a value other than 0 or 1 could cause the system to incorrectly interpret the flash loan status, leading to unexpected behavior.\n\n4. **Impact:** This could result in inconsistent state handling, potential security bypasses, or denial of service due to invalid configuration assumptions.\n",
+            "severity": "low",
+            "location": [
+                "superlendy/program/src/processor/mod.rs"
+            ],
+            "files": [
+                "super-lendy/program/src/processor/mod.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "fees.curator_borrow_fee_rate_bps or fees.curator_performance_fee_rate_bps can't be set to 50% even though the comments say it should be",
+            "description": "1. **Description:** The code uses a strict greater-than check (`> 5000`) instead of greater-than-or-equal, preventing the fee from being set to exactly 50% (5000 basis points), despite comments indicating this should be allowed.\n\n2. **Cause:** A logic inconsistency between the code and its documentation due to the use of `> 5000` instead of `>= 5000`.\n\n3. **Exploitation:** Not exploitable in a malicious sense, but leads to confusion and incorrect configuration expectations.\n\n4. **Impact:** Misalignment between documentation and behavior can lead to incorrect fee settings and user confusion, reducing clarity and maintainability.\n",
+            "severity": "informational",
+            "location": [
+                "superlendy/program/src/processor/reserve.rs"
+            ],
+            "files": [
+                "super-lendy/program/src/processor/reserve.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "reserve_mode or flash_loans_enabled can be set to arbitrary value",
+            "description": "1. **Description:** The `alter_reserve` function allows setting `mode` and `flash_loans_enabled` to any `u8` value without validation, even though only specific values (e.g., 0, 1) are meaningful.\n\n2. **Cause:** Lack of input validation on configuration parameters that are treated as enums or booleans in downstream logic.\n\n3. **Exploitation:** Setting invalid values could lead to undefined behavior or misinterpretation of the reserve state.\n\n4. **Impact:** Increases risk of configuration errors and potential logic bugs due to unvalidated inputs.\n",
+            "severity": "informational",
+            "location": [
+                "superlendy/program/src/processor/reserve.rs"
+            ],
+            "files": [
+                "super-lendy/program/src/processor/reserve.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Switchboard confidence interval is not utilized",
+            "description": "1. **Description:** The code checks for price staleness but does not use the confidence interval provided by the Switchboard oracle, which indicates the reliability of the price.\n\n2. **Cause:** Missing integration of the confidence interval in price validation logic.\n\n3. **Exploitation:** An attacker could influence or submit prices with high variance that pass staleness checks but are unreliable.\n\n4. **Impact:** Increases risk of using low-confidence prices in critical operations, potentially leading to incorrect financial decisions.\n",
+            "severity": "informational",
+            "location": [
+                "superlendy/program/src/processor/reserve.rs"
+            ],
+            "files": [
+                "super-lendy/program/src/processor/reserve.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "The reward rule can be set to an arbitrary value",
+            "description": "1. **Description:** The `set_reward_rules` function does not validate the `reason` field of reward rules, which should only be 0 (borrowing) or 1 (liquidity).\n\n2. **Cause:** Missing input validation allows arbitrary values to be set for reward rule types.\n\n3. **Exploitation:** Setting invalid rule types could lead to undefined behavior or misattribution of rewards.\n\n4. **Impact:** Could result in incorrect reward distribution logic or future bugs if new code assumes valid values.\n",
+            "severity": "informational",
+            "location": [
+                "superlendy/program/src/processor/reserve.rs"
+            ],
+            "files": [
+                "super-lendy/program/src/processor/reserve.rs"
+            ]
+        }
+    ]
+}

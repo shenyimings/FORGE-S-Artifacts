@@ -1,0 +1,190 @@
+{
+    "project": "blocksec_ref_lp_as_collateral_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_lp_as_collateral_v1.0-signed.pdf.json/ref-contracts/ref-exchange/src/shadow_actions.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2857142857142857,
+        "recall": 0.8,
+        "f1": 0.4210526315789473
+    },
+    "cwe_ground_truth": [
+        "CWE-1339",
+        "CWE-252",
+        "CWE-682",
+        "CWE-703",
+        "CWE-754"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-252",
+        "CWE-128",
+        "CWE-190",
+        "CWE-755",
+        "CWE-682",
+        "CWE-228",
+        "CWE-691",
+        "CWE-435",
+        "CWE-253",
+        "CWE-703",
+        "CWE-754"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Permanently Locked User",
+            "description": "1. **Description:** The `callback_process_shadow_force_close_result()` function is responsible for unlocking an account after a forced closure, but it may panic during execution due to an unchecked arithmetic operation.\n2. **Cause:** Although `internal_shadow_force_close()` verifies that `asset.reversed > amount`, this state is not guaranteed during the callback, leading to potential arithmetic underflow.\n3. **Exploitation:** If the callback panics, the account remains locked indefinitely, even though the liquidation process may have partially executed.\n4. **Impact:** The affected user is permanently locked out of their account, unable to access deposited, borrowed, or collateralized assets, resulting in a denial-of-service condition.\n"
+        },
+        {
+            "title": "Lack of Consistent Precision in on_remove_shadow()",
+            "description": "1. **Description:** The `on_cast_shadow()` function scales the input `amount` by `10**extra_decimals`, but `on_remove_shadow()` uses the raw `amount` without applying the same scaling factor.\n2. **Cause:** Inconsistent handling of decimal precision between two related functions leads to incorrect value calculations.\n3. **Exploitation:** An attacker could exploit the discrepancy during shadow position removal to receive incorrect amounts or manipulate internal balances.\n4. **Impact:** Results in incorrect accounting and potential loss of funds due to miscalculated shares or balances in the system.\n"
+        },
+        {
+            "title": "Potential Drain of Funds due to Early Return of Shares",
+            "description": "1. **Description:** The `FromFarming` and `FromBurrowland` implementations in `ShadowActions` immediately increase the `free_shares` of LP tokens, allowing liquidity to be removed in the same block.\n2. **Cause:** The design allows liquidity removal before confirming the success of `on_remove_shadow()` in dependent contracts.\n3. **Exploitation:** If `on_remove_shadow()` fails in Boost Farming or Burrowland after shares are released, the LP tokens remain staked while liquidity is withdrawn, enabling double use of the same assets.\n4. **Impact:** This can lead to a complete drain of funds from the Boost Farming and Burrowland contracts due to inconsistent state across systems.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code contains several integration and robustness weaknesses that can lead to inconsistent cross-contract state and denial-of-service via panics. The most impactful issues arise from (1) updating local accounting before making cross-contract calls and not reliably rolling back when the downstream call fails or when the callback cannot execute, and (2) insufficient validation of structured inputs (e.g., `shadow_id`, `min_token_amounts`) that are assumed well-formed and can trigger panics or unintended pool selection. There are also calculation/overflow risks (e.g., `10u128.pow(share_decimals)`), and exceptional conditions are handled via `expect`/indexing rather than defensive validation.\n",
+            "findings": [
+                {
+                    "title": "Cross-contract liquidation can desynchronize local 'shadow' accounting from Boost Farm state",
+                    "description": "In `on_burrow_liquidation`, the contract updates `liquidation_account` shadow records (removing shares from Burrowland and possibly from Farming via `withdraw_seed_amount`) *before* calling the external farming receiver:\n- `liquidation_account.update_shadow_record(... FromBurrowland ...)`\n- optionally `liquidation_account.update_shadow_record(... FromFarming ...)`\nThen it calls `ext_shadow_receiver::on_remove_shadow(... &self.boost_farm_id ...)` and only logs success/failure in `callback_on_burrow_liquidation`, without reverting local state if the external call fails.\n\nIf `on_remove_shadow` fails (or is not executed as expected), this contract will believe farming shares were removed while the Boost Farm contract may still consider them staked, creating an inconsistent state across correctly-behaving components.\n\nThis can break invariants used for later availability checks (e.g., `available_farming_shares`, `free_shares`) and may lead to incorrect future withdrawals/liquidations or stuck funds requiring admin intervention.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.83
+                },
+                {
+                    "title": "Rollback logic depends on callback execution; insufficient callback gas can leave state permanently inconsistent",
+                    "description": "In `shadow_action`, the contract updates internal state (`account.update_shadow_record(...)` and `internal_save_account`) before the cross-contract call to Burrowland/BoostFarm. It relies on `callback_on_shadow` to revert those updates when `is_promise_success()` is false.\n\nHowever, the callback is allocated a fixed `GAS_FOR_ON_CAST_SHADOW_CALLBACK` (20 Tgas). If the callback runs out of gas (or otherwise aborts), the rollback will not happen even when the external call fails, leaving shadow records permanently modified.\n\nThis is a control-flow robustness issue: correctness and protection (rollback) require the callback to run, but the contract does not guarantee it with sufficient gas or alternative recovery paths.\n",
+                    "category": "CWE-691",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Unvalidated `shadow_id` parsing can panic and/or mis-route to an unintended pool",
+                    "description": "`shadow_id_to_pool_id` parses `shadow_id` as:\n  `shadow_id.split(\"-\").collect::<Vec<&str>>()[1].parse().expect(\"Invalid shadow_id\")`\nProblems:\n- If `shadow_id` does not contain \"-\", indexing `[1]` panics.\n- If it contains additional '-' (e.g., `shadow_ref_v1-1-extra`), `[1]` becomes `\"1\"` and the suffix is ignored, allowing ambiguous/malformed IDs to map to a valid `pool_id` unexpectedly.\n- `.expect(...)` will panic on parse failure.\n\nIn `on_burrow_liquidation`, this panic can abort the whole liquidation flow (DoS of that call path) and the ambiguous parse can cause liquidation to be applied to a different pool than implied by the full `shadow_id` string.\n",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.86
+                },
+                {
+                    "title": "Potential overflow/panic in unit-share calculation using `10u128.pow(share_decimals)`",
+                    "description": "In `get_unit_lpt_assets`, the code computes a unit share amount as:\n  `10u128.pow(share_decimals as u32)`\nIf `share_decimals` is large enough, `pow` can overflow `u128` and panic (Rust will panic on overflow in debug and may wrap in some release contexts depending on compilation settings; either way it's unsafe to assume).\n\nBecause this function is public, an attacker can select pools (via `pool_ids`) whose share decimals trigger this edge case, causing the call to abort and potentially creating a cheap DoS vector against clients or indexers relying on it.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Missing validation of `min_token_amounts` length can cause panics in liquidation remove_liquidity",
+                    "description": "`on_burrow_liquidation` passes `min_token_amounts` directly into `pool.remove_liquidity(...)` after mapping types, without checking that `min_token_amounts.len() == pool.tokens().len()`.\n\nIf `remove_liquidity` expects a matching-length vector (a common pattern) and indexes into it, a malformed length can trigger a panic and abort the liquidation. While the caller is restricted to `burrowland_id`, this is still an exceptional-condition handling flaw at the integration boundary that can cause unexpected halts and complicate recovery if Burrowland bugs or is upgraded incorrectly.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.77
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains multiple instances where arithmetic is performed on fixed-width integers without explicit overflow protection, and multiple places where externally influenced inputs are assumed to be well-formed (leading to panics on malformed data). In NEAR Rust contracts, release builds do not trap on integer overflow; instead, they wrap, which can lead to incorrect accounting (refunds/credits) or incorrect view results. Additionally, parsing `shadow_id` assumes a strict format and uses indexing/`expect`, which will abort execution on syntactically invalid inputs; similarly, there are no sanity checks that vector lengths match expected token counts before indexing, so malformed inputs can trigger panics. These issues map directly to the listed CWE root causes (overflow/wraparound and improper handling of invalid structures/exceptional conditions).\n",
+            "findings": [
+                {
+                    "title": "Potential u128 overflow/wraparound in share scaling (10^decimals) used in view calculation",
+                    "description": "In `get_unit_lpt_assets`, the code computes:\n  `10u128.pow(share_decimals as u32)`\nwhere `share_decimals` is a `u8` returned from `pool.get_share_decimal()` and is not bounded here.\n\nIf `share_decimals` is large enough (roughly > 38 for base-10), `10^share_decimals` will exceed `u128::MAX`. In a release/WASM build this can wrap around, causing the \"unit share\" amount passed to `remove_liquidity` to become an unexpected small value. This produces incorrect asset quotes and can break downstream logic that relies on this view.\n\nEven if the current implementation of `get_share_decimal()` usually returns a safe range, the lack of an explicit bound makes this a latent overflow/wraparound risk.\n",
+                    "category": "CWE-190",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Potential overflow/wraparound in storage refund/credit arithmetic",
+                    "description": "Storage fee/refund is computed with multiplication and added to balances without checked arithmetic, e.g.:\n  `(prev_storage - env::storage_usage()) as Balance * env::storage_byte_cost()`\nand later:\n  `account.near_amount += storage_fee.0`\n  `liquidation_account.near_amount += ...`\n  `liquidator_account.near_amount += ...`\n\nWhile storage deltas are typically small, this is still unguarded `u128` arithmetic. If the multiplication or subsequent additions exceed `u128::MAX`, the value can wrap in release builds, leading to incorrect `near_amount` credits/refunds (potentially reducing a refund to a small number, or turning it into a large unintended credit depending on wrap behavior).\n\nThis is especially relevant because `storage_byte_cost()` is a large yoctoNEAR-denominated value and the multiplication is not `checked_mul`.\n",
+                    "category": "CWE-128",
+                    "severity": "low",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Panic/abort on malformed shadow_id due to unchecked split indexing and expect()",
+                    "description": "`shadow_id_to_pool_id` assumes `shadow_id` has at least one '-' and that the second segment is a valid integer:\n  `shadow_id.split(\"-\").collect::<Vec<&str>>()[1].parse().expect(\"Invalid shadow_id\")`\n\nIf `shadow_id` is syntactically invalid (no '-', empty second segment, non-numeric segment), this will:\n  - panic due to out-of-bounds indexing (`[1]`), or\n  - panic due to `.expect(...)` on parse failure\n\n`on_burrow_liquidation` calls `shadow_id_to_pool_id(&shadow_id)` on an externally supplied `shadow_id` (from the trusted `burrowland_id`, but still unvalidated input). A malformed `shadow_id` will abort the entire liquidation call, creating a denial-of-service condition for that liquidation path and making the contract brittle to input-format deviations.\n",
+                    "category": "CWE-228",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Missing validation of vector lengths can cause panics during liquidation",
+                    "description": "In `on_burrow_liquidation`, the contract passes `min_token_amounts` directly into `pool.remove_liquidity(...)` without checking that its length matches `pool.tokens().len()`. After the call, it assumes the returned `amounts` vector matches `tokens` length:\n  `for i in 0..tokens.len() { liquidator_account.deposit(&tokens[i], amounts[i]); }`\n\nIf `min_token_amounts` has an unexpected length and/or `remove_liquidity` returns an `amounts` vector whose length differs from `tokens.len()`, indexing `amounts[i]` can panic and abort the transaction. Even if `remove_liquidity` usually enforces correct lengths, this function itself does not guard against unusual/exceptional conditions and will fail catastrophically if an invariant is violated.\n",
+                    "category": "CWE-754",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Improper handling of exceptional conditions via panics in core paths",
+                    "description": "Multiple code paths rely on panicking behavior instead of returning recoverable errors, including:\n  - `shadow_id_to_pool_id(...).parse().expect(\"Invalid shadow_id\")`\n  - indexing into a split vector (`...[1]`)\n  - indexing `amounts[i]` without validating `amounts.len()`\n\nIn smart contracts, panics abort execution and revert state changes for the current call, which can be weaponized into denial-of-service (e.g., by repeatedly triggering liquidation attempts that always abort) or can reduce protocol robustness when upstream contracts send unexpected data.\n",
+                    "category": "CWE-755",
+                    "severity": "medium",
+                    "confidence": 0.75
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains multiple places where cross-contract call outcomes (promise results) are not properly acted upon, or where funds-transfer promises are issued without any verification of success. In NEAR, promise failures are common (callee panics, gas exhaustion, account does not exist for transfer, etc.). When a promise failure is only logged (or not checked at all), contract state can become inconsistent with external systems (e.g., farming/burrowland contracts) and user refunds/accounting can silently fail. These issues map to the provided CWE root causes around incorrect/unchecked return values and unexpected status codes.\n",
+            "findings": [
+                {
+                    "title": "Burrow liquidation callback ignores failed external call, causing state desynchronization",
+                    "description": "In `on_burrow_liquidation`, if `withdraw_seed_amount > 0` the contract calls the external farming contract via:\n`ext_shadow_receiver::on_remove_shadow(...).then(ext_self::callback_on_burrow_liquidation(...))`.\nHowever, `callback_on_burrow_liquidation` only logs whether `is_promise_success()` was true/false and performs no rollback or compensating action on failure.\n\nThis is problematic because prior to making the external call, the contract already updates internal accounting:\n- `liquidation_account.update_shadow_record(... FromBurrowland ...)`\n- and potentially `liquidation_account.update_shadow_record(... FromFarming, withdraw_seed_amount ...)`\n\nIf the external `on_remove_shadow` call fails (callee panic, out of gas, rejects request), the local contract will have reduced/changed the user's shadow/farming record but the farming contract will not, creating permanent inconsistency between the two systems. This can lead to stuck funds, incorrect future withdrawals/locks, or broken liquidation invariants.\n",
+                    "category": "CWE-253",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Refund transfers are issued without checking for success (silent refund failure)",
+                    "description": "In `callback_on_shadow`, on failure of the external cast-shadow call, the contract attempts to refund `storage_fee` via:\n`Promise::new(sender_id.clone()).transfer(storage_fee.0);`\nThere is no callback to verify whether the transfer succeeded.\n\nOn NEAR, transfers can fail (e.g., receiver account deleted/does not exist, or other execution failures). When this happens, the refund will not reach the user, and the contract does not record an alternative credit (e.g., adding to `account.near_amount`) in the failure branch. This can cause users to permanently lose the intended refund amount, and the contract will have no internal record that it still owes that refund.\n",
+                    "category": "CWE-252",
+                    "severity": "medium",
+                    "confidence": 0.75
+                }
+            ]
+        },
+        {
+            "reasoning": "CWE-690 is specifically about failing to check for NULL after calls that can return NULL, leading to a NULL pointer dereference. In this Rust/NEAR code, there are no raw pointers and no FFI calls that can return NULL pointers. The code primarily uses safe Rust types (e.g., Option/Result) and NEAR SDK abstractions.\n\nWhile there are several potential panic/DoS-style hazards (e.g., `shadow_id.split(\"-\").collect::<Vec<_>>()[1]` can panic on malformed `shadow_id`, and indexing `amounts[i]` assumes `remove_liquidity` returns at least `tokens.len()` elements), these are not NULL-pointer dereferences and do not match CWE-690’s root cause as defined.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-393",
+            "CWE-135",
+            "CWE-191",
+            "CWE-228",
+            "CWE-755",
+            "CWE-397",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-754",
+            "CWE-1339"
+        ],
+        [
+            "CWE-394",
+            "CWE-253",
+            "CWE-354",
+            "CWE-252",
+            "CWE-273"
+        ],
+        [
+            "CWE-690"
+        ]
+    ]
+}

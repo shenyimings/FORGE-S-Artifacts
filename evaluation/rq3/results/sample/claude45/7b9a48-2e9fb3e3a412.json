@@ -1,0 +1,201 @@
+{
+    "project": "blocksec_ref_exchange_v4.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_exchange_v4.0_signed.pdf.json/ref-exchange/src/account_deposit.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.21428571428571427,
+        "recall": 1.0,
+        "f1": 0.35294117647058826
+    },
+    "cwe_ground_truth": [
+        "CWE-666",
+        "CWE-664",
+        "CWE-826"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-664",
+        "CWE-672",
+        "CWE-404",
+        "CWE-682",
+        "CWE-691",
+        "CWE-666",
+        "CWE-284",
+        "CWE-668",
+        "CWE-703",
+        "CWE-662",
+        "CWE-400",
+        "CWE-826",
+        "CWE-704"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Improper Account Unregistration",
+            "description": "1. **Description:** The contract allows for account unregistration, but does not properly handle or validate the state of the account before unregistering, potentially leading to inconsistent storage or loss of user funds. Specifically, the function `storage_unregister()` fails to check whether the `legacy_tokens` field of the account is empty before proceeding with unregistration.\n2. **Cause:** The function only checks if the `tokens` map is empty (via `account_deposit.tokens.is_empty()`), but does not validate the `legacy_tokens` field, which could still hold token balances.\n3. **Exploitation:** A malicious or misinformed user could unregister their account while still having tokens recorded in `legacy_tokens`, leading to loss of those tokens. An attacker could also exploit this to force the system into an invalid state.\n4. **Impact:** Users may permanently lose tokens tracked in the `legacy_tokens` field, resulting in financial loss or denial of service for affected accounts.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After thorough analysis of the Solana smart contract code (which is actually a NEAR Protocol contract in Rust), I've identified several security issues stemming from the provided CWE categories:\n\n1. **CWE-682 (Incorrect Calculation)**: The `storage_usage()` function calculates storage costs but doesn't account for potential integer overflow when multiplying large values. While Rust has overflow checks in debug mode, in release mode this could wrap around, leading to incorrect storage cost calculations.\n\n2. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: In the `exchange_callback_post_withdraw` function, when a withdrawal fails and the account doesn't have enough storage or doesn't exist, tokens are deposited to the owner's \"lostfound\" account. However, this only works for whitelisted tokens. For non-whitelisted tokens, the funds are effectively lost with just a log message, representing improper resource management.\n\n3. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: The `internal_lostfound` function silently fails (only logs) when trying to deposit non-whitelisted tokens. This could lead to permanent loss of user funds without proper error handling or recovery mechanism.\n\n4. **CWE-691 (Insufficient Control Flow Management)**: In `deposit_with_storage_check`, if storage check fails after inserting a token, the token is removed. However, there's a race condition potential where the storage calculation might be inconsistent between the check and the actual state, especially in concurrent scenarios.\n\n5. **CWE-284 (Improper Access Control)**: While not a direct access control issue, the `internal_lostfound` function allows depositing failed withdrawals to the owner's account without any additional verification or limits, which could be exploited if the callback mechanism is compromised.\n\n6. **CWE-697 (Incorrect Comparison)**: In `storage_available()`, the comparison `self.near_amount > locked` should potentially be `>=` to ensure exact boundary conditions are handled correctly, though the current implementation returns 0 in edge cases which may be intentional.\n",
+            "findings": [
+                {
+                    "title": "Potential Integer Overflow in Storage Cost Calculation",
+                    "description": "The `storage_usage()` function performs multiplication operations that could overflow in release builds. The calculation `(INIT_ACCOUNT_STORAGE + self.legacy_tokens.len() as u64 * (ACC_ID_AS_KEY_STORAGE + U128_STORAGE) + self.tokens.len() as u64 * (KEY_PREFIX_ACC + ACC_ID_AS_KEY_STORAGE + U128_STORAGE)) as u128 * env::storage_byte_cost()` could wrap around if the number of tokens is extremely large, leading to incorrect storage cost calculations and potential exploitation.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Improper Handling of Failed Withdrawal for Non-Whitelisted Tokens",
+                    "description": "In `exchange_callback_post_withdraw`, when a withdrawal fails and needs to be returned to the user, if the token is not globally whitelisted, the `internal_lostfound` function only logs the failure and the tokens are effectively lost. This represents improper resource management where user funds can be permanently lost without proper recovery mechanism.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Silent Failure in Lost-Found Mechanism",
+                    "description": "The `internal_lostfound` function silently fails (only emits a log) when attempting to deposit non-whitelisted tokens. This inadequate error handling could lead to permanent loss of user funds without any revert or proper exception handling, violating the principle of fail-safe defaults.",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Race Condition in Storage Check During Token Registration",
+                    "description": "In `deposit_with_storage_check`, a token is inserted first, then storage is checked, and if insufficient, the token is removed. This pattern could lead to inconsistent state if the storage calculation changes between insertion and check, or in scenarios with complex state transitions. The control flow doesn't adequately protect against edge cases where storage state might be modified.",
+                    "category": "CWE-691",
+                    "severity": "low",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Unrestricted Lost-Found Deposits to Owner Account",
+                    "description": "The `internal_lostfound` function deposits failed withdrawal tokens directly to the owner's account without additional verification, rate limiting, or caps. While this requires a failed withdrawal callback, if the callback mechanism is compromised or exploited, it could allow unauthorized accumulation of tokens in the owner's account.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "After carefully analyzing the Solana smart contract code provided, I need to clarify that this is actually a NEAR Protocol smart contract (not Solana), as evidenced by the use of `near_sdk`, `near_bindgen`, and NEAR-specific patterns. However, I will proceed with the security analysis based on the provided CWE candidates.\n\nKey findings:\n\n1. **CWE-665 (Improper Initialization)**: The `Account::new()` function initializes `storage_used` to 0, but this field is never properly updated throughout the contract lifecycle. The contract calculates storage usage dynamically via `storage_usage()` but never updates the `storage_used` field, leading to inconsistent state.\n\n2. **CWE-404 (Improper Resource Shutdown or Release)**: In the `exchange_callback_post_withdraw` function, when a withdrawal fails and the account doesn't have enough storage, the code logs a message but doesn't properly handle the resource. The comment states \"we can just leave it without insert\" which means the account state change is abandoned without proper cleanup, potentially leaving resources in an inconsistent state.\n\n3. **CWE-666 (Operation on Resource in Wrong Phase of Lifetime)**: The `deposit_with_storage_check` function inserts a token balance first, then checks storage, and removes it if storage is insufficient. This creates a window where the resource (token balance) exists in an invalid state between insertion and validation.\n\n4. **CWE-662 (Improper Synchronization)**: The contract uses both `legacy_tokens` (HashMap) and `tokens` (UnorderedMap) to store token balances. Multiple functions (like `withdraw`, `deposit`) attempt to migrate from legacy to current storage, but this migration is not atomic and could lead to race conditions if multiple operations occur on the same account.\n\n5. **CWE-400 (Uncontrolled Resource Consumption)**: The `storage_usage()` calculation multiplies the number of tokens by storage costs without any upper bound check. An attacker could potentially register many tokens (even with 0 balance) to inflate storage costs and lock up NEAR tokens in the account.\n\n6. **CWE-668 (Exposure of Resource to Wrong Sphere)**: The `internal_lostfound` function deposits failed withdrawals to the owner's account, but only if the token is globally whitelisted. Non-whitelisted tokens are simply logged and lost, exposing user funds to potential loss without proper recovery mechanism.\n\n7. **CWE-704 (Incorrect Type Conversion or Cast)**: The storage calculations cast `u64` lengths to `u128` without checking for potential overflow in intermediate calculations, particularly in `storage_usage()` where multiple multiplications occur.\n",
+            "findings": [
+                {
+                    "title": "Uninitialized and Unused storage_used Field",
+                    "description": "The Account struct contains a storage_used field that is initialized to 0 in Account::new() but is never updated throughout the contract's lifecycle. The contract uses storage_usage() to calculate storage dynamically, but the storage_used field remains at 0, creating inconsistent state and potential confusion about actual storage consumption.",
+                    "category": "CWE-665",
+                    "severity": "medium",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Improper Resource Cleanup in Failed Withdrawal Callback",
+                    "description": "In exchange_callback_post_withdraw, when a withdrawal fails and the account lacks sufficient storage for refund, the code abandons the account state update with a comment 'we can just leave it without insert'. This leaves the resource (withdrawn tokens) in limbo without proper cleanup or consistent state management, potentially causing loss of funds.",
+                    "category": "CWE-404",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Token Balance Exists in Invalid State During Storage Check",
+                    "description": "The deposit_with_storage_check function inserts a token balance before validating storage availability, then removes it if storage is insufficient. This creates a temporal window where the token balance exists in the account's state despite potentially violating storage constraints, operating on the resource in the wrong phase of its lifecycle.",
+                    "category": "CWE-666",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Non-Atomic Migration Between Legacy and Current Token Storage",
+                    "description": "The contract maintains both legacy_tokens (HashMap) and tokens (UnorderedMap) for storing balances. Functions like withdraw() and deposit() perform migration by removing from legacy_tokens and inserting into tokens, but this operation is not atomic. Concurrent operations could lead to inconsistent state or race conditions during migration.",
+                    "category": "CWE-662",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unbounded Storage Consumption Through Token Registration",
+                    "description": "The storage_usage() calculation multiplies the number of registered tokens by per-token storage costs without any upper bound. An attacker could register an excessive number of tokens (even with 0 balance) to inflate storage requirements, effectively locking NEAR tokens in the account and potentially causing denial of service through storage exhaustion.",
+                    "category": "CWE-400",
+                    "severity": "high",
+                    "confidence": 0.87
+                },
+                {
+                    "title": "User Funds Lost for Non-Whitelisted Tokens in Failed Withdrawals",
+                    "description": "The internal_lostfound function only deposits failed withdrawal amounts to the owner's account if the token is globally whitelisted. For non-whitelisted tokens, the funds are simply logged and lost permanently. This exposes user resources (token balances) to the wrong sphere (permanent loss) without adequate recovery mechanism.",
+                    "category": "CWE-668",
+                    "severity": "critical",
+                    "confidence": 0.93
+                },
+                {
+                    "title": "Potential Integer Overflow in Storage Calculations",
+                    "description": "The storage_usage() function performs multiple multiplications and additions with u64 values (token counts, storage constants) before casting to u128. While the final cast prevents overflow, intermediate calculations could overflow if token counts are extremely large, leading to incorrect storage cost calculations and type conversion errors.",
+                    "category": "CWE-704",
+                    "severity": "medium",
+                    "confidence": 0.75
+                }
+            ]
+        },
+        {
+            "reasoning": "After carefully analyzing the provided Solana smart contract code (which is actually a NEAR Protocol contract in Rust), I examined it for the specific CWE candidates provided. Here's my analysis:\n\n1. **CWE-593 (Authentication Bypass: OpenSSL CTX Object Modified)**: This CWE is specific to OpenSSL context modifications and is not applicable to this NEAR smart contract code. No SSL/TLS operations are present.\n\n2. **CWE-605 (Multiple Binds to the Same Port)**: This CWE relates to network socket operations and port binding, which is not relevant to smart contract code. No network socket operations are present.\n\n3. **CWE-672 (Operation on a Resource after Expiration or Release)**: This is the most relevant CWE for this codebase. I identified a critical vulnerability in the `exchange_callback_post_withdraw` function. When a withdrawal fails (PromiseResult::Failed), the code attempts to re-deposit tokens back to the user's account. However, there's a problematic flow:\n   - The `withdraw` function removes tokens from the account and saves it\n   - If the external transfer fails, `exchange_callback_post_withdraw` tries to deposit back\n   - If the deposit fails due to storage issues, the code logs an error but doesn't save the account state\n   - The tokens are then sent to \"lostfound\" via `internal_lostfound`\n   - However, the account object that was modified (attempted deposit) is not properly handled - it's left in an inconsistent state\n   - The comment \"we can just leave it without insert, won't cause storage collection inconsistency\" is concerning as it suggests operating on an account object that may have been partially modified but not persisted\n\n4. **CWE-415 (Double Free)**: While Rust's ownership system prevents traditional double-free vulnerabilities, I examined the code for logical equivalents. The `unregister` function removes tokens from both `legacy_tokens` and `tokens` collections, but this is intentional cleanup, not a double-free issue. The `withdraw` function also removes from `legacy_tokens` and inserts into `tokens`, which is a migration pattern, not a double-free.\n\n5. **CWE-826 (Premature Release of Resource During Expected Lifetime)**: I found a potential issue related to this. In the `exchange_callback_post_withdraw` function, when handling a failed withdrawal, if the account doesn't have enough storage or doesn't exist, the tokens are moved to lostfound. However, the account object that was retrieved and potentially modified is abandoned without proper cleanup or state restoration. This represents a premature release of the account resource while it's still in an inconsistent state.\n\nThe most significant finding is the resource management issue in the callback function where an account object is operated on after it should have been properly handled or released.\n",
+            "findings": [
+                {
+                    "title": "Operation on Account Resource After Failed State Update",
+                    "description": "In the `exchange_callback_post_withdraw` function, when a withdrawal promise fails and the re-deposit to the user's account also fails due to insufficient storage, the code retrieves and modifies an Account object but then abandons it without proper state management. The account is retrieved via `internal_get_account`, an attempted deposit is made via `deposit_with_storage_check`, and if this fails, the modified account object is left in an inconsistent state without being saved or properly released. The comment 'we can just leave it without insert' suggests intentional operation on a resource that should have been released or properly handled. This could lead to state inconsistencies and potential loss of funds if the account object's state is partially modified but not persisted.",
+                    "category": "CWE-672",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Premature Abandonment of Account Resource in Failed Withdrawal Recovery",
+                    "description": "The `exchange_callback_post_withdraw` function prematurely abandons the Account resource when recovery from a failed withdrawal is unsuccessful. After retrieving the account and attempting to re-deposit tokens, if the deposit fails, the account object (which may have been partially modified during the deposit attempt) is simply dropped without proper cleanup or state restoration. The tokens are then moved to lostfound, but the account's state remains uncertain. This premature release of the account resource while it's still in an active transaction flow violates the expected lifetime of the resource and could lead to inconsistent state management.",
+                    "category": "CWE-826",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-410",
+            "CWE-487",
+            "CWE-118",
+            "CWE-501",
+            "CWE-911",
+            "CWE-610",
+            "CWE-704",
+            "CWE-400",
+            "CWE-673",
+            "CWE-668",
+            "CWE-404",
+            "CWE-666",
+            "CWE-913",
+            "CWE-1329",
+            "CWE-580",
+            "CWE-662",
+            "CWE-496",
+            "CWE-669",
+            "CWE-372",
+            "CWE-922",
+            "CWE-1229",
+            "CWE-495",
+            "CWE-706",
+            "CWE-665",
+            "CWE-221"
+        ],
+        [
+            "CWE-593",
+            "CWE-605",
+            "CWE-672",
+            "CWE-415",
+            "CWE-826"
+        ]
+    ]
+}

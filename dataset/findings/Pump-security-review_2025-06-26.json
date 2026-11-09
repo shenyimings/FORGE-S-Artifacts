@@ -1,0 +1,152 @@
+{
+    "path": "reports-without-source/Pump-security-review_2025-06-26.md",
+    "project_info": {
+        "url": [
+            "https://github.com/pump-fun/pump_transfer_hook"
+        ],
+        "commit_id": [
+            "042e8febfd07ac92f70dd2e2fa0fa378d2532c8c"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-06-26",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Any wallet can self-assign as super_admin for arbitrary mint",
+            "description": "This vulnerability allows any arbitrary signer to initialize the transfer hook state as the super_admin for any mint without proper authorization checks. The root cause is the lack of validation that the provided super_admin has any legitimate relationship with the target mint, such as being the mint authority or freeze authority. An attacker can exploit this by front-running the legitimate team to initialize the PDA for a given mint, effectively taking control of the whitelist system. Once initialized, the attacker can permanently disable the whitelist using toggle_off_transfer_whitelist, which is a one-way operation. This results in a complete loss of control over the token's transfer restrictions, leading to unauthorized transfers and potential token distribution abuse. The impact is considered medium because it compromises the intended access control mechanism but does not directly lead to theft of funds from other users.\n",
+            "severity": "medium",
+            "location": [
+                "InitializeExtraAccountMeta::initialize_extra_account_metas_ix"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Token programs required in struct yet not utilized",
+            "description": "The InitializeExtraAccountMeta struct includes token_program and associated_token_program as required accounts, but these programs are not used within the initialize_extra_account_metas_ix instruction. The root cause is unnecessary inclusion of these accounts in the instruction context without actual usage in the logic. While this does not introduce a direct security risk or functional flaw, it reduces code clarity and may mislead developers into assuming these programs are involved in the execution. An attacker cannot exploit this directly, but it contributes to code bloat and maintenance overhead. The impact is low, limited to reduced readability and potential confusion during future development or audits.\n",
+            "severity": "low",
+            "location": [
+                "InitializeExtraAccountMeta"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "Lacks a mechanism for modifying/removing whitelist entries",
+            "description": "The contract allows the admin to add addresses to the whitelist via add_whitelist_ix but does not provide any function to remove or modify existing entries. The root cause is the absence of a corresponding remove_whitelist_ix or update_whitelist_ix function. If a whitelisted address becomes compromised or malicious, the admin has no way to revoke its privileges, leaving the system exposed to unauthorized transfers from that address. This creates a permanent security risk once a bad actor is added, either intentionally or by mistake. The impact is low to medium depending on the sensitivity of the token, as it could lead to ongoing unauthorized transfers, but it does not allow fund extraction from arbitrary accounts.\n",
+            "severity": "low",
+            "location": [
+                "TransferHookState::add_whitelist_ix"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "add_whitelist_ix does not check for duplicate addresses",
+            "description": "The add_whitelist_ix function does not validate whether the address being added already exists in the whitelisted_wallets array. The root cause is the lack of a duplicate check before insertion. This allows the admin to accidentally or intentionally insert the same address multiple times, consuming multiple whitelist slots. Given the whitelist has a fixed size, this can lead to exhaustion of available slots, preventing legitimate addresses from being added. There is no mechanism to remove or replace entries, so the only recovery path is to abandon the current state. The impact is low, primarily affecting operational efficiency and whitelist management.\n",
+            "severity": "low",
+            "location": [
+                "TransferHookState::add_whitelist_ix"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Pre-hook transfer window allows unrestricted token movement",
+            "description": "There is a race condition during deployment where tokens can be transferred before the Transfer-Hook extension is fully initialized. The root cause is the separation of mint creation and extra_account_meta_list initialization into different transactions. If tokens are minted or transferred between these steps, those transfers bypass the whitelist enforcement because the hook is not yet active. An attacker or malicious actor could exploit this window to acquire tokens in non-whitelisted wallets, undermining the entire purpose of the whitelist. The impact is low to medium depending on the deployment timeline, as it enables unauthorized distribution but requires precise timing. The recommendation is to perform mint creation, initialization, and hook setup atomically or freeze the mint until setup is complete.\n",
+            "severity": "low",
+            "location": [
+                "Mint::create",
+                "extra_account_meta_list::initialize"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "TransferHookState account is over-allocated by 8 bytes",
+            "description": "The TransferHookState account is initialized with an extra 8 bytes due to a double inclusion of the account header size. The root cause is the explicit addition of 8 bytes in the account initialization macro while the TransferHookState::SIZE constant already includes the 8-byte discriminator. This results in an allocation of 689 bytes instead of the required 681, wasting 8 bytes of rent per deployment. While this does not affect functionality or security, it increases the cost of deployment unnecessarily. The impact is low, limited to increased resource consumption and higher deployment fees.\n",
+            "severity": "low",
+            "location": [
+                "TransferHookState::SIZE",
+                "#[account(init, space = 8 + TransferHookState::SIZE, ...)]"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Bypass token-account address whitelisting with SetAuthority",
+            "description": "The check_transfer_account function validates transfers based on the token account's address rather than its owner. The root cause is the use of source_token.key() instead of source_token.owner for whitelist verification. Since SPL Token allows account owners to change the authority of their token account via SetAuthority, a whitelisted account can transfer ownership to any arbitrary public key without changing the account address. After the change, the new owner can initiate transfers that pass the whitelist check because the account address remains the same. This allows whitelisted users to delegate or sell their transfer privileges to unauthorized parties, completely bypassing the access control system. The impact is medium, as it undermines the security model and enables unauthorized transfers without requiring additional privileges or funds.\n",
+            "severity": "low",
+            "location": [
+                "check_transfer_account"
+            ],
+            "files": []
+        }
+    ]
+}

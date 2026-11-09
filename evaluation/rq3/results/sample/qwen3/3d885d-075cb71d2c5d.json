@@ -1,0 +1,70 @@
+{
+    "project": "Raum Network Audit Report - QuillAudits.pdf.json",
+    "files": [
+        "dataset/contracts/Raum Network Audit Report - QuillAudits.pdf.json/corecontracts/token/src/balance.rs",
+        "dataset/contracts/Raum Network Audit Report - QuillAudits.pdf.json/corecontracts/token/src/allowance.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-284"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Possibility of overflow and underflow when performing arithmetic operations",
+            "description": "1. **Description:** Several functions in the codebase use native arithmetic operations (+, -) without bounds checking, creating potential for integer overflow or underflow.\n2. **Cause:** The use of unchecked arithmetic in functions like `receive_balance`, `spend_balance`, `spend_allowance`, and `add_pair_to_all_pairs` can result in unexpected behavior when values exceed i128 limits or go below zero.\n3. **Exploitation:** An attacker could craft transactions that cause balances or counters to overflow or underflow, potentially leading to incorrect state updates or denial of service.\n4. **Impact:** This could result in corrupted state, incorrect balance tracking, or contract malfunction, though the risk is mitigated as the issue has been resolved.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code consists of two modules: `balance.rs` and `allowance.rs`, which manage token balances and spending allowances in a Soroban smart contract. After analyzing the code with respect to the specified CWEs, the following observations are made:\n\n1. In `balance.rs`, the functions `receive_balance` and `spend_balance` do not perform any access control checks. They are public and allow any caller to increase or decrease an account's balance, which constitutes improper access control (CWE-284). Specifically:\n   - `receive_balance` lets any party arbitrarily inflate any account's balance without authorization.\n   - `spend_balance` allows deduction from an account only if the balance is sufficient, but it does not verify that the caller is authorized to spend the funds (e.g., the account owner or an approved spender). This enables unauthorized spending if not properly guarded at the caller level.\n\n2. In `allowance.rs`, the `write_allowance` function allows setting an allowance with an expiration in the past when `amount == 0`. While it checks for `amount > 0 && expiration_ledger < e.ledger().sequence()`, it does not prevent setting a past `expiration_ledger` when `amount == 0`. This could lead to inconsistent state or confusion, but since zero allowances are effectively no allowance, this is not critical. However, the lack of validation symmetry introduces a logic inconsistency.\n\n3. The `spend_allowance` function correctly reads the allowance and checks expiration in `read_allowance`, but when spending, it calls `write_allowance` with the updated amount and the **original** `expiration_ledger`. This preserves the original expiration, which is correct. However, if the updated allowance is zero, the contract does not remove the allowance entry or reduce TTL, potentially leading to unnecessary storage use. While not a direct security flaw, it affects resource lifecycle control.\n\n4. The `write_allowance` function extends TTL only when `amount > 0`. This is correct behavior, but if an allowance is reduced to zero, the entry remains until TTL expires. This is a minor inefficiency but not a vulnerability.\n\n5. No arithmetic overflows are possible due to the use of `i128` and proper checks, and no exceptions are mishandled due to use of `panic_with_error!`. The comparisons in `read_allowance` and `spend_allowance` are correct.\n\nThe primary security issue is the lack of access control in balance modification functions.\n",
+            "findings": [
+                {
+                    "title": "Lack of Access Control in Balance Modification Functions",
+                    "description": "The functions `receive_balance` and `spend_balance` in `balance.rs` do not verify that the caller is authorized to modify the specified account's balance. This allows any user to arbitrarily increase or decrease another user's balance, leading to unauthorized minting and spending of tokens. This is a critical vulnerability stemming from improper access control (CWE-284).",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.99
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code implements balance and allowance management for a token-like contract on the Soroban platform. After analyzing the code with respect to the specified CWEs, no direct vulnerabilities are found in the provided functions. The functions `receive_balance`, `spend_balance`, and those in the allowance module properly manage balances and allowances using the Soroban SDK's storage and access control patterns. \n\nHowever, it is important to note that access control (e.g., ensuring only the rightful owner can spend) is likely enforced at the caller level (not shown in this code). The `spend_balance` function is public and only checks for sufficient balance, but does not authenticate or authorize the caller. Similarly, `receive_balance` can be called by anyone to increase an account's balance. These functions are likely intended to be used internally or behind authorization checks in a higher-level contract.\n\nDespite these design considerations, none of the listed CWEs are directly violated in the provided code because:\n- There is no evidence of improper ownership (CWE-282) — ownership is likely managed via `Address`.\n- Privilege and authorization checks (CWE-269, CWE-285) may be handled externally.\n- No authentication of callers is performed in these functions, but they appear to be low-level helpers, not exposed entry points.\n- No dangerous methods are exposed without restriction in a way that violates CWE-749, assuming proper use by a controlling contract.\n- No mutable attestation, security tokens, user management, or communication channel issues are present in this snippet.\n\nTherefore, no actionable vulnerabilities from the listed CWEs are present in the isolated code.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-282",
+            "CWE-269",
+            "CWE-287",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1270",
+            "CWE-286",
+            "CWE-1280",
+            "CWE-346",
+            "CWE-923",
+            "CWE-1267"
+        ]
+    ]
+}

@@ -1,0 +1,67 @@
+{
+    "project": "2022-02-anchor.md.json",
+    "files": [
+        "dataset/contracts/2022-02-anchor.md.json/contracts/anchor-token-contracts/contracts/community/src/contract.rs",
+        "dataset/contracts/2022-02-anchor.md.json/contracts/money-market-contracts/contracts/market/src/contract.rs",
+        "dataset/contracts/2022-02-anchor.md.json/contracts/anchor-token-contracts/contracts/distributor/src/contract.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-664",
+        "CWE-755",
+        "CWE-703",
+        "CWE-710",
+        "CWE-248",
+        "CWE-1041",
+        "CWE-372"
+    ],
+    "cwe_detected": [
+        "CWE-284"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Spend limit on owner can be bypassed",
+            "description": "The spend limit set on the owner in the distributor and community contracts can be bypassed because the config.spend_limit value is never decreased after a successful spend operation. This lack of decrement logic allows the owner to repeatedly call the spend function with amounts up to the spend limit, effectively spending an unlimited total amount. The root cause is the missing state update to reduce the spend limit after each transaction. An attacker (or malicious owner) could exploit this by sending multiple transactions, each for the full spend limit, thereby bypassing the intended restriction. The impact includes potential loss of funds from the contract due to unbounded spending by the owner, undermining the security model that relies on spend limits for protection.\n"
+        },
+        {
+            "title": "community contract :: execute function",
+            "description": "1. **Description:** The `execute` function in the community contract handles governance actions such as `UpdateConfig` and `Spend`. Currently, governance authorization checks are implemented separately within each handler.\n2. **Cause:** Redundant access control checks are performed inside individual functions instead of being centralized at the entry point (`execute`).\n3. **Exploitation:** While not directly exploitable, this design increases code complexity and the risk of inconsistent permission enforcement.\n4. **Impact:** It leads to code duplication and reduced maintainability. Centralizing the governance check in `execute` would improve code clarity and reduce the likelihood of future security flaws due to missing checks.\n"
+        },
+        {
+            "title": "money-market-contracts/contracts/market claim_rewards may revert due to spend_limit set on distributor",
+            "description": "The `claim_rewards` function in the market contract calls `distributor_contract#spend()`, which reverts if the requested amount exceeds the `spend_limit`. The root cause is the hard cap enforced by the distributor contract without dynamic adjustment or user-controlled partial claims. An attacker cannot directly exploit this, but users may be unable to claim rewards once the limit is reached, especially after large accruals. This results in a denial of service for reward claiming, leading to loss of yield until the limit is increased by an admin.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "We analyzed three contract files. The first and third contracts have proper access controls. However, in the second contract (market contract), the function `register_contracts` does not check that the caller is the owner, allowing any user to set the contracts (overseer, interest_model, etc.) if they are currently uninitialized. This is an access control issue (CWE-284). Other potential issues were examined but deemed not critical or not matching the provided CWEs.\n",
+            "findings": [
+                {
+                    "title": "Missing Access Control in register_contracts Function",
+                    "description": "The function `register_contracts` in the market contract lacks an access control check to verify the caller is the owner. This allows any user to set the contracts (overseer_contract, interest_model, distribution_model, collector_contract, distributor_contract) if they are currently uninitialized, leading to unauthorized control of the contract's critical components.",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.95
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

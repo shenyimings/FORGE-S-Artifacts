@@ -1,0 +1,197 @@
+{
+    "path": "reports/Hacken_Sallar.md",
+    "project_info": {
+        "url": "https://github.com/Sallar-Labs/Sallar",
+        "commit_id": "787caf381e11f75151a34dac0bed5f3cce8bb8d5",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-08-09",
+        "project_path": "contracts/Hacken_Sallar.md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Incorrect Value",
+            "description": "1. **Description:** The contract contains several hardcoded values that do not match their documented specifications. This includes DUSTSPERBLOCK, initialtokendistribution, and various literals in the final_mining section, as well as constants in token_math.rs such as FIRST_BP, TOPBOOSTREDUCTION, and others. These discrepancies affect the intended economic model and token distribution.\n2. **Cause:** The root cause is incorrect literal values being used in the code compared to what is specified in the documentation. This may stem from unit conversion errors (e.g., treating 20 as 20,000) or precision mismatches in floating-point constants.\n3. **Exploitation:** An attacker or malicious actor could exploit the misunderstanding of these values to manipulate expectations around token supply, mining rewards, or staking yields, especially if external systems (e.g., frontends, oracles) rely on the documented values.\n4. **Impact:** The impact is critical as it undermines the entire tokenomics model, potentially leading to incorrect token issuance, loss of trust, and financial discrepancies in downstream integrations.\n",
+            "severity": "critical",
+            "files": [
+                "programs/sallar/src/lib.rs",
+                "programs/sallar/src/token_math.rs"
+            ],
+            "location": [
+                "lib.rs",
+                "token_math.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Stuck Funds",
+            "description": "1. **Description:** The final staking account releases only 0.1% of its balance per cycle, with each cycle taking at least 20 hours. Due to this small release rate, the vast majority of funds remain locked for an extremely long time\u2014e.g., 1000 days to withdraw 70%, and up to 10,000 days for 99.5%.\n2. **Cause:** The root cause is a design decision to use a fixed small percentage per cycle without providing alternative withdrawal mechanisms or acceleration paths.\n3. **Exploitation:** While not directly exploitable by an attacker, malicious or negligent operators could use this mechanism to effectively freeze user funds indefinitely, creating a liquidity trap.\n4. **Impact:** The impact is high, especially if large amounts of funds accumulate in the final staking account, as users would face severe delays in accessing their assets, leading to potential loss of funds in practice.\n",
+            "severity": "high",
+            "files": [
+                "programs/sallar/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#236"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Unset Or Unsettable Token Metadata",
+            "description": "1. **Description:** The SPL token mint for the Sallar token is managed by a PDA, and while mint authority is correctly secured, the program does not set token metadata (e.g., name, symbol, URI) nor allows it to be set post-deployment.\n2. **Cause:** The program lacks a function to initialize or update the metadata via the Metaplex Token Metadata standard or similar.\n3. **Exploitation:** Attackers cannot directly exploit this, but the absence of metadata prevents proper integration with wallets, explorers, and exchanges, reducing usability and trust.\n4. **Impact:** The impact is high due to the critical role metadata plays in token discoverability and ecosystem integration. Without it, the token may be rejected by major platforms.\n",
+            "severity": "high",
+            "files": [
+                "programs/sallar/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Missing Validation & Corrupted Data",
+            "description": "1. **Description:** Functions that convert between u64 and f64, such as convert_u64_to_f64_safely, are prone to rounding errors for large integers (above 2^53), leading to data corruption.\n2. **Cause:** The inherent limitation of f64 precision combined with lack of proper clamping or error handling in conversion logic.\n3. **Exploitation:** An attacker could provide large numerical inputs that get silently rounded, leading to incorrect calculations in critical financial logic (e.g., rewards, balances).\n4. **Impact:** The impact is medium, as it could result in financial miscalculations, though the likelihood is low due to the high threshold for triggering the issue.\n",
+            "severity": "medium",
+            "files": [
+                "programs/sallar/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1077"
+                ]
+            },
+            "title": "Denial Of Service State",
+            "description": "1. **Description:** The program uses f64 for calculations and compares results directly to exact values without accounting for floating-point precision errors, which can cause state transitions to fail on valid inputs.\n2. **Cause:** Direct equality checks on imprecise floating-point results without using tolerance (epsilon) comparisons.\n3. **Exploitation:** An attacker could craft inputs that result in precision drift, causing legitimate transactions to fail, effectively denying service.\n4. **Impact:** The impact is medium, as it could disrupt normal operation, though workarounds may exist through artificial input crafting, which may require off-chain manipulation.\n",
+            "severity": "medium",
+            "files": [
+                "programs/sallar/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Missing Validation",
+            "description": "1. **Description:** The contract accepts PDA bump seeds (e.g., mint_nonce, top_block_nonce) as arbitrary arguments without validating they are the correct derived values.\n2. **Cause:** Lack of validation that the provided nonce matches the actual bump seed from Program Derived Address derivation.\n3. **Exploitation:** An attacker could pass incorrect nonces, leading to the creation of invalid PDAs and subsequent state corruption that cannot be recovered.\n4. **Impact:** The impact is medium, as it can lead to irreversible state corruption and denial of service for future operations, though the likelihood is low due to the need for incorrect inputs.\n",
+            "severity": "medium",
+            "files": [
+                "programs/sallar/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ]
+            },
+            "title": "Immutable Ownership",
+            "description": "1. **Description:** The contract does not allow ownership transfer, making it impossible to update the owner address even in emergency situations.\n2. **Cause:** The ownership model is hardcoded without a function to transfer or renounce ownership.\n3. **Exploitation:** If the current owner key is lost or compromised, there is no way to recover control, leading to permanent loss of governance.\n4. **Impact:** The impact is medium, as it affects long-term maintainability and security response capability, though it does not directly lead to fund loss.\n",
+            "severity": "medium",
+            "files": [
+                "programs/sallar/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Invalid Hardcoded Value",
+            "description": "1. **Description:** The constant REDUCTION_INVERSE has a value that differs from its documented specification and is not exactly representable in f64, leading to silent rounding.\n2. **Cause:** The use of a decimal literal that cannot be precisely represented in binary floating-point format, combined with incorrect documentation.\n3. **Exploitation:** Could lead to subtle miscalculations in economic functions relying on this constant, especially over time or at scale.\n4. **Impact:** The impact is medium due to potential long-term deviation from expected behavior, though the immediate financial impact is low.\n",
+            "severity": "medium",
+            "files": [
+                "programs/sallar/src/lib.rs",
+                "programs/sallar/src/token_math.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Inconsistent Data",
+            "description": "1. **Description:** The constant FINAL_STAKING_ACCOUNT_BALANCE_PART_FOR_STAKING_DIVISION_FACTOR was changed from f64 to u64 to avoid unnecessary conversions, but the related conversion logic was not removed, leading to redundant code.\n2. **Cause:** Incomplete refactoring where type changes were made without cleaning up associated conversion code.\n3. **Exploitation:** While not directly exploitable, redundant conversions increase complexity and risk of future bugs.\n4. **Impact:** The impact is low, as it does not affect security or correctness directly, but harms code maintainability and clarity.\n",
+            "severity": "low",
+            "files": [
+                "programs/sallar/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        }
+    ]
+}

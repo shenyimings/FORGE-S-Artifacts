@@ -1,0 +1,754 @@
+{
+    "path": "reports/VAR_MoonBite_240103_OfficialR.pdf",
+    "project_info": {
+        "url": "https://github.com/Phoenix-Protocol-Group/phoenix-contracts",
+        "commit_id": "d65eef7",
+        "address": [],
+        "chain": "soroban",
+        "compiler_version": "n/a",
+        "audit_date": "2024-01-18",
+        "project_path": "contracts/VAR_MoonBite_240103_OfficialR.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Incorrect access control when updating pool configuration",
+            "description": "The update_config function in the pool contract checks if the sender parameter matches the admin, but the sender is derived from a function argument rather than being authenticated through Soroban's authorization system. This design flaw allows any user to pass the admin's address as the sender parameter without proving ownership or authorization. As a result, an attacker can bypass access control and modify critical pool configurations. This leads to a complete loss of administrative integrity, enabling unauthorized changes to the pool's behavior.\n",
+            "severity": "critical",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.update_config"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Pool contract can be drained due to negative referral fee",
+            "description": "The do_swap function applies the referral_fee without validating that it is non-negative. Since the referral_fee_amount is calculated using a signed integer (i128), a negative fee results in a negative amount, which when subtracted from return_amount, effectively increases it. An attacker can exploit this by providing a negative referral fee to inflate the return amount beyond legitimate values. This allows the attacker to extract more tokens than they should, potentially draining the pool of its assets over repeated transactions.\n",
+            "severity": "critical",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.do_swap"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "Unbounded instance storage",
+            "description": "The factory contract uses instance storage to maintain a growing list of liquidity pools via save_lp_vec and save_lp_vec_with_tuple_as_key. Instance storage in Soroban has strict size limitations and becomes increasingly expensive as it grows. Since the number of pools is unbounded, the storage can eventually reach the network's per-transaction limit (130 KB), preventing the creation of new pools. This creates a denial-of-service condition where the factory becomes unusable after a certain number of deployments, undermining the system's scalability.\n",
+            "severity": "high",
+            "files": [
+                "contracts/factory/src/storage.rs"
+            ],
+            "location": [
+                "storage.rs.save_lp_vec",
+                "storage.rs.save_lp_vec_with_tuple_as_key"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Factory can be made to deploy malicious pools",
+            "description": "The create_liquidity_pool function allows users to specify the lp_wasm_hash, which determines the contract code to be deployed. This user-controlled input enables deployment of arbitrary or malicious code under the factory's authority. Similarly, the initialize function in the LiquidityPool contract accepts token_wasm_hash and stake_wasm_hash from user input, risking initialization of unauthorized contracts. This undermines trust in the platform, as users expect only verified, secure code to be deployed, and opens the door to impersonation and fund theft.\n",
+            "severity": "high",
+            "files": [
+                "contracts/factory/src/contract.rs",
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.create_liquidity_pool",
+                "contract.rs.initialize"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "Deployment of pools can be front-runned",
+            "description": "The factory contract allows any user to create a liquidity pool for any token pair, and only one pool per pair is permitted. Since the pool address is derived from the token pair and deployer, a malicious actor can preempt legitimate creators by deploying a pool first. This prevents the actual token creators from launching their intended pool, effectively blocking their access to the ecosystem. This race condition enables front-running attacks that disrupt fair and permissionless access to the protocol.\n",
+            "severity": "high",
+            "files": [
+                "contracts/factory/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.create_liquidity_pool"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "The usage of assert_max_spread assume pool tokens have the same amount of decimals",
+            "description": "The assert_max_spread function assumes that the offer and return amounts have the same decimal precision when calculating expected returns using belief_price. However, if the tokens involved have different decimals, the calculation becomes incorrect. For example, a 1:1 belief price (1e18) applied to tokens with different decimals will either cause an unnecessary panic due to perceived excessive spread or allow an unfavorable swap. This leads to incorrect slippage protection and potential financial loss for users.\n",
+            "severity": "high",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.do_swap",
+                "contract.rs.assert_max_spread"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Any user can DoS important functionality of the stake contract",
+            "description": "The create_distribution_flow function in the stake contract lacks access control, allowing any user to create new distributions. Other critical functions like bond and distribute_rewards iterate over all distributions in a loop. As the number of distributions grows unbounded, these operations become increasingly gas-intensive and may eventually exceed transaction limits. A malicious user can exploit this by creating a large number of distributions, causing a denial of service for legitimate users trying to interact with the staking system.\n",
+            "severity": "high",
+            "files": [
+                "contracts/stake/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.create_distribution_flow"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Unbound breaks the reward distribution",
+            "description": "When a user unbonds part of their stake, the reward calculation still includes shares_correction and withdrawn_rewards associated with that stake. These values are not adjusted upon unbinding, leading to incorrect reward computations. As a result, users may receive fewer rewards than expected or no rewards at all, even for active stakes. This flaw breaks the integrity of the reward distribution mechanism and undermines user trust in the staking system.\n",
+            "severity": "high",
+            "files": [
+                "contracts/stake/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.unbound"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect return_amount in stable pool",
+            "description": "The compute_swap function in the stable pool contract fails to subtract the commission_amount from the return_amount before returning it. This causes the do_swap function to transfer more tokens to the user than intended, as the commission is not deducted from the output. Over time, this results in a gradual loss of funds from the pool, directly impacting its solvency and leading to financial losses for liquidity providers.\n",
+            "severity": "high",
+            "files": [
+                "contracts/pool_stable/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.compute_swap"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Split deposit should target the new pool ratio",
+            "description": "The split_deposit_based_on_pool_ratio function calculates the deposit split based on the pool ratio before the swap occurs. However, after the swap, the ratio changes, making the initial calculation inaccurate. This causes users to receive fewer LP shares than they should, resulting in equity loss even in a fee-less environment. The current binary search method is both inefficient and imprecise, leading to suboptimal user outcomes.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.split_deposit_based_on_pool_ratio"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-1325"
+                ]
+            },
+            "title": "Soroban Storage DoS Pattern in Factory contract",
+            "description": "The create_liquidity_pool function loads the entire lp_vec from storage, which grows with each new pool. This unbounded vector is included in the transaction footprint, and as it grows, the cost of loading it increases. Eventually, the vector will exceed the 130 KB per-transaction read limit, making pool creation impossible. This creates a denial-of-service condition that limits the scalability of the factory contract, despite being acknowledged by the developers.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/factory/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.create_liquidity_pool"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "The do_swap function only allows belief prices down to 1%",
+            "description": "The do_swap function converts belief_price using Decimal::percent, which only allows values down to 1% (1e16). For token pairs with price ratios below 1%, such as USDC/ETH (~0.03%), users cannot set a belief price that accurately reflects the market, leaving them without proper slippage protection. This reduces the usability of the swap function for low-ratio pairs and increases the risk of unfavorable trades.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.do_swap"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Multihop swaps do not allow to express belief price for all the swap operations",
+            "description": "The multihop swap function only accepts a single belief_price for the entire swap path, rather than individual prices for each hop. This limits the user's ability to set precise slippage tolerance for each leg of the swap, increasing the risk of partial execution or unfavorable rates in volatile markets. Without per-hop control, users are exposed to higher financial risk during complex swaps.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/multihop/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.swap"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect assignment of total_fee_bps",
+            "description": "The query_pool_info_for_factory function incorrectly assigns max_allowed_spread_bps to total_fee_bps, which is misleading because these values represent different concepts. total_fee_bps should reflect the actual swap fee, not the maximum allowed spread. This misassignment can cause third-party applications and users to make incorrect assumptions about transaction costs, potentially affecting trading strategies and integration logic.\n",
+            "severity": "low",
+            "files": [
+                "contracts/factory/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.query_pool_info_for_factory"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Invalid value returned by total_comission_amount",
+            "description": "The simulate_swap and simulate_reverse_swap functions sum commission amounts across different tokens into a single total_commission_amount. Since commissions are denominated in different tokens, adding them together produces a meaningless aggregate value. This misleads users about the true cost of multihop swaps and reduces transparency. The value is not useful for decision-making and can cause confusion.\n",
+            "severity": "low",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.simulate_swap",
+                "contract.rs.simulate_reverse_swap"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "User can accidentally swap the wrong asset",
+            "description": "Functions like do_swap and simulate_swap use a conditional check to determine pool balances based on whether the offer_asset is token_a or token_b. If the asset is neither, it defaults to treating it as token_b. This allows a user to accidentally swap a third token (token_c) if they interact with the wrong pool, leading to loss of funds. The lack of explicit validation increases the risk of user error and fund loss due to incorrect asset handling.\n",
+            "severity": "low",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.do_swap",
+                "contract.rs.simulate_reverse_swap",
+                "contract.rs.simulate_swap",
+                "contract.rs.split_deposit_based_on_pool_ratio"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-1325"
+                ]
+            },
+            "title": "Soroban storage limitation discourages staking",
+            "description": "The BondingInfo structure stores a vector of individual stakes, which grows with each bond operation. As this vector expands, the storage cost for each subsequent transaction increases, eventually approaching the transaction limit. This makes staking progressively more expensive and may deter users from making multiple stakes. Although the timestamps are unused after creation, the current design unnecessarily penalizes active users.\n",
+            "severity": "low",
+            "files": [
+                "contracts/stake/src/storage.rs"
+            ],
+            "location": [
+                "storage.rs.BondingInfo"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect computation of return amount",
+            "description": "The do_swap function passes the sum of return_amount and commission_amount to assert_max_spread, but omits the referral_fee_amount. This underestimates the total output, leading to incorrect spread validation. As a result, the spread check may pass when it should fail, allowing larger-than-allowed slippage. This weakens the slippage protection mechanism and exposes users to greater financial risk during swaps.\n",
+            "severity": "low",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.do_swap"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing max_spread validation",
+            "description": "The do_swap function does not validate that max_spread is non-negative or within the allowed limit (config.max_allowed_spread_bps). If max_spread is negative, assert_max_spread will always fail; if it exceeds the allowed limit, it may allow excessive slippage. This lack of input validation undermines the safety of the swap function and can lead to unexpected behavior or loss of funds.\n",
+            "severity": "low",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs.do_swap"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Incorrect decimals assertion",
+            "description": "The `from_str` function in the DECIMAL crate incorrectly implements an assertion for fractional digits. The assertion `assert!(exp <= Self::DECIMAL_PLACES, \"Too many fractional digits\")` is a tautology because `exp` is calculated as `Self::DECIMAL_PLACES - fractional_part.len()`, and since `fractional_part.len()` is non-negative, `exp` will always be less than or equal to `DECIMAL_PLACES`. This renders the check ineffective and allows for a negative `exp` value to pass, which is later cast to `u32` in the `pow` function, potentially causing a panic due to overflow. The root cause is flawed logic in the condition, where the assertion should instead verify that `exp >= 0` to ensure valid exponentiation. An attacker could potentially trigger a denial of service by providing a string with more than 18 fractional digits, leading to a panic during the `pow` operation. However, the immediate impact is limited due to input length constraints and parsing safeguards.\n",
+            "severity": "informational",
+            "files": [
+                "packages/decimal/src/lib.rs"
+            ],
+            "location": [
+                "from_str#2-6"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ]
+            },
+            "title": "Incorrect event topic when providing liquidity",
+            "description": "In the `provide_liquidity` function, an event is published with an incorrect topic. Specifically, the fourth event uses the topic `(\"provide_liquidity\", \"token_a\")` for `config.token_b`, which mislabels the emitted data. This is caused by a copy-paste error in the event publishing logic where the same topic key `\"token_a\"` is reused for both tokens. An attacker cannot directly exploit this for financial gain, but a malicious or misconfigured frontend relying on event topics could misinterpret which token was deposited, leading to incorrect state representation or user confusion. The impact is primarily on observability and integration correctness, as downstream services may index or react to events based on these topics.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "provide_liquidity#8"
+            ]
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "Max referral fee cannot be changed",
+            "description": "The `update_config` function in the pool contract does not allow the admin to modify the `max_referral_bps` parameter after initialization. This limitation arises because the configuration update logic omits this field from the updateable parameters. The root cause is an incomplete implementation of the configuration update mechanism, likely due to oversight during development. As a result, if the initial value for `max_referral_bps` is set suboptimally, it cannot be adjusted later without redeploying the contract. This reduces the protocol's flexibility and long-term maintainability, especially in response to changing market conditions or incentive models. While not directly exploitable, it represents a governance limitation that could hinder operational agility.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "update_config"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing, incomplete, or redundant basis-point range checks",
+            "description": "The contract fails to consistently validate basis-point (bps) values such as `max_allowed_spread_bps`, `max_allowed_slippage_bps`, `max_referral_bps`, and `total_fee_bps`, which are expected to be in the 0\u201310,000 range. Some checks are missing entirely, others are partial (e.g., checking only the upper bound), and some are redundantly applied (e.g., `swap_fee_bps` checked twice). This inconsistency stems from ad-hoc validation logic instead of a centralized, reusable validation function. An attacker could potentially initialize or update the pool with negative or excessively high bps values if validation is bypassed, leading to economically unsound configurations such as negative fees or infinite spreads. The impact includes potential protocol instability, incorrect fee calculations, and loss of user trust due to unpredictable behavior.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "initialize",
+                "update_config"
+            ]
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-570"
+                ]
+            },
+            "title": "Deployer redundancies",
+            "description": "The functions `deploy_stake_contract` and `deploy_lp_contract` contain a redundant check where `deployer != e.current_contract_address()` is evaluated, but `deployer` is assigned from `e.current_contract_address()`, making the condition always false. This dead code serves no purpose and introduces unnecessary complexity. The root cause is a logical error in the conditional check, likely due to a misunderstanding of the execution context. While this does not introduce a direct security vulnerability, it reduces code clarity and increases the risk of future bugs during maintenance. Attackers cannot exploit this directly, but it reflects poor code hygiene and could mask other issues during audits or reviews.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/factory/src/contract.rs"
+            ],
+            "location": [
+                "deploy_stake_contract",
+                "deploy_lp_contract"
+            ]
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "LP token\u2019s metadata is too simple",
+            "description": "The LP token deployed during pool initialization uses hardcoded metadata: \"Pool Share Token\" for the name and \"POOL\" for the symbol, regardless of the underlying token pair (tokenA and tokenB). This lack of customization means all LP tokens appear identical, making it difficult for users and third-party services to distinguish between different liquidity pools. The root cause is the use of static strings instead of dynamically generated names based on the reserve tokens. While not a security vulnerability per se, this creates usability and trust issues, as users may be unable to verify they are interacting with the correct pool, increasing the risk of phishing or misrouting funds. The impact is primarily on user experience and ecosystem integration.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "initialize"
+            ]
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "LP token\u2019s decimals should be constant",
+            "description": "The `create_liquidity_pool` function allows user input to determine the number of decimals for the LP token, rather than enforcing a fixed value. This design choice introduces variability in LP token precision across different pools, which can lead to inconsistencies in how balances are displayed and calculated by wallets, DEXs, and analytics platforms. The root cause is the lack of a standardized decimal policy in the factory contract. The impact includes potential integration issues, incorrect balance rendering, and increased complexity for frontends that must handle variable decimal places. A constant decimal value (e.g., 7 or 8) would improve interoperability and reduce the risk of errors in downstream applications.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/factory/src/contract.rs"
+            ],
+            "location": [
+                "create_liquidity_pool"
+            ]
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Compilation errors",
+            "description": "The code at commit `384c8cf` fails to compile due to errors in the `contracts/pool_stable/` module. This indicates the presence of syntactic or semantic errors in the source code, such as missing dependencies, type mismatches, or incorrect function signatures. The root cause is likely incomplete or untested changes introduced during development. While the contract cannot be deployed in this state, the issue was later fixed. The impact is a complete halt in development, testing, and deployment workflows until the errors are resolved, representing a critical quality assurance failure. Compilation errors prevent any form of secure deployment and must be addressed before audit or production use.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/pool_stable/"
+            ],
+            "location": [
+                "contracts/pool_stable/"
+            ]
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Static tolerance value may lead to high imprecision for small pools",
+            "description": "The `split_deposit_based_on_pool_ratio` function uses a constant tolerance value of 500, which defines the smallest meaningful difference in deposit amounts. This static threshold does not scale with pool size, leading to significant relative imprecision in small or imbalanced pools. For example, a 500-unit tolerance in a pool with 1,000 units represents a 50% error margin. The root cause is the use of a fixed value instead of a dynamic, pool-size-relative threshold. Attackers could exploit this by manipulating deposit ratios to extract disproportionate liquidity shares, especially in low-liquidity pools. The impact includes unfair distribution of LP tokens and potential economic loss for honest depositors, undermining the fairness and reliability of the protocol.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "split_deposit_based_on_pool_ratio"
+            ]
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-191"
+                ]
+            },
+            "title": "Incorrect decimal handling in the decimal package",
+            "description": "The `to_i128_with_precision` function in the decimal package does not handle cases where the target precision exceeds the internal `decimal_places()` (which is 18). The function calculates a divisor using `10i128.pow((self.decimal_places() - precision) as u32)`, which underflows if `precision > self.decimal_places()`, resulting in a large exponent when cast to `u32`. Although currently safe due to hardcoded usage with precision 6, the function is unsafe if used with higher precision values. The root cause is missing bounds checking on the precision argument. If future code uses this function with tokens having more than 18 decimals (even though developers claim none will), it could lead to incorrect conversions, miscalculations, and potential fund loss. The impact is latent but severe if assumptions about token decimals are violated.\n",
+            "severity": "informational",
+            "files": [
+                "packages/decimal/src/lib.rs"
+            ],
+            "location": [
+                "to_i128_with_precision#5"
+            ]
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "Curve combinations become increasingly expensive",
+            "description": "In the `fund_distribution` function, reward curves are combined using a `combine` method that retains all historical points, leading to quadratic time complexity (O(n\u00b2)) due to bubble sort in the curve package. As more distributions are funded, the curve grows indefinitely, increasing both computation cost and storage overhead. The root cause is the lack of pruning logic to remove expired or irrelevant curve points. An attacker could exploit this by repeatedly funding small distributions, forcing the contract to process increasingly large curves, eventually making `fund_distribution` or related functions uneconomical to call. The impact is a potential denial-of-service via resource exhaustion, threatening the long-term sustainability of the staking mechanism.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/stake/src/contract.rs"
+            ],
+            "location": [
+                "fund_distribution"
+            ]
+        },
+        {
+            "id": 30,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Documentation and naming issues",
+            "description": "The codebase contains multiple documentation and naming inaccuracies, such as referencing non-existent parameters (`token_wasm_hash`), outdated URLs, spelling errors (\"Constan\" \u2192 \"Constant\"), doctest failures, and misleading function names like `assert_approx_ratio` which does not actually assert. These issues stem from insufficient documentation maintenance and review. While not directly exploitable, they increase the cognitive load for developers and auditors, raise the risk of misinterpretation, and may lead to incorrect assumptions during integration or modification. The impact is reduced code maintainability and increased likelihood of human error, especially in complex or safety-critical sections.\n",
+            "severity": "informational",
+            "files": [
+                "packages/phoenix/src/utils.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 31,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "Unused code and data types",
+            "description": "Several code elements are unused, including variables (`admin`, `max_distributions`, `manager`), data types (`OptionUint`), unreachable error handling (`Err(Error::Overflow)`), and entire files (`packages/phoenix/src/error.rs`). These remnants of prior development efforts clutter the codebase and increase maintenance burden. The root cause is failure to clean up during refactoring. While not a direct security risk, unused code can mislead developers, increase audit surface, and potentially introduce bugs if accidentally referenced. The impact is reduced code clarity and increased technical debt, making future development more error-prone.\n",
+            "severity": "informational",
+            "files": [
+                "packages/phoenix/src/utils.rs",
+                "packages/phoenix/src/error.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 32,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-390"
+                ]
+            },
+            "title": "Lack of validation on total_shares",
+            "description": "In the `withdraw_liquidity` function, the code checks if `total_shares` is zero to avoid division by zero when computing `share_ratio`, but does not panic or revert if it is zero. However, if `total_shares` is zero, no liquidity exists in the pool, so a withdrawal should be impossible. Allowing execution to continue silently masks a critical protocol invariant violation. The root cause is incomplete error handling logic. If a zero `total_shares` occurs due to a bug or malicious state manipulation, the function proceeds with a zero `share_ratio`, potentially leading to incorrect token transfers or silent failure. The impact is reduced fault detectability and potential for undetected protocol corruption.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "withdraw_liquidity"
+            ]
+        },
+        {
+            "id": 33,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Unchecked assumptions of get_deposit_amounts arguments",
+            "description": "The `get_deposit_amounts` function assumes that `desired_a` and `desired_b` are positive and that `min_a` and `min_b` are non-negative if present, but these preconditions are not enforced with runtime checks. The root cause is reliance on implicit assumptions rather than explicit validation. If these assumptions are violated\u2014either by buggy caller code or future modifications\u2014the function may produce incorrect deposit amounts or behave unpredictably. The impact includes potential miscalculations in liquidity provisioning, leading to user funds being deposited in unintended ratios or rejected silently. Adding explicit assertions would improve robustness and prevent misuse.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/pool/src/contract.rs"
+            ],
+            "location": [
+                "get_deposit_amounts"
+            ]
+        },
+        {
+            "id": 34,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Unnecessary referral unwrapping",
+            "description": "The `swap` function in the multihop contract unnecessarily clones and pattern-matches on the `referral` optional parameter, duplicating the `lp_client.swap` call in both `if` and `else` branches. This redundancy increases code size and complexity without benefit, as the `referral` option can be passed directly. The root cause is suboptimal use of Rust's ownership and option handling. While not a security flaw, it harms code maintainability and increases the risk of divergence between the two branches if one is updated and the other is not. The impact is primarily on code quality and long-term sustainability, making audits and modifications more difficult.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/multihop/src/contract.rs"
+            ],
+            "location": [
+                "swap"
+            ]
+        }
+    ]
+}

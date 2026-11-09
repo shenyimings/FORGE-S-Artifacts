@@ -1,0 +1,75 @@
+{
+    "project": "sherlock-presale-audit-nov-2025-50862dad540c07ca5f41ffca25e0d5bd7cab8246.pdf.json",
+    "files": [
+        "dataset/contracts/sherlock-presale-audit-nov-2025-50862dad540c07ca5f41ffca25e0d5bd7cab8246.pdf.json/programs/presale/src/presale_mode_handler/fixed_price_presale.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-1339",
+        "CWE-707",
+        "CWE-682",
+        "CWE-1284",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-284",
+        "CWE-691",
+        "CWE-664"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "registry can consume other registry supply",
+            "description": "The `get_remaining_deposit_quota` function in the fixed-price presale handler calculates deposit limits based on global and personal quotas but fails to enforce that a registry's total claimed tokens do not exceed its allocated `presale_supply`. The root cause is the missing validation check against `registry.presale_supply` when processing deposits. This allows one registry to consume tokens beyond its supply limit by exhausting the global pool, effectively depriving other registries of their rightful allocation. For example, one registry could end up with 200 tokens claimed against a 100-token supply, while another receives nothing. The impact is unfair distribution of presale tokens and potential denial of access for legitimate participants in other registries.\n"
+        },
+        {
+            "title": "fixed price presale may unable to complete",
+            "description": "In fixed-price presales, the `suggest_deposit_amount` function truncates deposits to ensure they align with token price, which can prevent the total deposit from ever reaching the `presale_maximum_cap`. The root cause is the truncation logic that removes excess amounts during deposit, leading to a final total that falls short of the cap by a small margin (e.g., 99 out of 100). When `presale_minimum_cap` equals `presale_maximum_cap`, this prevents the presale from transitioning to the `Completed` state via `end_presale_if_max_cap_reached`, forcing the presale to run until the `presale_end_time` even if the cap is effectively reached. The impact is that the presale cannot end early, leading to user frustration and reduced efficiency, especially in cases with long end times.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code is mostly arithmetic and presale-mode glue, but there are a few security-relevant trust and accounting assumptions.\n\n(1) During `initialize_presale`, the program accepts a `FixedPricePresaleExtraArgs` account from `remaining_accounts` and only checks that its internal `presale` field equals `presale_pubkey`. It does not verify that this account is the canonical/expected address (e.g., a PDA derived from the presale), nor that it is uniquely bound to this presale in a way that cannot be substituted. If an attacker can cause a different program-owned account with crafted contents to be passed in, they could influence `q_price` and `disable_withdraw`, impacting pricing and withdrawal behavior. This is an access-control/trust-boundary issue around “who is authorized to supply configuration”.\n\n(2) `get_total_base_token_sold` stops iterating registries on the first uninitialized registry (`break`). This relies on a strict “all initialized registries are packed contiguously from index 0” invariant. If that invariant is ever violated (by a bug elsewhere, upgrade, or unexpected state), later initialized registries will be ignored, undercounting tokens sold. Any downstream logic that relies on this total (caps, accounting, distribution decisions) could be bypassed or made inconsistent.\n\n(3) `FixedPricePresaleHandler::initialize_data` writes only three fields into a zero-copy struct that contains explicit padding (`padding0`, `padding1`) and does not zero them. This can preserve stale bytes in account data. While not immediately exploitable in the shown code, it is a lifecycle/control issue: future upgrades or other code paths that (incorrectly) interpret or compare these bytes can lead to unexpected behavior, and it complicates safe evolution of the stored data layout.\n",
+            "findings": [
+                {
+                    "title": "Config account substitution risk: extra params not verified as canonical PDA",
+                    "description": "In `initialize_presale`, the `FixedPricePresaleExtraArgs` account is taken from `remaining_accounts` and validated only by checking:\n`presale_extra_param.presale == presale_pubkey`.\n\nThere is no check that `presale_extra_param_ai.key` equals an expected canonical address (e.g., a PDA derived from the presale), nor any seed/bump verification tying this configuration account to the presale.\n\nIf an attacker can provide (now or via some other instruction flow) a different program-owned account whose data sets `presale = presale_pubkey`, they can influence security-critical configuration used for initialization (notably `q_price` and `disable_withdraw`). This is a trust-boundary/access-control weakness around who is allowed to supply presale configuration.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Early-loop break can undercount total sold tokens if registries are non-contiguous",
+                    "description": "`get_total_base_token_sold` iterates `presale.presale_registries` and executes `break` on the first uninitialized registry:\n`if presale_registry.is_uninitialized() { break; }`\n\nThis assumes all initialized registries are contiguous from the start of the array. If a gap exists (an uninitialized entry followed by initialized ones), the function will ignore later deposits and return a lower total sold amount.\n\nAny security-critical logic that depends on this total (cap enforcement, allocation/accounting, distribution checks) can become inconsistent or bypassed under such state conditions. This is insufficient control-flow management relying on an implicit invariant.\n",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Padding bytes in zero-copy handler are left uninitialized (stale data persists)",
+                    "description": "`FixedPricePresaleHandler::initialize_data` writes `q_price`, `disable_withdraw`, and `disable_earlier_presale_end_once_cap_reached` but does not zero or set `padding0`/`padding1`.\n\nBecause this struct is stored via zero-copy into account data, any existing bytes in those padding fields remain and persist across the resource’s lifetime. While the current code does not read these fields, stale padding can:\n- create unexpected behavior if future upgrades repurpose those bytes,\n- complicate deterministic comparisons/hashing of state,\n- increase the chance of subtle state-integration bugs.\n\nThis is improper control of stored resource/state across its lifetime.\n",
+                    "category": "CWE-664",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

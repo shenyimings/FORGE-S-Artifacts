@@ -1,0 +1,157 @@
+{
+    "project": "tensor_foundation_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/tensor_foundation_audit_final.pdf.json/marketplace/program/src/instructions/mpl_core/delist.rs",
+        "dataset/contracts/tensor_foundation_audit_final.pdf.json/marketplace/program/src/instructions/mpl_core/close_expired_listing.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.1,
+        "recall": 0.5,
+        "f1": 0.16666666666666669
+    },
+    "cwe_ground_truth": [
+        "CWE-669",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-664",
+        "CWE-697",
+        "CWE-682",
+        "CWE-666",
+        "CWE-284",
+        "CWE-221",
+        "CWE-668",
+        "CWE-703",
+        "CWE-501"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Utilization of Improper Payer Account",
+            "description": "In `process_close_expired_listing_core`, the `list_state` account is used as the payer for a CPI transfer, but it is a program-owned account with minimal lamports, likely insufficient for transaction fees. This can cause transaction failure and prevent cleanup of expired listings. Similarly, in `process_delist_core`, the `rent_destination` account is incorrectly required to be a signer and payer, even though its role is only to receive rent refunds. This introduces unnecessary constraints and increases the risk of transaction failure. The root cause is incorrect assignment of payer responsibilities in CPI calls.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code, I have identified several security issues stemming from the candidate CWE root causes:\n\n1. **CWE-284 (Improper Access Control)**: In `close_expired_listing.rs`, the `owner` account is marked as `UncheckedAccount` and does not require a signature. While there is a `has_one = owner` constraint on `list_state`, this only verifies that the provided owner matches the one stored in `list_state`. However, since the owner doesn't sign, anyone can call this function with the correct owner address once the listing expires. This could allow unauthorized parties to trigger the closure and transfer of assets, potentially front-running the legitimate owner.\n\n2. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: Both files use `validate_asset()` but there's insufficient error handling context. The validation occurs after account constraints are checked, but if the asset validation fails after state modifications or in edge cases, it could lead to inconsistent state. Additionally, the `TransferV1CpiBuilder` invocations don't have explicit error handling for potential CPI failures beyond the `?` operator.\n\n3. **CWE-697 (Incorrect Comparison)**: In `close_expired_listing.rs`, the expiry check uses `list_state.expiry < Clock::get()?.unix_timestamp`. This comparison is correct for checking if something has expired, but there's a potential edge case: if `expiry` equals the current timestamp, the listing is not considered expired. This could lead to a one-second window where the listing should be closeable but isn't, though this is a minor timing issue.\n\n4. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The `list_state` account is closed (via `close = rent_destination`) in both functions, but the asset transfer happens before the account closure. If the transfer fails after the account is marked for closure, or if there are reentrancy issues, the state could become inconsistent. The order of operations (transfer then close) is correct, but there's no explicit verification that the asset transfer succeeded before proceeding to close the account.\n\n5. **CWE-682 (Incorrect Calculation)**: In both files, the `quantity` field in the `MakeEvent` is hardcoded to `1`. While this might be intentional for single NFT listings, if the system is ever extended to support batch operations or if `list_state` contains quantity information that differs from 1, this hardcoded value could lead to incorrect event logging and potential accounting issues.\n\nThe most critical issue is the lack of signer requirement for the owner in `close_expired_listing.rs`, which represents an access control vulnerability.\n",
+            "findings": [
+                {
+                    "title": "Missing Signer Requirement for Owner in Close Expired Listing",
+                    "description": "In `close_expired_listing.rs`, the `owner` account is defined as `UncheckedAccount` without requiring a signature. While the `has_one = owner` constraint verifies the owner matches the stored value in `list_state`, anyone can call this function with the correct owner address once the listing expires. This allows unauthorized parties to trigger the closure and asset transfer, potentially front-running the legitimate owner or causing unwanted state changes.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Insufficient Error Handling for Asset Validation",
+                    "description": "Both `delist.rs` and `close_expired_listing.rs` call `validate_asset()` but lack comprehensive error handling. If asset validation fails after account constraints are checked or during edge cases, it could lead to inconsistent state or unexpected behavior. The validation should occur earlier in the execution flow with explicit error handling.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Potential Edge Case in Expiry Timestamp Comparison",
+                    "description": "In `close_expired_listing.rs`, the expiry check uses `list_state.expiry < Clock::get()?.unix_timestamp`, which means if the expiry timestamp exactly equals the current timestamp, the listing is not considered expired. This creates a one-second window where the listing should arguably be closeable but isn't, potentially causing user confusion or timing-dependent behavior.",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Hardcoded Quantity Value in Event Logging",
+                    "description": "Both files hardcode `quantity: 1` in the `MakeEvent` structure. If the system is extended to support batch operations or if `list_state` contains different quantity information, this hardcoded value could lead to incorrect event logging and accounting discrepancies. The quantity should be derived from the actual state or validated against expected values.",
+                    "category": "CWE-682",
+                    "severity": "low",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Resource Lifecycle Management Risk with Account Closure",
+                    "description": "In both files, the `list_state` account is closed via the `close` constraint, but the asset transfer occurs within the function body. If there are any reentrancy issues or if the transfer fails in unexpected ways, the account closure could proceed while leaving the asset in an inconsistent state. While the current implementation appears correct, explicit verification of transfer success before account closure would improve robustness.",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.6
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code for the delist and close_expired_listing functions, I've identified several security issues related to the candidate CWEs:\n\n1. **CWE-404 (Improper Resource Shutdown or Release)**: In both `delist.rs` and `close_expired_listing.rs`, the `list_state` account is closed (via the `close = rent_destination` constraint), but the asset transfer happens BEFORE the account closure. If the transfer fails after the account is marked for closure, this could lead to inconsistent state. However, Anchor handles this atomically, so this is not a critical issue but worth noting for understanding the lifecycle.\n\n2. **CWE-666 (Operation on Resource in Wrong Phase of Lifetime)**: In `close_expired_listing.rs`, the code uses `list_state.to_account_info()` as the payer for the transfer operation. This is problematic because:\n   - The `list_state` account is being closed in the same transaction (marked with `close = rent_destination`)\n   - Using a closing account as a payer could lead to issues if the account's lamports are being reclaimed\n   - The account is in the \"closing\" phase of its lifetime when it's being used as a payer\n\n3. **CWE-665 (Improper Initialization)**: The `owner` field in `CloseExpiredListingCore` is an `UncheckedAccount` that doesn't require a signature. While the `has_one = owner` constraint validates the owner matches the list_state, there's no verification that this owner account is properly initialized or in a valid state to receive the asset.\n\n4. **CWE-501 (Trust Boundary Violation)**: Both functions mix trusted data (from the validated `list_state` PDA) with untrusted external inputs (`asset`, `collection`, `owner` in close_expired_listing). The `asset` and `collection` accounts are marked as `UncheckedAccount` and only validated via `validate_asset`, which may not be sufficient to prevent all attack vectors.\n\n5. **CWE-668 (Exposure of Resource to Wrong Sphere)**: In `close_expired_listing.rs`, the asset is transferred to an `owner` account that doesn't need to sign the transaction. This means anyone can trigger the transfer of an expired listing to the original owner, potentially exposing the asset to unintended timing or state conditions.\n\n6. **CWE-221 (Information Loss or Omission)**: The `record_event` calls in both functions occur AFTER the critical transfer operation. If the transfer succeeds but event recording fails, there would be no on-chain record of the delisting, leading to information loss that could hamper later analysis or indexing.\n",
+            "findings": [
+                {
+                    "title": "Resource Used as Payer During Closure Phase",
+                    "description": "In `close_expired_listing.rs`, the `list_state` account is used as the payer for the TransferV1 CPI call while simultaneously being closed in the same transaction. Using an account as a payer during its closure phase violates proper resource lifecycle management and could lead to unexpected behavior or failures if the account's lamports are being reclaimed.",
+                    "category": "CWE-666",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unvalidated Owner Account State in Expired Listing Closure",
+                    "description": "In `close_expired_listing.rs`, the `owner` account is declared as `UncheckedAccount` and doesn't require a signature. While the `has_one = owner` constraint validates ownership, there's no verification that the owner account is properly initialized or in a valid state to receive the transferred asset. This could lead to assets being transferred to improperly initialized accounts.",
+                    "category": "CWE-665",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Trust Boundary Violation with Unchecked External Accounts",
+                    "description": "Both functions accept `asset` and `collection` as `UncheckedAccount` types, relying solely on the `validate_asset` function for validation. These untrusted external inputs are mixed with trusted PDA data (`list_state`) without comprehensive validation, potentially allowing malicious actors to provide crafted accounts that pass basic validation but cause unexpected behavior.",
+                    "category": "CWE-501",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Asset Transfer to Non-Signing Owner in Expired Listing",
+                    "description": "In `close_expired_listing.rs`, the asset is transferred to the `owner` account without requiring the owner's signature. While this is intentional for expired listings, it exposes the asset transfer to the wrong control sphere - anyone can trigger the transfer at any time after expiry, potentially at inopportune moments for the owner or under unexpected market/state conditions.",
+                    "category": "CWE-668",
+                    "severity": "low",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Event Recording After Critical State Changes",
+                    "description": "Both functions call `record_event` after the asset transfer completes. If the event recording fails (though unlikely), the transfer would succeed but leave no on-chain record of the delisting. This information loss could hamper indexing, auditing, or later analysis of marketplace activity, creating a discrepancy between actual state and recorded events.",
+                    "category": "CWE-221",
+                    "severity": "low",
+                    "confidence": 0.65
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-410",
+            "CWE-487",
+            "CWE-118",
+            "CWE-501",
+            "CWE-911",
+            "CWE-610",
+            "CWE-704",
+            "CWE-400",
+            "CWE-673",
+            "CWE-668",
+            "CWE-404",
+            "CWE-666",
+            "CWE-913",
+            "CWE-1329",
+            "CWE-580",
+            "CWE-662",
+            "CWE-496",
+            "CWE-669",
+            "CWE-372",
+            "CWE-922",
+            "CWE-1229",
+            "CWE-495",
+            "CWE-706",
+            "CWE-665",
+            "CWE-221"
+        ]
+    ]
+}

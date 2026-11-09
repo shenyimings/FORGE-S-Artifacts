@@ -1,0 +1,109 @@
+{
+    "path": "reports/Audius Solana - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": "https://github.com/AudiusProject/audius-protocol",
+        "commit_id": "9b82a8c962aa0524c2db2e73c55854b4c7200c9d",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-11-21",
+        "project_path": "contracts/Audius Solana - Zellic Audit Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Missing PDA validation leading to multiple transfers",
+            "description": "1. **Description:** The Rewards Manager program allows reward redemption via a two-step process involving signed messages and a PDA (Program Derived Address) to prevent replay of transfers. However, the PDA used to mark a transfer as completed is not properly validated, allowing an attacker to supply any signer account instead of the expected PDA.\n2. **Cause:** The transfer_account_info account is not checked to ensure it is the correct PDA derived from transfer details. Additionally, the VerifiedMessages account is only zeroed in lamports but not invalidated, allowing reuse within the same transaction.\n3. **Exploitation:** An attacker can bypass the replay protection by providing a fake signer account as the transfer PDA and reusing the VerifiedMessages account across multiple instructions in a single transaction.\n4. **Impact:** This vulnerability allows an attacker to redeem the same reward multiple times, leading to unauthorized minting or transfer of tokens and potential loss of funds.\n",
+            "severity": "critical",
+            "files": [
+                "solana-programs/reward-manager/program/src/processor.rs"
+            ],
+            "location": [
+                "RewardsManager.EvaluateAttestations"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-138"
+                ],
+                "3": [
+                    "CWE-140"
+                ],
+                "4": [
+                    "CWE-142"
+                ]
+            },
+            "title": "Ambiguous format for signed messages",
+            "description": "1. **Description:** Signed messages in the Rewards Manager are serialized by concatenating fields with underscores, which can lead to ambiguous parsing when fields contain underscores themselves.\n2. **Cause:** The use of a simple underscore-delimited format without length prefixes or fixed-width fields allows different combinations of input (e.g., amount and ID) to produce identical serialized messages.\n3. **Exploitation:** An attacker could craft malicious message inputs that parse to different values than intended, potentially manipulating the redemption process if such inputs were accepted.\n4. **Impact:** While the off-chain system currently prevents inputs with underscores, this ambiguity represents a latent risk. If future changes allow such inputs, it could lead to critical exploits involving reward manipulation.\n",
+            "severity": "informational",
+            "files": [
+                "solana-programs/reward-manager/program/src/processor.rs"
+            ],
+            "location": [
+                "RewardsManager.process_evaluate_attestations"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Unsafe account deletion method",
+            "description": "1. **Description:** The EvaluateAttestations instruction deletes the VerifiedMessages account by zeroing its lamports, but does not invalidate its data or resize it to zero, leaving it usable within the same transaction.\n2. **Cause:** Solana does not immediately delete accounts with zero lamports; they remain accessible for the duration of the transaction, enabling reuse.\n3. **Exploitation:** An attacker can include multiple EvaluateAttestations instructions in a single transaction, reusing the same VerifiedMessages account after it has been \"deleted\".\n4. **Impact:** This enables replay of reward claims within a single transaction, contributing to the exploit chain for the critical PDA validation issue (3.1).\n",
+            "severity": "low",
+            "files": [
+                "solana-programs/reward-manager/program/src/processor.rs"
+            ],
+            "location": [
+                "RewardsManager.EvaluateAttestations"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack of parameters validation in InitRewardManager",
+            "description": "1. **Description:** The InitRewardManager instruction does not validate key parameters such as min_votes or the mint account, allowing potentially invalid configurations.\n2. **Cause:** The on-chain program does not enforce that min_votes > 0 or that the provided mint_info corresponds to a legitimate token mint.\n3. **Exploitation:** A misconfigured or malicious caller could initialize a RewardManager that requires zero votes, effectively removing access control.\n4. **Impact:** While the off-chain system is expected to provide correct parameters, this lack of validation increases the risk of operational errors or future exploits if the on-chain guardrails are absent.\n",
+            "severity": "informational",
+            "files": [
+                "solana-programs/reward-manager/program/src/processor.rs"
+            ],
+            "location": [
+                "RewardsManager.InitRewardManager"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,190 @@
+{
+    "path": "reports-without-source/2026-03-18-cyfrin-securitize-solana-whitelister-v2.0.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/securitize-io/bc-solana-whitelister"
+        ],
+        "commit_id": [
+            "edb0c4a19cb4"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-03-06",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-1293"
+                ]
+            },
+            "title": "Improper investor-to-identity validation allows arbitrary wallet attachment to any investor identity",
+            "description": "The vulnerability exists in the register_vault instruction of the VaultRegistrar program, where the investor signature requirement does not properly validate that the signing wallet belongs to the identity being modified. The root cause is that the program only verifies that the existing_investor_wallet signed the transaction and that its derived identity PDA is valid, but it does not confirm that this identity PDA is linked to the target identity_account used in the downstream CPI to rwa_rbac::attach_wallet_to_identity. As a result, an authorized operator can use any wallet they control to satisfy the signature check while attaching a malicious vault to an arbitrary investor's identity. This allows the attacker to impersonate the victim investor, receive and transfer DS tokens under their compliance profile, bypass regulatory restrictions, and potentially redeem tokens through the off-ramp into attacker-controlled liquidity tokens, leading to severe financial and compliance risks.\n",
+            "severity": "medium",
+            "location": [
+                "register_vault.rs#138-144"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Investor's token balance is not checked prior to registration",
+            "description": "The vulnerability arises because the Solana implementation of the VaultRegistrar omits a critical validation present in the EVM version: checking whether the investor holds any tokens of the relevant asset_mint. The root cause is the absence of a token balance verification step before allowing vault registration. An attacker or misconfigured integration can register a vault for an investor who has not completed proper onboarding or KYC processes, as indicated by zero token balance. This could allow unauthorized or incomplete investors to gain access to regulated DeFi functions. The exploitation involves calling register_vault with a wallet that has no tokens, which would be rejected in the EVM version but is accepted on Solana. The impact includes potential regulatory non-compliance, incorrect investor eligibility assumptions by downstream protocols, and possible abuse of whitelisting mechanisms by unqualified users.\n",
+            "severity": "low",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "VaultRegistered event omits investor signer when signature is required",
+            "description": "The vulnerability is an informational issue where the VaultRegistered event does not include the existing_investor_wallet public key when require_investor_signature is enabled. The root cause is incomplete event data emission in the register_vault instruction. This omission prevents off-chain monitoring systems and compliance tools from verifying which wallet provided consent during registration. An attacker could exploit this lack of transparency to obscure malicious activity, although the on-chain logic remains intact. The impact is reduced auditability and transparency, making it harder to detect unauthorized or suspicious registrations. This weakens the trust model for integrators and auditors who rely on event logs for monitoring and forensic analysis.\n",
+            "severity": "informational",
+            "location": [
+                "register_vault.rs:138-144"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "set_require_investor_signature allows setting to current value, emitting misleading event",
+            "description": "The vulnerability lies in the set_require_investor_signature function, which unconditionally updates the flag and emits a RequireInvestorSignatureUpdated event even when the new value matches the current one. The root cause is the absence of a no-op guard check. This allows an operator to trigger an event that falsely indicates a configuration change, misleading off-chain monitoring systems and potentially causing unnecessary alerts or automated responses. The exploitation involves calling the function with the same boolean value already set, resulting in a redundant event emission. The impact is operational confusion, degraded monitoring reliability, and increased noise in event processing systems, which could lead to alert fatigue or misinterpretation of system state.\n",
+            "severity": "informational",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Dead Error Variants and Documentation Inconsistency for Signature Requirements",
+            "description": "This finding consists of two parts: (1) dead error variants VaultSignatureRequired and InvestorSignatureRequired are defined but never used in the code, and (2) the README incorrectly states that both investor and vault keypairs must sign when require_investor_and_vault_signatures is true, while the actual state field is require_investor_signature and vault signature is never enforced. The root cause is outdated or incorrect documentation and unused code. The impact includes developer confusion, potential integration errors, and increased maintenance burden. Attackers could exploit the documentation mismatch to misconfigure integrations or assume incorrect security guarantees. The dead code may mislead auditors or developers into believing additional signature checks exist when they do not.\n",
+            "severity": "informational",
+            "location": [
+                "errors.rs",
+                "README"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Permissionless Initialize and Counter Saturation Edge Case",
+            "description": "The vulnerability stems from the lack of access control on the initialize function, allowing any payer to create a VaultRegistrarState with any admin and asset_mint. The root cause is intentional permissionless design without safeguards. This enables spam or malicious creation of registrar instances, potentially polluting the namespace and complicating discovery of legitimate registrars. Additionally, the global counter uses saturating_add(1), and once it reaches u64::MAX, further initialization attempts will fail because the PDA already exists. While reaching u64::MAX is practically infeasible, this creates a theoretical denial-of-service vector for future registrar creation. The impact includes potential ecosystem clutter and long-term protocol inflexibility.\n",
+            "severity": "informational",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Insufficient validation on vaults",
+            "description": "The vulnerability exists because the Solana implementation lacks pre-CPI checks that are present in the EVM version to verify if a vault is already registered. The root cause is missing validation logic before calling rwa_rbac::cpi::attach_wallet_to_identity. Unlike the EVM version, which reverts with specific errors like VaultBelongsToDifferentInvestor or VaultAlreadyRegistered, the Solana contract performs no such check. This breaks parity with the EVM architecture and removes granular error handling. An attacker could exploit this to register a vault that is already associated with another investor, potentially leading to identity confusion or unexpected behavior in downstream systems. The impact includes reduced safety, weaker error reporting, and increased risk of identity collisions.\n",
+            "severity": "informational",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "Explicitly reject Pubkey::default() for vault_wallet or the investor_wallet",
+            "description": "The vulnerability is the absence of explicit checks rejecting Pubkey::default() for vault_wallet or investor_wallet inputs. The root cause is missing sanity checks before performing CPI calls. In EVM, equivalent zero-address checks (notZeroAddress) are used, but the Solana version does not enforce this. An attacker could pass default public keys (all zeros) as inputs, which might lead to undefined behavior, failed transactions, or potential edge-case exploits if downstream programs do not handle them correctly. The impact includes potential transaction failures, reduced robustness, and deviation from secure coding best practices. It is recommended to add explicit rejections of default pubkeys to align with EVM security standards.\n",
+            "severity": "informational",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant Zero-Address Check in revoke_operator",
+            "description": "The vulnerability is a gas optimization issue where the revoke_operator_handler contains a redundant check for operator != Pubkey::default(). The root cause is unnecessary code duplication, as add_operator_handler already prevents zero-address operators from being added. Therefore, the zero-address check in revoke_operator is superfluous because the subsequent state.operators.contains(&operator) check will naturally fail for Pubkey::default(), resulting in OperatorNotFound. The exploitation is not possible, but the impact includes wasted gas due to extra instructions and increased maintenance burden. Removing the redundant check would reduce compute costs and simplify the codebase without affecting security.\n",
+            "severity": "informational",
+            "location": [
+                "revoke_operator_handler",
+                "add_operator_handler"
+            ],
+            "files": []
+        }
+    ]
+}

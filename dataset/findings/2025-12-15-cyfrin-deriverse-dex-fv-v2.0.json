@@ -1,0 +1,131 @@
+{
+    "path": "reports-without-source/2025-12-15-cyfrin-deriverse-dex-fv-v2.0.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/Cyfrin/audit-2025-10-deriverse"
+        ],
+        "commit_id": [
+            "30b06d2da69e956c000120cdc15907b5f33088d7"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-11-01",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-287"
+                ],
+                "3": [
+                    "CWE-1390"
+                ],
+                "4": [
+                    "CWE-303"
+                ],
+                "5": [
+                    "CWE-304"
+                ]
+            },
+            "title": "Missing Signer Verification in voting_reset",
+            "description": "The `voting_reset` function fails to verify that the admin account is a signer of the transaction, despite requiring that the admin's public key matches the operator address. This creates a critical authorization flaw where an attacker can invoke the `voting_reset` instruction by providing an account with the correct public key but without any requirement for cryptographic signing. The root cause is the absence of a signer check (`is_signer`) on the admin account. An attacker can exploit this by crafting a transaction with a forged admin account that matches the operator address but is not actually signed by the legitimate admin. This would allow unauthorized resetting of critical voting parameters, potentially disrupting governance processes and leading to malicious control over voting outcomes. The impact includes unauthorized manipulation of the voting system, leading to potential governance hijacking or denial of service for legitimate voters.\n",
+            "severity": "high",
+            "location": [
+                "voting_reset",
+                "src/program/processor/voting_reset.rs#55-61",
+                "voting_reset.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing Version Validation for Private Clients Account",
+            "description": "The `new_private_client()` function does not validate that the provided `private_clients_acc` account matches the protocol version specified in `root_state`. Since different protocol versions use different PDA seeds that include the version number, each version must have its own isolated `private_clients_acc`. The lack of version validation opens the door for cross-version account misuse, where an account from one version could be incorrectly used in another. The root cause is the missing version check between `root_state` and the `private_clients_acc` header. An attacker could exploit this by passing a `private_clients_acc` from an older or newer protocol version, potentially leading to state corruption, incorrect client initialization, or privilege escalation across versions. The impact includes compromised data integrity and potential bypass of version-specific logic or security controls.\n",
+            "severity": "high",
+            "location": [
+                "ST-A-05::private_client_version_match",
+                "src/program/processor/new_private_client.rs#108-109",
+                "new_private_client.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-347"
+                ]
+            },
+            "title": "change_points_program_expiration is permissionless",
+            "description": "The `change_points_program_expiration` function does not verify that the admin account has signed the transaction. While it checks that the provided admin account key matches the `operator_address` in the root state, it omits the critical `is_signer` check. This allows any user to invoke the function by passing the admin's public key without needing the corresponding private key, effectively making the function permissionless. The root cause is the missing `admin.is_signer` validation. An attacker can exploit this by calling the function with the admin's public key and manipulating the points program expiration time without authorization. This could lead to premature expiration or indefinite extension of the points program, disrupting incentive mechanisms and potentially causing financial loss or governance manipulation.\n",
+            "severity": "medium",
+            "location": [
+                "VT-R-02::points_program_cannot_shorten",
+                "src/program/processor/change_points_program_expiration.rs#46-52"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-1280"
+                ]
+            },
+            "title": "Voting is allowed even after voting period's end time",
+            "description": "The `voting()` function allows votes to be recorded even after the voting period has ended. Although the function eventually checks the voting end time in `finalize_voting()`, it does so only after the vote has already been applied to the voting accumulators. This means the last vote can be submitted post-deadline and still affect the outcome. The root cause is the incorrect placement of the time validation check— it should occur before any state modifications. An attacker (or any user) can exploit this by waiting until just after the deadline and submitting a vote, which will still be counted due to the flawed logic. The impact is a violation of fair governance principles, allowing late votes to influence results, which undermines the integrity and predictability of the voting process.\n",
+            "severity": "medium",
+            "location": [
+                "ST-B-01::votes_accepted_before_deadline",
+                "src/program/processor/voting.rs#105-129"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Missing Array Synchronization in dividends_claim",
+            "description": "The `dividends_claim` instruction fails to synchronize the `client_community_state.data` array with `community_state.base_crncy` before processing claims. If a new base currency is added to the community and a user has not performed a syncing operation (e.g., deposit or trade), their `client_community_state.data` will be shorter than the current `base_crncy` list. This causes the zip iterator to terminate early, preventing the user from claiming dividends for newly added currencies. The root cause is the absence of a synchronization step before dividend calculation. An attacker is not required to exploit this—it affects all inactive users automatically. The impact is financial loss for users who are unable to claim rightful dividends, leading to user dissatisfaction and potential loss of trust in the protocol's fairness and reliability.\n",
+            "severity": "medium",
+            "location": [
+                "HL-B-01::user_dividends_synced_with_protocol",
+                "specs/unit_test.rs",
+                "dividends_claim"
+            ],
+            "files": []
+        }
+    ]
+}

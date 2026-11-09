@@ -1,0 +1,202 @@
+{
+    "project": "07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json",
+    "files": [
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd5_claim_unstaked_sol.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-1041",
+        "CWE-710"
+    ],
+    "cwe_detected": [
+        "CWE-807",
+        "CWE-707",
+        "CWE-664",
+        "CWE-190",
+        "CWE-682",
+        "CWE-778",
+        "CWE-284",
+        "CWE-221",
+        "CWE-346",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Redundant error handling in ClaimUnstakedSOLCommand::execute_prepare",
+            "description": "The execute_prepare function has a second match statement with error arms for pricing sources that are already filtered out by the first match. The root cause is duplicated validation logic. These error arms are unreachable, creating dead code. The impact is reduced code clarity and maintainability, making it harder to audit and modify the logic safely.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The command is a multi-step state machine that performs CPI calls to external stake pool services and then internally redistributes claimed SOL via `FundService::offset_receivables`. Across these transitions, several security-relevant assumptions are not enforced on-chain: (1) key account identities (treasury/reserve) are not always checked against the fund’s canonical addresses, (2) sysvar/program accounts are accepted without verifying they are the real sysvars/program IDs, and (3) a reserve-balance invariant check uses a stale lamport snapshot taken before subsequent SOL transfers. Additionally, the design appears to rely on `.with_required_accounts(...)` as a “protection mechanism”, but in the shown code the required-account set is not re-validated at execution time, so a direct caller could potentially supply a different account set if outer-layer access controls are imperfect.\n",
+            "findings": [
+                {
+                    "title": "Stale reserve lamports snapshot used for post-transfer invariant check",
+                    "description": "In `execute_execute`, the code later enforces:\n`require_gte!(to_sol_account_amount, fund_account.sol.get_total_reserved_amount())`.\nHowever `to_sol_account_amount` is computed inside the claim functions as `fund_reserve_account.lamports()` immediately after claiming (in both `spl_stake_pool_claim_sol` and `marinade_stake_pool_claim_sol`), and **before** `FundService::offset_receivables(...)` is called.\n\nBecause `offset_receivables` can transfer SOL out of the reserve account (e.g., to treasury), the reserve lamports at the time of the `require_gte!` check may be lower than the earlier snapshot. This turns the check into a weaker, potentially incorrect invariant check that can pass even if the reserve is undercollateralized after the offset/transfer.\n\nImpact: depending on `offset_receivables` behavior, this can allow reserve depletion below the reserved amount invariant without being detected here, leading to insolvency or failed future withdrawals/operations.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Treasury/reserve account identities not enforced in execute stage (potential fund diversion)",
+                    "description": "In `execute_execute`, the code destructures accounts as:\n`[fund_reserve_account, fund_treasury_account, remaining_accounts @ ..]`\nand then passes these directly into `fund_service.offset_receivables(...)`, without verifying:\n- `fund_reserve_account.key()` equals `fund_account.get_reserve_account_address()?`\n- `fund_treasury_account.key()` equals `fund_account.get_treasury_account_address()?`\n\nSimilar missing key checks exist in `spl_stake_pool_claim_sol` for both `fund_reserve_account` and `fund_treasury_account` (it uses `fund_treasury_account` as a destination, and never checks it is the canonical treasury).\n\nThe code appears to rely on `.with_required_accounts(...)` to ensure the correct accounts are supplied, but that is not a cryptographic/on-chain enforcement by itself unless the dispatcher strictly validates it. If an attacker can invoke the instruction path that reaches this command execution (or if the dispatcher validation is bypassable), they could supply an arbitrary `fund_treasury_account` and redirect claimed SOL/revenue flows to an attacker-controlled account.\n\nImpact: unauthorized redirection of claimed SOL (revenue) away from the intended treasury address.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Sysvar/program account spoofing risk (clock/stake_history/stake_program not validated)",
+                    "description": "Multiple functions accept critical accounts but do not validate they are the expected sysvars/program IDs:\n- `spl_stake_pool_get_claimable_stake_accounts`: `clock`, `stake_history`\n- `spl_stake_pool_claim_sol`: `clock`, `stake_history`, `stake_program`\n- `marinade_stake_pool_claim_sol`: `clock` (and other program accounts are not owner/ID-checked here)\n\nThese accounts are then consumed by `SPLStakePoolService::<T>::get_claimable_stake_accounts(...)` and `SPLStakePoolService::<T>::claim_sol(...)`.\nIf the downstream stake pool programs/services do not strictly enforce sysvar/program IDs, a caller could pass spoofed accounts containing crafted data that alters claimability calculations or CPI behavior.\n\nImpact: incorrect claimability decisions, premature/incorrect claiming attempts, or unexpected CPI behavior depending on downstream validation. At minimum, this increases attack surface and can enable griefing/DoS via malformed accounts.\n",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.66
+                },
+                {
+                    "title": "Resource/invariant control not maintained across claim → offset → update sequence",
+                    "description": "The sequence in `execute_execute` is:\n1) claim SOL into reserve (CPI)\n2) offset receivables / transfer revenue (internal transfers)\n3) update fund asset values\n4) update `pending_unstaking_amount_as_sol` using `claimed_sol_amount`\n\nThe code assumes the reserve account remains correctly controlled and sufficiently funded throughout these steps, but:\n- The reserve balance check uses a pre-offset snapshot (see separate finding).\n- The code does not re-assert that the accounts in use remain the canonical fund PDAs at each step (treasury/reserve key equality checks are missing in the execute stage).\n\nImpact: loss of control over the reserve’s intended lifetime/invariants during a multi-step operation, especially if upstream account selection/validation is bypassed.\n",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Reliance on off-chain/structural 'required accounts' as a protection mechanism",
+                    "description": "The design uses `.with_required_accounts(...)` to declare what should be provided for later stages, but within the shown code paths, the execute functions generally do not re-validate that the passed accounts match those required sets (except for some stake account PDA checks and pool_account matching in specific places).\n\nIf the surrounding framework does not strictly enforce these required account lists on-chain, then this “protection mechanism” can fail: a direct caller can supply an alternative account arrangement and exploit the missing identity checks (notably for treasury and sysvars/program IDs).\n\nImpact: weakening of the intended safety model; turns account correctness into a best-effort convention rather than an enforced rule.\n",
+                    "category": "CWE-693",
+                    "severity": "medium",
+                    "confidence": 0.62
+                }
+            ]
+        },
+        {
+            "reasoning": "The code largely relies on accounts passed in through `accounts: &[AccountInfo]` and uses them to (a) decide which stake accounts are claimable and (b) perform CPIs that move SOL using PDA signer seeds. Several of those inputs are not origin-validated (sysvars/program IDs), which is a classic Solana footgun: an attacker can pass arbitrary accounts that “look like” the expected accounts unless the program explicitly checks their addresses. Additionally, some arithmetic and state-updating choices (unchecked addition; `saturating_sub`) can hide invariant violations and produce incorrect fund accounting without surfacing an error. Finally, the code does not emit any logs for security-critical claim activity, hindering incident analysis.\n",
+            "findings": [
+                {
+                    "title": "Sysvar accounts (Clock, StakeHistory) are not origin-validated before use in claimability decisions",
+                    "description": "In `spl_stake_pool_get_claimable_stake_accounts`, the code destructures `accounts` as `[clock, stake_history, remaining_accounts @ ..]` and passes `clock` and `stake_history` into:\n  `SPLStakePoolService::<T>::get_claimable_stake_accounts(clock, stake_history, ...)`\nHowever, it never verifies that:\n  - `clock.key() == solana_program::sysvar::clock::ID`\n  - `stake_history.key() == solana_program::sysvar::stake_history::ID`\nBecause Solana allows callers to provide arbitrary accounts, an attacker can supply spoofed accounts with attacker-controlled data. This is a security decision point (which stake accounts are considered claimable) and can lead to incorrect behavior (e.g., attempting claims that should not be allowed, inconsistent state transitions, or repeated DoS by forcing failing CPIs).\n",
+                    "category": "CWE-807",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "CPI program accounts are not verified (stake_program / pool_program / token_program), enabling malicious program substitution",
+                    "description": "The following accounts are accepted from the caller and used to construct services / perform CPIs without any local validation of their program IDs:\n  - `spl_stake_pool_claim_sol`: `stake_program` is taken from `accounts` and passed to `SPLStakePoolService::<T>::claim_sol(...)`.\n  - `marinade_stake_pool_claim_sol`: `pool_program` and `pool_token_program` are taken from `accounts` and passed into `MarinadeStakePoolService::new(...)` / subsequent calls.\nIf the downstream service methods do not internally enforce expected program IDs, a caller could replace these with attacker-controlled programs. This can be catastrophic because the CPIs are invoked with PDA signer seeds (e.g., `&[&fund_account.get_reserve_account_seeds()]`, `&[&fund_account.get_seeds()]`), potentially granting the malicious program signed authority over fund-owned PDAs, enabling unauthorized lamport movements or other privileged actions.\nRecommended mitigations:\n  - Explicitly `require_keys_eq!(stake_program.key(), solana_program::stake::program::ID)` (or the correct stake program id used).\n  - Explicitly validate `pool_program` and `pool_token_program` against the known Marinade program ID and SPL Token program ID (or Token-2022 if supported).\n  - Similarly validate `clock`/`stake_history` sysvars where used.\n",
+                    "category": "CWE-346",
+                    "severity": "critical",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Unchecked u64 addition when accumulating claimed SOL can overflow and wrap",
+                    "description": "In `spl_stake_pool_claim_sol`:\n  `total_claimed_sol_amount += claimed_sol_amount;`\nThis is unchecked arithmetic on `u64`. In optimized builds, Rust will wrap on overflow, producing an incorrect smaller value.\nWhile practically `claimed_sol_amount` is likely bounded by stake account lamports, the code should still use `checked_add` (and error on overflow) to prevent silent wraparound and incorrect accounting, especially since the accumulated value later drives receivable offsets and fund state updates.\n",
+                    "category": "CWE-190",
+                    "severity": "low",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Use of saturating_sub masks underflow/invariant violations in pending_unstaking accounting",
+                    "description": "In `execute_execute`, fund accounting is updated with:\n  `supported_token.pending_unstaking_amount_as_sol = supported_token\n      .pending_unstaking_amount_as_sol\n      .saturating_sub(claimed_sol_amount);`\nIf `claimed_sol_amount` ever exceeds `pending_unstaking_amount_as_sol` (due to prior state corruption, logic bugs, or upstream authenticity failures), the subtraction will silently clamp to 0 instead of failing. This causes information loss about an invariant violation and can leave the fund state inconsistent with reality, hampering correct downstream decisions and analysis.\nA safer approach is to `require_gte!(pending_unstaking_amount_as_sol, claimed_sol_amount)` and fail if violated (or record an explicit discrepancy).\n",
+                    "category": "CWE-221",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "No logging/audit trail for SOL claim events (amounts, accounts, pool) hampers detection and incident response",
+                    "description": "The code performs security-critical actions (claiming SOL from stake pools, offsetting receivables, transferring revenue) but emits no `msg!()` logs containing key details such as pool mint, pool address, claimed amount, and involved PDAs.\nWhile not a direct exploit primitive, insufficient logs materially hinder monitoring, debugging, and post-incident forensics for fund movements.\n",
+                    "category": "CWE-778",
+                    "severity": "info",
+                    "confidence": 0.9
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-757",
+            "CWE-221",
+            "CWE-807",
+            "CWE-1267",
+            "CWE-656",
+            "CWE-778",
+            "CWE-287",
+            "CWE-116",
+            "CWE-911",
+            "CWE-1339",
+            "CWE-495",
+            "CWE-369",
+            "CWE-749",
+            "CWE-118",
+            "CWE-170",
+            "CWE-1280",
+            "CWE-1229",
+            "CWE-240",
+            "CWE-285",
+            "CWE-345",
+            "CWE-372",
+            "CWE-404",
+            "CWE-191",
+            "CWE-286",
+            "CWE-269",
+            "CWE-673",
+            "CWE-704",
+            "CWE-1270",
+            "CWE-346",
+            "CWE-282",
+            "CWE-1335",
+            "CWE-913",
+            "CWE-228",
+            "CWE-669",
+            "CWE-410",
+            "CWE-580",
+            "CWE-501",
+            "CWE-463",
+            "CWE-1426",
+            "CWE-172",
+            "CWE-190",
+            "CWE-665",
+            "CWE-20",
+            "CWE-424",
+            "CWE-357",
+            "CWE-662",
+            "CWE-496",
+            "CWE-666",
+            "CWE-1283",
+            "CWE-655",
+            "CWE-311",
+            "CWE-327",
+            "CWE-706",
+            "CWE-922",
+            "CWE-193",
+            "CWE-923",
+            "CWE-1329",
+            "CWE-668",
+            "CWE-128",
+            "CWE-182",
+            "CWE-400",
+            "CWE-330",
+            "CWE-487",
+            "CWE-610",
+            "CWE-184",
+            "CWE-358",
+            "CWE-135",
+            "CWE-326",
+            "CWE-654",
+            "CWE-138",
+            "CWE-74"
+        ]
+    ]
+}

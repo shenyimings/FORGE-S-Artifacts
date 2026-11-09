@@ -1,0 +1,230 @@
+{
+    "project": "blocksec_ref_token-locker-v2.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_token-locker-v2.0-signed.pdf.json/contracts/contract/src/account.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2857142857142857,
+        "recall": 0.8,
+        "f1": 0.4210526315789473
+    },
+    "cwe_ground_truth": [
+        "CWE-664",
+        "CWE-666",
+        "CWE-405",
+        "CWE-400",
+        "CWE-408"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-922",
+        "CWE-664",
+        "CWE-672",
+        "CWE-404",
+        "CWE-682",
+        "CWE-691",
+        "CWE-771",
+        "CWE-666",
+        "CWE-284",
+        "CWE-703",
+        "CWE-405",
+        "CWE-400",
+        "CWE-826"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Lack of charging NEAR in function withdraw",
+            "description": "The `withdraw()` function initiates token transfers via `transfer_token()`, which requires attaching 1 yocto NEAR. However, the contract—not the user—bears this cost because no NEAR is required from the caller. The `withdraw()` function does not enforce the user to attach a minimal amount of NEAR, leaving the contract to cover transaction fees for token transfers. An attacker could repeatedly call `withdraw()` to drain the contract’s NEAR balance, especially in scenarios with high gas costs or frequent withdrawals. The contract may deplete its NEAR balance, preventing future token transfers and disrupting service for all users.\n"
+        },
+        {
+            "title": "Incorrect update on unlock_time_sec in function after_token_burn()",
+            "description": "In the `after_token_burn()` callback function, when a token transfer fails and the system rolls back the state, the `unlock_time_sec` is incorrectly set to the current timestamp if all tokens were burned. The rollback logic fails to preserve the original `unlock_time_sec` value, instead overwriting it with the current time, which breaks the intended lock-up duration. An attacker could trigger a failed burn transaction (e.g., by making the recipient reject funds), causing the unlock time to reset to the present, thereby bypassing the time lock. Users could prematurely withdraw locked assets by exploiting the incorrect state rollback, undermining the core time-locking functionality of the contract.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code (which appears to be NEAR Protocol code, not Solana), I've identified several security issues stemming from the candidate CWE list:\n\n1. **CWE-682 (Incorrect Calculation)**: In the `after_token_transfer` function, when a token transfer fails and the account doesn't have an existing lock for that token, a new lock is created with `unlock_time_sec: nano_to_sec(env::block_timestamp())`. This means the lock expires immediately (current timestamp), allowing immediate withdrawal. This is incorrect - failed transfers should restore the original lock time, not create an immediately unlockable position.\n\n2. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The `after_token_transfer` callback doesn't properly restore the original lock state on failure. When a transfer fails and the token_id doesn't exist in locked_tokens, it creates a new lock with the current timestamp as unlock_time, which fundamentally changes the resource control semantics. The original lock information (including unlock_time_sec) is lost.\n\n3. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: In `after_token_transfer`, when the promise fails and the account doesn't exist (`else` branch of `if let Some(mut account)`), the function only emits a `WithdrawLostfound` event but doesn't attempt any recovery mechanism. The tokens are effectively lost with no way to recover them, which is an improper handling of this exceptional condition.\n\n4. **CWE-691 (Insufficient Control Flow Management)**: The `transfer_token` function doesn't return the Promise, making it impossible for callers to handle the asynchronous result. The control flow after token transfer is managed only through the callback, but the original caller has no way to know if the operation succeeded or failed.\n\n5. **CWE-284 (Improper Access Control)**: While `after_token_transfer` is marked as `#[private]`, the `transfer_token` function is public (no access modifier) and can be called by anyone. Although it's an internal implementation detail, it's exposed in the `impl Contract` block without proper access restrictions, potentially allowing unauthorized token transfers if called directly.\n",
+            "findings": [
+                {
+                    "title": "Incorrect Lock Time Calculation on Failed Transfer",
+                    "description": "In the `after_token_transfer` function, when a token transfer fails and the token_id doesn't exist in the account's locked_tokens, a new lock is created with `unlock_time_sec: nano_to_sec(env::block_timestamp())`. This sets the unlock time to the current timestamp, making the tokens immediately withdrawable. This is incorrect behavior - the original lock time should be preserved, not replaced with the current time.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Resource State Recovery on Transfer Failure",
+                    "description": "The `after_token_transfer` callback doesn't properly restore the original lock state when a transfer fails. If the token_id doesn't exist in locked_tokens after a failed transfer, it creates a new lock with current timestamp instead of restoring the original lock information. This violates proper resource lifecycle management and could allow premature access to locked tokens.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Insufficient Handling of Lost Tokens on Account Deletion",
+                    "description": "In `after_token_transfer`, when a transfer fails and the account no longer exists, the function only emits a `WithdrawLostfound` event without implementing any recovery mechanism. The tokens become permanently inaccessible with no way to recover them, representing improper handling of this exceptional condition.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Insufficient Control Flow for Asynchronous Operations",
+                    "description": "The `transfer_token` function initiates an asynchronous token transfer but doesn't return the Promise to the caller. This prevents the calling code from properly managing the control flow and handling the asynchronous result, relying solely on the callback mechanism without giving the caller any control or visibility.",
+                    "category": "CWE-691",
+                    "severity": "low",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Missing Access Control on Internal Transfer Function",
+                    "description": "The `transfer_token` function is implemented in a public `impl Contract` block without explicit access restrictions. While it appears to be an internal helper function, it's technically callable by external actors. This could potentially allow unauthorized token transfers if the function is exposed through the contract's public interface.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code (which appears to be NEAR Protocol Rust code, not Solana), I've identified several security issues related to the candidate CWEs:\n\n1. **CWE-400 (Uncontrolled Resource Consumption)**: The `locked_tokens` HashMap can grow up to MAX_LOCK_NUM entries per account, but there's no mechanism to remove old/expired locks automatically. Users must manually withdraw to clean up entries. This could lead to storage bloat over time as accounts accumulate locks that are never withdrawn.\n\n2. **CWE-404 (Improper Resource Shutdown or Release)**: In the `after_token_transfer` callback, when a transfer fails and the account doesn't exist (the else branch of `if let Some(mut account)`), the tokens are effectively lost. The contract emits a `WithdrawLostfound` event but doesn't properly handle the resource - the locked tokens are not restored to any account and become inaccessible.\n\n3. **CWE-665 (Improper Initialization)**: In `after_token_transfer`, when a transfer fails and the token_id doesn't exist in locked_tokens, a new LockInfo is created with `unlock_time_sec: nano_to_sec(env::block_timestamp())`. This means the lock is immediately unlocked, which may not reflect the original lock conditions. The original unlock_time_sec is lost, potentially allowing premature access to funds.\n\n4. **CWE-666 (Operation on Resource in Wrong Phase of Lifetime)**: The `withdraw` function removes the lock_info from the HashMap before the token transfer is confirmed successful. If the transfer fails, the `after_token_transfer` callback attempts to restore it, but this creates a window where the resource state is inconsistent. The lock is removed optimistically before confirming the operation succeeded.\n\n5. **CWE-922 (Insecure Storage of Sensitive Information)**: The `locked_tokens` HashMap stores financial information (locked balances and unlock times) in a way that's publicly readable through contract state queries. While blockchain transparency is expected, there's no access control or privacy consideration for sensitive balance information.\n\n6. **CWE-704 (Incorrect Type Conversion or Cast)**: The code uses `checked_sub` for balance subtraction which is good, but the conversion between U128 and u128 (via .0 accessor) happens frequently without consistent validation. While U128 is a wrapper type, the unwrapping via `.0` could potentially lead to issues if the internal representation changes.\n",
+            "findings": [
+                {
+                    "title": "Uncontrolled Growth of Locked Tokens Storage",
+                    "description": "The locked_tokens HashMap can accumulate up to MAX_LOCK_NUM entries per account with no automatic cleanup mechanism. Expired locks remain in storage until manually withdrawn, leading to unbounded storage growth over time as users may forget or choose not to withdraw expired locks.",
+                    "category": "CWE-400",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Lost Tokens When Account Doesn't Exist During Transfer Failure",
+                    "description": "In the after_token_transfer callback, if a token transfer fails and the account no longer exists, the tokens are permanently lost. The code emits a WithdrawLostfound event but provides no recovery mechanism, effectively destroying user funds.",
+                    "category": "CWE-404",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Improper Lock Time Initialization on Transfer Failure Recovery",
+                    "description": "When after_token_transfer fails and needs to restore tokens for a non-existent token_id, it creates a new LockInfo with unlock_time_sec set to the current timestamp. This loses the original lock duration and immediately unlocks the funds, violating the intended lock semantics.",
+                    "category": "CWE-665",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Premature Lock Removal Before Transfer Confirmation",
+                    "description": "The withdraw function removes the lock_info from locked_tokens before confirming the token transfer succeeded. This creates an inconsistent state where the lock is removed optimistically, and must be restored in after_token_transfer if the transfer fails, creating a window of incorrect state.",
+                    "category": "CWE-666",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Public Exposure of Sensitive Balance Information",
+                    "description": "The locked_tokens HashMap containing user balance and unlock time information is stored without access controls and is publicly queryable through contract state. While blockchain transparency is inherent, there's no consideration for privacy of sensitive financial data.",
+                    "category": "CWE-922",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code (which appears to be NEAR Protocol code based on the syntax), I examined it for the specific CWE candidates provided. Here are my findings:\n\n1. **CWE-672 (Operation on a Resource after Expiration or Release)**: In the `withdraw` function, there's a critical issue. The function removes the lock_info from the account using `account.locked_tokens.remove(&token_id)`, then performs operations on it. If the token transfer fails in `after_token_transfer`, the code attempts to restore the lock by either updating an existing entry or inserting a new one. However, there's a race condition window where the lock has been removed but the transfer hasn't completed. If the contract state is queried during this window, the lock appears to not exist, even though the tokens haven't been transferred yet. This is an operation on a resource (lock_info) after it has been released (removed from the HashMap).\n\n2. **CWE-771 (Missing Reference to Active Allocated Resource)**: In the `after_token_transfer` callback, when a transfer fails and the account no longer exists (`else` branch of `if let Some(mut account)`), the function emits a `WithdrawLostfound` event but doesn't restore the tokens anywhere. The locked tokens are effectively lost because there's no reference maintained to recover them. The resource (locked tokens) was allocated/removed but the reference to restore them is lost when the account doesn't exist.\n\n3. **CWE-826 (Premature Release of Resource During Expected Lifetime)**: The `withdraw` function prematurely releases the lock_info resource by removing it from `locked_tokens` before confirming the token transfer succeeded. The lock should remain until the transfer is confirmed successful. Currently, it's removed immediately, and only restored if the transfer fails, creating a window where the resource is released during its expected lifetime (until transfer completion).\n\n4. **CWE-405 (Asymmetric Resource Consumption)**: The contract allows users to create locks up to MAX_LOCK_NUM without any cost proportional to the storage used. An attacker could create many small locks approaching MAX_LOCK_NUM, consuming contract storage resources asymmetrically. While there's a limit, there's no mechanism to charge for or throttle the creation of multiple locks per account.\n",
+            "findings": [
+                {
+                    "title": "Premature Release of Lock Resource Before Transfer Confirmation",
+                    "description": "The withdraw function removes the lock_info from account.locked_tokens before the token transfer is confirmed successful. This creates a window where the lock is released but tokens haven't been transferred yet. If the contract state is queried during this period, the lock appears non-existent even though the withdrawal hasn't completed. The lock should only be removed after transfer confirmation in the callback.",
+                    "category": "CWE-826",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Operation on Released Lock Resource",
+                    "description": "In the withdraw function, lock_info is removed from the HashMap and then operated upon. While the immediate operations are safe, this pattern creates a race condition where the resource (lock) has been released from its storage location but is still being used. The subsequent callback attempts to restore it on failure, but there's a temporal gap where the lock doesn't exist in storage despite tokens not being transferred.",
+                    "category": "CWE-672",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Lost Reference to Locked Tokens on Account Deletion",
+                    "description": "In after_token_transfer, when a token transfer fails but the account no longer exists (possibly deleted between withdraw call and callback), the function emits a WithdrawLostfound event but doesn't maintain any reference to recover the locked tokens. The tokens become permanently inaccessible as there's no mechanism to restore them without an account reference.",
+                    "category": "CWE-771",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Asymmetric Storage Consumption Through Lock Creation",
+                    "description": "The contract allows users to create up to MAX_LOCK_NUM locks per account without proportional cost. While there's a limit, an attacker could create many accounts each with maximum locks, consuming significant contract storage resources with minimal investment. There's no throttling or cost mechanism proportional to the number of locks created.",
+                    "category": "CWE-405",
+                    "severity": "medium",
+                    "confidence": 0.75
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code (which appears to be NEAR Protocol Rust code, not Solana), I examined it for the specified CWE categories related to resource consumption and algorithmic complexity issues. The analysis focused on:\n1. **CWE-407 (Inefficient Algorithmic Complexity)**: The code uses HashMap operations which are generally O(1) average case. No nested loops or inefficient algorithms were found that could lead to worst-case complexity issues exploitable by attackers.\n2. **CWE-408 (Early Amplification)**: The `withdraw` function performs account lookups and state modifications, but these are necessary operations that occur after authentication (via `env::predecessor_account_id()`). No expensive operations occur before proper authorization.\n3. **CWE-409 (Data Amplification)**: No compressed data handling is present in the code.\n4. **CWE-1094 (Excessive Index Range Scan)**: The code uses HashMap with direct key lookups (`get`, `remove`, `insert`). There are no range scans or iterations over large data tables that could be exploited.\n5. **CWE-776 (XML Entity Expansion)**: No XML processing is present in the code.\n6. **CWE-406 (Network Amplification)**: The `transfer_token` function makes external contract calls, but these are single calls per withdrawal operation with fixed gas limits. There's no mechanism for an attacker to amplify network traffic volume.\n7. **CWE-1084 (Excessive File/Data Access)**: The code performs reasonable data access operations. The `withdraw` function does: account lookup, token removal, account update, and token transfer - all necessary operations for the business logic.\n8. **CWE-1176 (Inefficient CPU Computation)**: All computations are straightforward arithmetic operations and HashMap lookups. No inefficient algorithms were identified.\n9. **CWE-1072 (No Connection Pooling)**: Not applicable as this is blockchain smart contract code, not traditional database access code.\n10. **CWE-1050 (Resource Consumption in Loop)**: While there's a check `self.locked_tokens.len() < MAX_LOCK_NUM` in `add_lock`, there are no loops in the code that consume platform resources excessively. The HashMap operations are not performed in loops that could be exploited.\nThe code appears to be well-structured with appropriate bounds checking (MAX_LOCK_NUM limit) and uses efficient data structures (HashMap). No security issues related to the specified CWE categories were identified.",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-410",
+            "CWE-487",
+            "CWE-118",
+            "CWE-501",
+            "CWE-911",
+            "CWE-610",
+            "CWE-704",
+            "CWE-400",
+            "CWE-673",
+            "CWE-668",
+            "CWE-404",
+            "CWE-666",
+            "CWE-913",
+            "CWE-1329",
+            "CWE-580",
+            "CWE-662",
+            "CWE-496",
+            "CWE-669",
+            "CWE-372",
+            "CWE-922",
+            "CWE-1229",
+            "CWE-495",
+            "CWE-706",
+            "CWE-665",
+            "CWE-221"
+        ],
+        [
+            "CWE-1246",
+            "CWE-593",
+            "CWE-771",
+            "CWE-605",
+            "CWE-672",
+            "CWE-405",
+            "CWE-415",
+            "CWE-770",
+            "CWE-1235",
+            "CWE-920",
+            "CWE-779",
+            "CWE-826"
+        ],
+        [
+            "CWE-407",
+            "CWE-408",
+            "CWE-409",
+            "CWE-1094",
+            "CWE-776",
+            "CWE-406",
+            "CWE-1084",
+            "CWE-1176",
+            "CWE-1072",
+            "CWE-1050"
+        ]
+    ]
+}

@@ -1,0 +1,144 @@
+{
+    "project": "blocksec_ref_finance_exchange_v1.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_finance_exchange_v1.0_signed.pdf.json/ref-exchange/src/simple_pool.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.1111111111111111,
+        "recall": 1.0,
+        "f1": 0.19999999999999998
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-190",
+        "CWE-682",
+        "CWE-435",
+        "CWE-284",
+        "CWE-193",
+        "CWE-703",
+        "CWE-369",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect Admin Fees Calculation in Simple Pool",
+            "description": "In the Simple Pool implementation, the calculation for minting shares to the admin as part of admin fees is mathematically incorrect. The current formula results in the admin receiving fewer shares than intended, leading to lower-than-expected admin fees. The root cause lies in the flawed derivation of the `Minted_Share` formula, which does not properly account for the total fee amount relative to pool value changes. An attacker cannot directly exploit this, but the protocol itself suffers from incorrect fee accounting, which can be consistently triggered during any swap involving the Simple Pool. The impact is a systematic under-collection of admin fees, resulting in financial loss for the protocol and misaligned economic incentives.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code implements core pool math and share accounting, but it relies heavily on the caller (outer contract layer) to enforce critical security properties. Several functions accept `sender_id`/`admin_fee` as parameters and do not bind them to `env::predecessor_account_id()`, creating access-control risks if these methods are ever exposed directly or invoked incorrectly by the integrating contract. The implementation also performs multiple security-relevant balance/share updates using unchecked arithmetic (`+`/`-` on `u128`), which can wrap in release/WASM builds and corrupt accounting. Additionally, fee-minting logic depends on `AdminFees` values that are not validated here; extreme values can cause division-by-zero panics (DoS) or over-mint shares. Finally, share registration and zero-balance LP handling can allow persistent storage growth if the outer layer does not strictly require storage deposits and/or does not limit registrations.\n",
+            "findings": [
+                {
+                    "title": "Untrusted `sender_id` enables unauthorized share transfer / liquidity withdrawal if exposed",
+                    "description": "Multiple state-changing methods trust a passed-in `sender_id` rather than binding actions to the transaction caller:\n- `share_transfer(&mut self, sender_id, receiver_id, amount)` debits `sender_id` without verifying that `sender_id == env::predecessor_account_id()`.\n- `remove_liquidity(&mut self, sender_id, shares, ...)` burns shares from `sender_id` without authenticating the caller.\n- `add_liquidity(&mut self, sender_id, ...)` mints shares to an arbitrary `sender_id`.\nIf any public/external entrypoint forwards user-controlled `sender_id` into these functions (or fails to enforce `sender_id == predecessor`), an attacker can transfer others’ shares or withdraw others’ liquidity.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Unchecked arithmetic on balances/shares can wrap and corrupt pool accounting",
+                    "description": "The contract uses unchecked `u128` arithmetic in several security-critical places. In Rust release/WASM, overflows typically wrap instead of panicking, which can silently corrupt accounting:\n- `share_transfer`: `balance_out + amount` is unchecked and may wrap, giving the receiver an incorrect (possibly very small) balance or enabling weird state.\n- `add_liquidity`: `self.amounts[i] += amount` and the initial-liquidity branch `self.amounts[i] += amounts[i]` are unchecked.\n- `swap`: `self.amounts[in_idx] += amount_in`, `self.amounts[out_idx] -= amount_out` are unchecked; `self.volumes[...] += ...` is unchecked.\n- `remove_liquidity`: `self.amounts[i] -= amount` and `self.shares_total_supply -= shares` are unchecked.\nThese operations should use `checked_add/checked_sub` (with explicit error handling) to prevent wraparound that could lead to incorrect withdrawals, broken invariants, or permanent pool corruption.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Fee-minting uses unvalidated `AdminFees` leading to DoS (division by zero) or excessive share minting",
+                    "description": "In `swap`, fee share minting computes:\n  denominator = new_invariant * FEE_DIVISOR / admin_fee.exchange_fee\nand similarly for `referral_fee`, then mints `(numerator / denominator)` shares.\nProblems if `admin_fee.exchange_fee` / `admin_fee.referral_fee` are not validated by the integrating contract:\n- If the fee value is so large that `new_invariant * FEE_DIVISOR / fee == 0`, then `numerator / denominator` will divide by zero and panic, reverting swaps (DoS).\n- If `exchange_fee` (or `referral_fee`) is set larger than intended (e.g., > `FEE_DIVISOR` or inconsistent with `total_fee`), the denominator becomes too small and the contract over-mints shares to `exchange_id`/`referral_id`, diluting LPs.\nThis is especially dangerous if a caller can influence `AdminFees` passed into `swap` (directly or via mis-integration).\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.82
+                },
+                {
+                    "title": "Swap assumes tokens were received; mis-integration can allow swapping without paying",
+                    "description": "`swap` explicitly assumes `amount_in` \"was already received from `sender_id`\" but does not verify any token transfer occurred. If the outer contract calls `swap` before confirming an FT transfer (or can be tricked into calling it without an actual preceding transfer), the pool’s internal balances will be updated as if funds were received, allowing an attacker to extract `amount_out` without providing `amount_in`.\nThis is an integration hazard between correctly-behaving components (the pool math vs. token transfer flow), and must be enforced at the outer contract boundary (e.g., only call `swap` from an `ft_on_transfer` handler after validating `predecessor` is the token contract and the transferred amount matches).\n",
+                    "category": "CWE-435",
+                    "severity": "critical",
+                    "confidence": 0.67
+                },
+                {
+                    "title": "Potential storage-growth/DoS if share registration is not metered and zero-balance LPs are retained",
+                    "description": "`share_register` inserts a new entry into `self.shares` but does not itself enforce/collect storage payment (comment: \"Storage payment should be checked by caller\"). Additionally, `remove_liquidity` intentionally keeps LPs registered by setting balance to 0 instead of removing the key.\nIf the integrating contract does not strictly require adequate deposits and/or does not limit who can register, an attacker can register many accounts and bloat on-chain storage, increasing costs and potentially causing operational issues.\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.77
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains multiple arithmetic edge cases that can lead to panics (transaction abort/DoS) or state corruption via wrapping arithmetic. The most impactful issues are several divide-by-zero paths (CWE-369) reachable under plausible pool states or parameter choices, and multiple unchecked u128 additions/subtractions that will wrap in release builds (CWE-190/CWE-191/CWE-128). There are also deliberate +/-1 rounding adjustments in `add_liquidity` that can create off-by-one effects (CWE-193), potentially causing users to overpay by 1 unit per token or unexpectedly revert when minted shares round to zero.\n",
+            "findings": [
+                {
+                    "title": "Divide-by-zero in add_liquidity when a pool reserve becomes zero",
+                    "description": "In `add_liquidity`, when `self.shares_total_supply > 0`, the function computes:\n  `... / self.amounts[i]`\nwhere `self.amounts[i]` is a u128 reserve.\nThere is no check that `self.amounts[i] != 0` in this branch.\n\nA reserve can become 0 while `shares_total_supply` remains > 0 due to rounding in `remove_liquidity`:\n  `amount = floor(self.amounts[i] * shares / shares_total_supply)`\nIf `shares` is close to `shares_total_supply` (but not equal), `amount` can equal the full reserve for a token, driving `self.amounts[i]` to 0 while leaving some shares outstanding.\n\nSubsequent `add_liquidity` calls would then divide by zero and panic, creating a persistent DoS for providing liquidity (until the pool state is otherwise fixed, which may be impossible).\n",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.82
+                },
+                {
+                    "title": "Divide-by-zero in remove_liquidity when shares_total_supply is zero (e.g., withdrawing 0 shares)",
+                    "description": "`remove_liquidity` divides by `self.shares_total_supply` unconditionally:\n  `... / U256::from(self.shares_total_supply)`\nbut does not assert `self.shares_total_supply > 0` nor `shares > 0`.\n\nA registered account can call `remove_liquidity(..., shares=0, ...)` when the pool is empty (`shares_total_supply == 0`), satisfying `prev_shares_amount >= shares`, and then triggering division by zero inside the loop.\nThis causes a panic (transaction abort). While it does not directly steal funds, it is a correctness/DoS footgun and can be used to force failing calls if this method is exposed through higher-level logic.\n",
+                    "category": "CWE-369",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Divide-by-zero in swap fee share minting due to zero denominator from truncating division",
+                    "description": "In `swap`, when allocating exchange/referral fees, the code computes:\n  `denominator = new_invariant * FEE_DIVISOR / admin_fee.exchange_fee;`\n  `mint = numerator / denominator`\n\nEven when `admin_fee.exchange_fee > 0`, `denominator` can become 0 due to integer division truncation if:\n  `admin_fee.exchange_fee > new_invariant * FEE_DIVISOR`.\n\nThe same applies to `admin_fee.referral_fee`.\nThere are no bounds checks ensuring `exchange_fee`/`referral_fee` are <= `new_invariant * FEE_DIVISOR` (or even <= `FEE_DIVISOR`), so a misconfigured (or user-influenced) `AdminFees` can cause `numerator / 0` and panic, reverting swaps (DoS).\n",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.86
+                },
+                {
+                    "title": "Unchecked u128 additions can wrap: pool reserves, LP share balances, and volume counters",
+                    "description": "The contract performs multiple unchecked u128 additions that will wrap in release builds:\n  - `self.amounts[i] += amounts[i]` (initial liquidity branch)\n  - `self.amounts[i] += amount` (subsequent liquidity branch)\n  - `self.amounts[in_idx] += amount_in` (swap)\n  - `self.shares.insert(receiver_id, &(balance_out + amount))` (share_transfer)\n  - `self.volumes[in_idx].input.0 += amount_in` and `output.0 += amount_out` (swap volume tracking)\n\nIf any of these values approach u128::MAX, wrapping will corrupt pool accounting and can break invariants relied upon for pricing and withdrawals (potentially enabling value extraction or permanently bricking the pool depending on surrounding contract logic).\nOnly `shares_total_supply` is protected with `checked_add`; the other accumulators are not.\n",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Unchecked u128 subtractions can underflow/wrap: reserves and shares_total_supply",
+                    "description": "The contract performs unchecked subtractions:\n  - `self.amounts[i] -= amount` in `remove_liquidity`\n  - `self.amounts[out_idx] -= amount_out` in `swap`\n  - `self.shares_total_supply -= shares` in `remove_liquidity`\n\nWhile the code intends to ensure these are safe via prior assertions and formula properties, any inconsistency (e.g., prior wrapped arithmetic, unexpected state, or future modifications) can cause underflow and wrap to a huge value, catastrophically corrupting pool state.\n\nIn particular, `self.shares_total_supply -= shares` is not checked against `shares_total_supply` (only against the user's share balance), so if the total supply is ever desynced from individual balances (e.g., via overflow elsewhere), this can underflow.\n",
+                    "category": "CWE-191",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Off-by-one rounding adjustments in add_liquidity can overcharge by 1 unit per token and/or cause unexpected reverts",
+                    "description": "In `add_liquidity` (existing pool branch):\n  - `fair_supply` uses `(amounts[i] - 1)` (round down with a -1 bias)\n  - required deposit is computed as `(...).as_u128() + 1` (round up with a +1 bias)\n\nThis introduces off-by-one behavior: the function may set `amounts[i]` (the required transferred amounts) to 1 unit more than the exact proportional amount, effectively overcharging liquidity providers by 1 smallest unit per token.\n\nIt can also push `fair_supply` to 0 for small deposits (e.g., `amounts[i] == 1`), leading to a revert (`ERR32_ZERO_SHARES`), which may be surprising UX and can be used to grief integrators expecting minimal deposits to succeed.\n",
+                    "category": "CWE-193",
+                    "severity": "low",
+                    "confidence": 0.74
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-135",
+            "CWE-191",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-1339"
+        ]
+    ]
+}

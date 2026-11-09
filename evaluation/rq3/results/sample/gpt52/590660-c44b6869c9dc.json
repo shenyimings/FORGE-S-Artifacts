@@ -1,0 +1,140 @@
+{
+    "project": "zenith-dbc-audit-may-2025.pdf.json",
+    "files": [
+        "dataset/contracts/zenith-dbc-audit-may-2025.pdf.json/programs/dynamic-bonding-curve/src/state/config.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.14285714285714285,
+        "recall": 0.5,
+        "f1": 0.22222222222222224
+    },
+    "cwe_ground_truth": [
+        "CWE-1068",
+        "CWE-710"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-573",
+        "CWE-664",
+        "CWE-682",
+        "CWE-710",
+        "CWE-703",
+        "CWE-684"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect documentation for get_total_trading_fee()",
+            "description": "The inline documentation for the get_total_trading_fee() function incorrectly states that the maximum fee numerator is capped at 50%. However, in the current release, this cap has been increased to 99%. While this does not introduce a functional vulnerability, it can mislead developers and auditors about the actual fee limits enforced by the system. Incorrect documentation may lead to incorrect assumptions in integrations or security reviews, potentially resulting in flawed economic models or unexpected behavior in downstream applications.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The reviewed code is primarily configuration/fee math, but it contains several security-relevant validation gaps that can be abused to break pool behavior or trigger program aborts. The most serious issue is in `PoolConfig::init`, which copies a user-provided `Vec` into a fixed-size array without bounding the length; if the vector is longer than `MAX_CURVE_POINT_CONFIG`, the program will panic due to out-of-bounds indexing (DoS). Additionally, `init` does not clear unused curve slots, which can leave stale configuration data if the account is ever re-initialized or partially overwritten, violating resource lifetime expectations. Several percentage fields (protocol/referral and LP split percentages) are not validated to be <=100 (or to sum to <=100), which can cause underflow errors and transaction failures (DoS) or unintended fee/LP distribution. Finally, there is an unnecessary `unwrap()` in a critical fee computation path; while currently “guarded” by a cap, it is brittle and can become a panic vector if constants or types change.\n",
+            "findings": [
+                {
+                    "title": "Out-of-bounds write/panic in PoolConfig::init when curve.len() exceeds MAX_CURVE_POINT_CONFIG",
+                    "description": "`PoolConfig::init` iterates `for i in 0..curve.len()` and writes into `self.curve[i]`, but `self.curve` is a fixed-size array of length `MAX_CURVE_POINT_CONFIG`.\nIf the caller supplies a `curve` vector longer than `MAX_CURVE_POINT_CONFIG`, indexing `self.curve[i]` will go out of bounds and cause a Rust panic, aborting the program execution.\nOn Solana, this manifests as a hard failure (transaction abort), enabling a denial-of-service against any instruction path that invokes this initialization with attacker-controlled input.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Stale curve configuration due to not clearing unused slots during init",
+                    "description": "`PoolConfig::init` only writes the first `curve.len()` entries into `self.curve` and leaves the remaining array entries unchanged.\nIf the same `PoolConfig` account can ever be reinitialized/updated with a shorter curve (e.g., via an upgrade/migration/admin update path), old curve points may remain and later be interpreted as valid liquidity distribution points, leading to unexpected pricing/liquidity behavior.\nThis is a resource lifetime/control issue: the code does not maintain full control of the configuration state across updates.\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Missing validation of fee/percentage fields can cause underflow-driven DoS or unintended distribution",
+                    "description": "Multiple calculations assume percentages are well-formed (0..=100) and/or that component percentages sum to <=100, but there is no validation in this module:\n- `PoolFeesConfig::get_fee_on_amount` assumes `protocol_fee_percent` and `referral_fee_percent` are sensible; values >100 (or referral >100 of protocol) can produce surprising results or trigger subtraction failures (via SafeMath) causing transaction aborts.\n- `PoolConfig::get_lp_distribution` and `get_liquidity_distribution` subtract computed portions from `lp_amount/liquidity`; if `partner_locked_lp_percentage + partner_lp_percentage + creator_locked_lp_percentage > 100`, the final subtraction underflows and returns an error, enabling a configuration-based DoS.\nBecause these parameters are security-critical (directly control value distribution), they should be bounded and (where applicable) sum-checked during initialization/update.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Brittle unwrap() in fee numerator conversion could become a panic vector",
+                    "description": "In `PoolFeesConfig::get_total_trading_fee`, after capping `total_fee_numerator` to `MAX_FEE_NUMERATOR`, the code does:\n`total_fee_numerator.try_into().unwrap()`.\nWhile the cap currently implies the value should fit in `u64`, using `unwrap()` in on-chain code is fragile and can reintroduce panics if constants/types change or if future refactors alter the cap logic.\nPrefer returning an explicit error instead of panicking.\n",
+                    "category": "CWE-710",
+                    "severity": "low",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Flag fields use permissive comparisons without validating allowed domain (0/1 or enum range)",
+                    "description": "Some security-relevant booleans/enums are stored as `u8` and interpreted with permissive comparisons:\n- `DynamicFeeConfig::is_dynamic_fee_enable` treats any nonzero `initialized` value as enabled.\n- `PoolConfig::is_fixed_token_supply` treats only `1` as fixed and any other value as dynamic.\nWithout explicit validation that these fields are within the intended domain (e.g., {0,1} or valid enum discriminants), malformed state can lead to unintended behavior and inconsistent policy enforcement across program components.\n",
+                    "category": "CWE-707",
+                    "severity": "low",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "Review of `config.rs` identified issues primarily around missing validation and unsafe assumptions about input sizes/flag domains. The most security-relevant problem is an unchecked copy from an attacker-controlled `Vec` into a fixed-size array inside `PoolConfig::init`, which can panic (transaction abort / DoS) and can also leave stale configuration data if the provided curve is shorter than the previous one. Additionally, multiple “flag” fields are treated as booleans/enums without enforcing their valid domains, which can lead to unintended execution paths and misconfiguration-driven failures.\n",
+            "findings": [
+                {
+                    "title": "Unchecked curve length causes out-of-bounds write/panic in PoolConfig::init (DoS)",
+                    "description": "`PoolConfig::init` copies `curve: &Vec<LiquidityDistributionParameters>` into the fixed-size\n`self.curve: [LiquidityDistributionConfig; MAX_CURVE_POINT_CONFIG]` using:\n\n`for i in 0..curve.len() { self.curve[i] = ... }`\n\nIf `curve.len() > MAX_CURVE_POINT_CONFIG`, indexing `self.curve[i]` will go out of bounds and panic.\nIn Solana/Anchor, a panic aborts the instruction, which is a denial-of-service vector against any\ninstruction path that calls `init` with attacker-influenced `curve` length.\n",
+                    "category": "CWE-573",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Partial curve initialization can leave stale curve points (configuration confusion)",
+                    "description": "In `PoolConfig::init`, only indices `[0..curve.len())` are overwritten. The remainder of `self.curve`\nis not cleared. If `init` is ever used in a context where the account is not freshly zeroed\n(e.g., re-initialization/upgrade/mutable update patterns), old curve points beyond the new `curve.len()`\npersist.\n\nLater, `get_initial_base_supply` reconstructs a curve by scanning `self.curve` until it finds a point\nwith `liquidity == 0`. If stale entries are non-zero, they may be unintentionally included in pricing/supply\ncalculations. This can lead to incorrect supply computation or swap sizing, potentially impacting economic\ncorrectness and causing unexpected instruction failures.\n",
+                    "category": "CWE-684",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Flag/enum fields lack domain validation (invalid values silently change behavior)",
+                    "description": "Several configuration fields are treated as booleans/enums but are stored as raw `u8` and not validated\nin this module (e.g., `fixed_token_supply_flag`, `collect_fee_mode`, `migration_option`, `activation_type`,\n`token_type`, `quote_token_flag`, and `DynamicFeeConfig.initialized`).\n\nExample: `is_fixed_token_supply()` returns true only for `fixed_token_supply_flag == 1`; any other value,\nincluding invalid values like `2`, is treated as \"dynamic supply\". Similarly, `DynamicFeeConfig` enables\ndynamic fees for any non-zero `initialized`.\n\nIf upstream instruction handlers do not strictly validate these fields on creation/update, malformed values\ncan force unintended branches, causing misconfiguration-driven economic behavior or systematic transaction\nfailures.\n",
+                    "category": "CWE-573",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-758",
+            "CWE-1061",
+            "CWE-573",
+            "CWE-571",
+            "CWE-1092",
+            "CWE-1044",
+            "CWE-1126",
+            "CWE-1164",
+            "CWE-477",
+            "CWE-684",
+            "CWE-1177",
+            "CWE-1101",
+            "CWE-570",
+            "CWE-1059",
+            "CWE-1065",
+            "CWE-1209",
+            "CWE-1048",
+            "CWE-1041",
+            "CWE-1127",
+            "CWE-1357",
+            "CWE-1076",
+            "CWE-1093",
+            "CWE-1120",
+            "CWE-657",
+            "CWE-1066",
+            "CWE-1068"
+        ]
+    ]
+}

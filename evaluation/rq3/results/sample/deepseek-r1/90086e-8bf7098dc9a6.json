@@ -1,0 +1,142 @@
+{
+    "project": "sec3_helium_program_library_report.pdf.json",
+    "files": [
+        "dataset/contracts/sec3_helium_program_library_report.pdf.json/programs/voter-stake-registry/src/instructions/update_voter_weight_record_v0.rs",
+        "dataset/contracts/sec3_helium_program_library_report.pdf.json/programs/voter-stake-registry/src/instructions/cast_vote_v0.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.42857142857142855,
+        "recall": 0.5,
+        "f1": 0.4615384615384615
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-1288",
+        "CWE-862",
+        "CWE-285",
+        "CWE-284",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-862",
+        "CWE-285",
+        "CWE-435",
+        "CWE-638",
+        "CWE-284"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Permissionless update_voter_weight_record_v0",
+            "description": "The `update_voter_weight_record_v0` instruction allows any payer to update a voter weight record for any owner, without requiring authorization from the owner. The root cause is the absence of a signature or authority check on `args.owner`. An attacker can exploit this to manipulate voting weights, clear targets, or alter voting actions on behalf of other users. The impact includes vote manipulation, undermining the integrity of the governance system.\n"
+        },
+        {
+            "title": "Manipulate num_active_votes in position",
+            "description": "The instruction `update_voter_weight_record_v0` and `cast_vote_v0` do not validate that the position account corresponds to the provided token account's mint. This allows an attacker to pass unrelated position accounts, manipulating the `voter_weight` calculation or incrementing `num_active_votes` on arbitrary positions. The root cause is missing mint consistency checks. Exploitation involves passing mismatched accounts to inflate voting power or lock positions incorrectly. The impact is vote manipulation and potential denial of service for legitimate voters.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract exhibits two vulnerabilities:\n1. Improper Access Control (CWE-284): The `update_voter_weight_record_v0` instruction lacks owner authorization, allowing malicious actors to manipulate voter weight records arbitrarily.\n2. Improper Interaction Between Entities (CWE-435): The `update_voter_weight_record_v0` instruction disrupts vote accumulation in `cast_vote_v0`, causing incorrect vote weight calculations when interleaved.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized Voter Weight Record Modification",
+                    "description": "The `update_voter_weight_record_v0` instruction does not verify that the `payer` or caller has any relationship with the `owner` argument. This allows any user to create or overwrite the `VoterWeightRecord` for any governance token owner, enabling denial-of-service attacks by resetting voting weights or expiration times.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Vote Accumulation Interference",
+                    "description": "Calling `update_voter_weight_record_v0` during a multi-transaction vote accumulation (via `cast_vote_v0`) resets the `VoterWeightRecord`'s action and target. This breaks the accumulation logic in `cast_vote_v0`, causing subsequent votes to set (rather than add to) the total weight and leading to incorrect voting power calculations.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract exhibits one primary vulnerability related to improper authorization. In the `update_voter_weight_record_v0` handler function, there is no validation of the caller's authority over the `owner` parameter. This allows any user to arbitrarily set/modify voter weight records for any other account by specifying a target `owner` address. The `cast_vote_v0` handler appropriately validates authority using `resolve_governing_token_owner`, but this critical check is missing in the weight update function.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized Voter Weight Record Modification",
+                    "description": "The `handler` function in `update_voter_weight_record_v0.rs` processes `UpdateVoterWeightRecordArgsV0` containing an `owner` field without verifying the caller's authority over this account. Any attacker can specify an arbitrary `owner` address and modify their voting power, enabling manipulation of governance mechanisms. Proper authorization checks (e.g., verifying signature authority over the target account) are missing.\n",
+                    "category": "CWE-285",
+                    "severity": "critical",
+                    "confidence": 0.99
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract exhibits two instances of Missing Authorization (CWE-862). First, `update_voter_weight_record_v0` allows any payer to manipulate voter weight records without ownership verification. Second, `cast_vote_v0` processes token/position accounts without validating their association with the voter, enabling vote manipulation.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized Voter Weight Record Modification",
+                    "description": "The instruction `update_voter_weight_record_v0` allows any payer to create/modify a VoterWeightRecord for any owner without authorization checks. This enables malicious actors to arbitrarily set voting weights for any account.",
+                    "category": "CWE-862",
+                    "severity": "critical",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Missing Ownership Validation for Vote Assets",
+                    "description": "The instruction `cast_vote_v0` processes token/position accounts from remaining accounts without verifying ownership by `args.owner`. Attackers can supply arbitrary accounts to inflate voting power or corrupt vote tracking.",
+                    "category": "CWE-862",
+                    "severity": "critical",
+                    "confidence": 0.95
+                }
+            ]
+        },
+        {
+            "reasoning": "The instruction `update_voter_weight_record_v0` does not authenticate the `owner` argument. It allows any payer to set the voter weight record for any owner without authorization. This violates CWE-638 because the access check is missing. The instruction `cast_vote_v0` does have proper access control through the `voter_authority` signer and the `resolve_governing_token_owner` function, so it is safe.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized Update of Voter Weight Record",
+                    "description": "The 'update_voter_weight_record_v0' instruction allows any payer to create or update the voter weight record for any owner without verifying the payer's authority. This could allow an attacker to arbitrarily set the voting weight of any user, potentially enabling unauthorized governance actions.",
+                    "category": "CWE-638",
+                    "severity": "critical",
+                    "confidence": 0.99
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-269",
+            "CWE-749",
+            "CWE-1267",
+            "CWE-287",
+            "CWE-346",
+            "CWE-923",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-282",
+            "CWE-1280",
+            "CWE-286",
+            "CWE-1270"
+        ],
+        [
+            "CWE-863",
+            "CWE-927",
+            "CWE-732",
+            "CWE-862",
+            "CWE-1230",
+            "CWE-1328"
+        ],
+        [
+            "CWE-638",
+            "CWE-1314",
+            "CWE-425"
+        ]
+    ]
+}

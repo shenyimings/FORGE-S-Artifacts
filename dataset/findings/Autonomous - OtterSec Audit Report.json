@@ -1,0 +1,75 @@
+{
+    "path": "reports-without-source/Autonomous - OtterSec Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/Autonomous-Finance/stake-vault"
+        ],
+        "commit_id": [
+            "35d7bb2"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-01-10",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-191"
+                ]
+            },
+            "title": "DOS Due to Large Value of Excess Tokens",
+            "description": "This vulnerability is a denial-of-service (DoS) issue arising in the `distribute_inner` function when there is a mismatch between `vault_state.minted_tokens` and the actual token balance in the `vault_token_account`. The root cause is that `vault_state.minted_tokens` is not updated when tokens are directly transferred into the vault's token account, causing `excess_tokens` to exceed `minted_tokens`. When the system attempts to subtract `excess_tokens` from `minted_tokens` using `checked_sub`, an arithmetic underflow occurs, causing the transaction to revert. This prevents reward distribution, resulting in a temporary DoS. The impact is disrupted operations for reward distribution until additional SOL deposits reset the balance inconsistency. Although temporary, this creates an operational vulnerability that could be exploited to delay critical functions.\n",
+            "severity": "high",
+            "location": [
+                "stake-vault/src/instructions/distribute.rs::distribute_inner"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Locked Tokens in the Vault Token Account",
+            "description": "This vulnerability stems from inconsistent accounting between `vault_state.active_sol_deposits` and `user_account.deposited_lamports`. When a user deposits SOL, the full amount (including fees) is added to `active_sol_deposits`, but the user's `deposited_lamports` is credited only with the net amount after fee deduction. This discrepancy causes the fee portion to be effectively locked in the vault's token account, as no mechanism exists to claim or distribute these tokens. The root cause is the failure to track fee-derived tokens separately. An attacker cannot directly exploit this for gain, but users and the vault lose access to these funds, leading to permanent loss of fee-related value. The impact is economic loss and reduced fund efficiency within the protocol.\n",
+            "severity": "high",
+            "location": [
+                "stake-vault/src/instructions/deposit_sol.rs::DepositSol"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Inaccurate Data Due to Epoch Mismatch",
+            "description": "This vulnerability occurs when the `last_update_epoch` in the `StakePool` struct does not match the current epoch, leading to stale data in the `total_lamports` field. Since `total_lamports` is used to calculate pool token prices during withdrawals, an outdated value results in incorrect pricing. The root cause is the lack of validation to ensure `total_lamports` is up to date before use. An attacker could exploit this by triggering withdrawal or reward calculations during an outdated epoch, potentially gaining an unfair advantage in token exchange rates. The impact includes inaccurate financial calculations, which may lead to economic loss for users or the vault due to mispriced token conversions.\n",
+            "severity": "high",
+            "location": [
+                "stake-vault/src/state/stake_pool.rs::calc_pool_tokens_required_for_withdrawal"
+            ],
+            "files": []
+        }
+    ]
+}

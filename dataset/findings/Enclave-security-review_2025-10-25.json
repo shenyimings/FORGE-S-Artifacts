@@ -1,0 +1,130 @@
+{
+    "path": "reports-without-source/Enclave-security-review_2025-10-25.md",
+    "project_info": {
+        "url": [
+            "https://github.com/Enclave-Money/solver-fund-pool-anchor"
+        ],
+        "commit_id": [
+            "668adb2eac1ecb81843ffda226db1fd1e1ed9396"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-10-25",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Funds can be redirected",
+            "description": "1. **Description:** The vulnerability allows an attacker to redirect borrowed funds to their own token account instead of the intended user account. This occurs because the program does not validate that the provided `user_token_account` belongs to the user.\n2. **Cause:** The root cause is the lack of ownership validation on the `user_token_account`. The account is only required to be mutable and does not enforce that its owner is the `user` or that it is the associated token account (ATA) for the user and mint.\n3. **Exploitation:** An attacker can obtain a valid signature for a borrow request and then substitute the `user_token_account` with one they control. Since the signature does not bind the token account, the program will accept the malicious account and transfer funds to it.\n4. **Impact:** The attacker can steal funds from the pool by redirecting loan payouts to their own account, leading to direct financial loss for the protocol.\n",
+            "severity": "high",
+            "location": [
+                "programs/solver-fund-pool-anchor/src/instructions/borrow.rs::user_token_account#142-143"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-347"
+                ]
+            },
+            "title": "Wrong‑Offset Ed25519 instruction introspection enables forged approvals",
+            "description": "1. **Description:** The program insecurely verifies off-chain Ed25519 signatures by inspecting the previous instruction in the transaction without proper validation, allowing forged approvals.\n2. **Cause:** The program fails to validate critical fields in the Ed25519 instruction, including the program ID, instruction index fields (which must be in inline mode), and bounds of offsets and sizes. This allows an attacker to craft a malicious preceding instruction that appears valid upon inspection.\n3. **Exploitation:** An attacker can construct a transaction with a specially crafted Ed25519 verification instruction that causes the runtime to verify attacker-controlled data, while placing legitimate-looking bytes at the offsets the program checks. The program will accept this as a valid signature verification.\n4. **Impact:** Unauthorized users can trigger borrow operations without possessing a valid signature from an authorized signer, leading to unauthorized fund withdrawals and potential nonce manipulation that blocks legitimate users.\n",
+            "severity": "high",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-439"
+                ]
+            },
+            "title": "Program does not support `Token-2022` mints",
+            "description": "1. **Description:** The program uses the legacy SPL Token interface and does not support Token-2022 mints, which are incompatible with the current CPI calls.\n2. **Cause:** The code imports and uses `anchor_spl::token::Token`, which is tied to the legacy token program. Token-2022 mints are owned by a different program ID (`spl_token_2022::ID`), causing CPIs to fail when used with such mints.\n3. **Exploitation:** While not directly exploitable for theft, this limitation prevents interoperability with modern token standards and may cause transaction failures when users attempt to interact with Token-2022 assets.\n4. **Impact:** Reduced functionality and compatibility, limiting the protocol's utility in ecosystems adopting Token-2022 features such as transfer hooks or confidential transfers.\n",
+            "severity": "low",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "`borrow` lacks `has_one = user` constraint on `user_borrow_state`",
+            "description": "1. **Description:** The `borrow` instruction does not enforce that the `user` field inside the `UserBorrowState` account matches the `user` account passed in the instruction.\n2. **Cause:** The account is derived using the user's key as a seed, but the program does not validate that the stored `user` field in the account data corresponds to the provided account. This creates a trust gap between on-chain data and runtime accounts.\n3. **Exploitation:** If the account data is modified via an unchecked CPI or data corruption, the program may process a borrow using a mismatched user, breaking assumptions about nonce ownership and replay protection.\n4. **Impact:** Could lead to incorrect state updates, broken replay protection, and potential inconsistencies in user accounting or access control logic.\n",
+            "severity": "low",
+            "location": [
+                "programs/solver-fund-pool-anchor/src/instructions/borrow.rs::Borrow#109-128"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Inconsistent usage of seed constants and byte literals",
+            "description": "1. **Description:** The program inconsistently uses hardcoded byte literals (`b\\\"fund_pool\\\"`) and a constant (`FUND_POOL_SEED`) when deriving the `fund_pool` PDA, risking future mismatches.\n2. **Cause:** Some account constraints use `seeds = [b\\\"fund_pool\\\"]` while others use `seeds = [FUND_POOL_SEED]`, even though they are currently equivalent. This redundancy increases maintenance risk.\n3. **Exploitation:** During future upgrades, a developer might modify one version (e.g., the constant) but forget to update the hardcoded literals, causing PDA derivation mismatches and breaking functionality.\n4. **Impact:** Potential operational failures, including inability to access critical state accounts, if seed inconsistencies are introduced during updates.\n",
+            "severity": "low",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Frontrunnable Initialization",
+            "description": "1. **Description:** The `initialize` instruction can be called by any party, allowing an attacker to front-run the legitimate deployer and seize administrative control of the protocol.\n2. **Cause:** The instruction does not restrict who can invoke it, and the `initial_admin` is set based on an arbitrary public key provided by the caller.\n3. **Exploitation:** An attacker monitoring the mempool can detect the deployment transaction and submit their own `initialize` call first, becoming the admin and gaining control over admin-gated functions permanently.\n4. **Impact:** Complete loss of control over the protocol by the intended deployer, leading to potential fund lockup, unauthorized changes, or denial of service.\n",
+            "severity": "low",
+            "location": [],
+            "files": []
+        }
+    ]
+}

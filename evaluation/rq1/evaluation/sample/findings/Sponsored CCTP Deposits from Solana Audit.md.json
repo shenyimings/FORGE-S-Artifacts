@@ -1,0 +1,149 @@
+{
+    "path": "reports/Sponsored CCTP Deposits from Solana Audit.md",
+    "project_info": {
+        "url": "https://github.com/across-protocol/contracts/",
+        "commit_id": "30eed1972adf4e90c9fb65fe818d7a6f5e9aca5f",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-11-10",
+        "project_path": "contracts/Sponsored CCTP Deposits from Solana Audit.md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-405"
+                ]
+            },
+            "title": "Program-Sponsored Rents Allow Cheap Griefing That Starves rent_fund and Triggers Repeated Temporary DoS",
+            "description": "This vulnerability arises from the cost asymmetry in the deposit_for_burn function, where the program sponsors rent for both the UsedNonce PDA and the CCTP v2 MessageSent account. The attacker can submit deposits with minimal token amounts while maximizing the hook data size, which increases the rent cost for the MessageSent account. The root cause is the lack of on-chain enforcement of minimum deposit amounts and message size limits, combined with the off-chain quote generator not sufficiently restricting these parameters. An attacker can exploit this by repeatedly submitting such deposits, draining the rent_fund and preventing new sponsored deposits. The impact is a recurring, temporary denial of service (DoS), as the rent_fund must be replenished and the five-day reclaim window delays recovery, allowing the attacker to re-trigger the DoS at low cost.\n",
+            "severity": "high",
+            "location": [
+                "deposit_for_burn#105"
+            ],
+            "files": [
+                "programs/sponsored-cctp-src-periphery/src/instructions/deposit.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Destination Hook Fails Can Permanently Lock Funds",
+            "description": "The deposit_for_burn function invokes CCTP v2's deposit_for_burn_with_hook, which irreversibly burns tokens on the source chain before confirming successful execution on the destination. If the destination hook fails due to time-sensitive conditions or changing state, the transfer cannot be reversed or rescued under CCTP v2, as it lacks a replacement or unburn mechanism. The root cause is the irreversible nature of the burn operation combined with the dependency on external, potentially failing logic on the destination chain. An attacker or unfortunate user could trigger a burn where the destination conditions are not met, leading to permanent fund lockup. The impact is the permanent loss of user funds when destination-side hooks revert, even if the failure is due to transient or predictable conditions.\n",
+            "severity": "medium",
+            "location": [
+                "deposit_for_burn#105"
+            ],
+            "files": [
+                "programs/sponsored-cctp-src-periphery/src/instructions/deposit.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Missing Rent-Fund Balance Precheck Causes Late Revert and Poor UX in deposit_for_burn",
+            "description": "The deposit_for_burn instruction does not perform an early check on the rent_fund balance before attempting to refund the user for the UsedNonce account creation. The root cause is the absence of a pre-validation step to ensure sufficient lamports are available in the rent_fund. An attacker or regular user could submit transactions when the rent_fund is low, causing the transaction to revert during the refund step after computation has already been consumed. The impact is a poor user experience and wasted transaction fees due to late reverts, as well as inefficient use of compute units, especially under high load or when the fund is near depletion.\n",
+            "severity": "low",
+            "location": [
+                "deposit_for_burn#105"
+            ],
+            "files": [
+                "programs/sponsored-cctp-src-periphery/src/instructions/deposit.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Repeated PDA Bump Search Wastes Compute Units",
+            "description": "The program derives the rent_fund and state PDAs without storing their bump seeds, forcing Anchor to perform a runtime search for valid bump values on every invocation. The root cause is the omission of persisted bump values in account constraints. This increases compute unit consumption, especially in high-frequency paths like deposit_for_burn. An attacker could exploit this by triggering these paths repeatedly, increasing network load and potentially causing transactions to fail due to compute limits. The impact is inflated and variable compute costs, leading to performance instability and higher transaction failure rates under load.\n",
+            "severity": "low",
+            "location": [
+                "deposit_for_burn#25",
+                "deposit_for_burn#28"
+            ],
+            "files": [
+                "programs/sponsored-cctp-src-periphery/src/instructions/deposit.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ]
+            },
+            "title": "Overuse of emit_cpi! on Privileged Paths Increases Compute Cost Without Clear Security Benefit",
+            "description": "Privileged instructions such as initialize, set_signer, and withdraw_rent_fund use emit_cpi! to emit events, which introduces an additional cross-program invocation and serialization overhead. The root cause is the unnecessary use of CPI-based event emission for admin functions where log integrity is less critical. This increases compute unit consumption for low-frequency but important administrative operations, raising the risk of transaction failure in composite calls. The impact is higher operational costs and reduced reliability for critical admin functions, without a corresponding security benefit, as these paths are already permissioned.\n",
+            "severity": "low",
+            "location": [
+                "initialize#42",
+                "set_signer#83",
+                "withdraw_rent_fund#128",
+                "reclaim_event_account#216",
+                "reclaim_used_nonce_account#251"
+            ],
+            "files": [
+                "programs/sponsored-cctp-src-periphery/src/instructions/admin.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Oversized CCTP Messages Can Permanently Lock Rent in MessageSent Event Accounts",
+            "description": "The deposit_for_burn function allows CCTP messages that are large enough to make the reclaim_event_account transaction exceed Solana's packet size limit due to the inclusion of the attestation with multiple signatures. The root cause is the lack of an upper bound on message size during deposit, which allows creation of MessageSent accounts that cannot be reclaimed. An attacker can exploit this by submitting deposits with messages near the size limit, causing deposit_for_burn to succeed but making reclaim_event_account always fail. The impact is permanent loss of rent funds and a griefing vector that can drain the rent_fund, disrupting service and requiring manual replenishment.\n",
+            "severity": "informational",
+            "location": [
+                "deposit_for_burn#105",
+                "reclaim_event_account#216"
+            ],
+            "files": [
+                "programs/sponsored-cctp-src-periphery/src/instructions/deposit.rs"
+            ]
+        }
+    ]
+}

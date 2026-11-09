@@ -1,0 +1,113 @@
+{
+    "path": "reports/openbook_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/openbook-dex/openbook-v2/tree/audit/programs/openbook-v2",
+        "commit_id": "840e661",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-09-20",
+        "project_path": "contracts/openbook_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Missing Side Check On Market Vault Account",
+            "description": "1. **Description:** The `place_order` instruction lacks validation to ensure that the market vault account used for depositing assets matches the side (bid or ask) of the order. This allows a mismatch between the order side and the vault used.\n2. **Cause:** The root cause is the absence of a check in the `place_order` function to validate that the `market_vault` corresponds to the correct side of the order (base or quote vault).\n3. **Exploitation:** An attacker can place a bid order but deposit into the ask-side vault (or vice versa), effectively receiving assets without providing the corresponding counter-asset, thereby draining funds from the market.\n4. **Impact:** This leads to financial losses for legitimate traders, imbalance in market vaults, and undermines the integrity of the trading system.\n",
+            "severity": "critical",
+            "files": [
+                "programs/openbook-v2/src/instructions/place_order.rs"
+            ],
+            "location": [
+                "place_order#"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Incorrect Check On Variance Value",
+            "description": "1. **Description:** In the `oracle_price_from_a_and_b` function, the condition `target_var > var` incorrectly rejects valid oracle prices when the calculated variance is below the target, when it should instead reject when variance exceeds the target.\n2. **Cause:** The logic uses a reversed comparison: it returns `None` when variance is too low, rather than when it is too high, which contradicts the intended security check.\n3. **Exploitation:** Attackers could manipulate oracle inputs to keep variance low, causing the system to reject valid prices and potentially fall back to less secure or outdated price sources.\n4. **Impact:** This may result in denial of service for price updates or reliance on stale/inaccurate prices, leading to incorrect trading decisions and financial losses.\n",
+            "severity": "high",
+            "files": [
+                "programs/openbook-v2/src/state/market.rs"
+            ],
+            "location": [
+                "market::oracle_price_from_a_and_b"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Proper Access Control Implementation",
+            "description": "1. **Description:** The `create_market` instruction does not verify that the `market_base_vault` and `market_quote_vault` do not have a `close_authority` set, which could allow unauthorized parties to close or drain vaults.\n2. **Cause:** Missing validation during market creation to ensure vaults are securely initialized without external close authorities.\n3. **Exploitation:** A malicious actor could set themselves as the close authority during vault creation and later close the vault to steal funds or disrupt market operations.\n4. **Impact:** Potential loss of funds from market vaults and denial of service for market functionality.\n",
+            "severity": "medium",
+            "files": [
+                "programs/openbook-v2/src/instructions/create_market.rs"
+            ],
+            "location": [
+                "create_market"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Incorrect Variance Calculation",
+            "description": "1. **Description:** The `target_var` in `oracle_price_from_a_and_b` is calculated as `conf_filter.powi(2)`, but fails to account for the `(priceA / priceB)^2` factor, leading to an inaccurate variance threshold.\n2. **Cause:** The calculation omits a necessary scaling factor used in the single-oracle case, making the composite oracle's variance check inconsistent and too permissive.\n3. **Exploitation:** Attackers could exploit the miscalibrated threshold to pass through oracle prices with unacceptably high variance by manipulating the ratio between oracle sources.\n4. **Impact:** Inaccurate asset pricing may result in trades at unfair rates, causing financial instability and loss of user funds.\n",
+            "severity": "low",
+            "files": [
+                "programs/openbook-v2/src/state/market.rs"
+            ],
+            "location": [
+                "market::oracle_price_from_a_and_b"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Potential Overflow Prevention",
+            "description": "1. **Description:** Several fields in the `Market` struct (e.g., `fees_accrued`, `maker_volume`, `taker_volume_wo_oo`) use `u64`, which may overflow in high-volume or long-running markets.\n2. **Cause:** The use of a 64-bit unsigned integer for cumulative financial metrics that can grow indefinitely over time without rollover protection.\n3. **Exploitation:** In a highly active market, these values could eventually overflow, resetting to zero and corrupting accounting data.\n4. **Impact:** Incorrect financial tracking, potential loss of fees, and systemic accounting errors that could undermine trust and lead to disputes or exploits.\n",
+            "severity": "informational",
+            "files": [
+                "programs/openbook-v2/src/state/market.rs"
+            ],
+            "location": [
+                "Market.fees_accrued",
+                "Market.fees_to_referrers",
+                "Market.referrer_rebates_accrued",
+                "Market.fees_available",
+                "Market.maker_volume",
+                "Market.taker_volume_wo_oo"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,241 @@
+{
+    "project": "2024-11-mantra-dex.md.json",
+    "files": [
+        "dataset/contracts/2024-11-mantra-dex.md.json/contracts/farm-manager/src/helpers.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3333333333333333,
+        "recall": 1.0,
+        "f1": 0.5
+    },
+    "cwe_ground_truth": [
+        "CWE-20",
+        "CWE-707",
+        "CWE-664",
+        "CWE-1284"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-1288",
+        "CWE-664",
+        "CWE-190",
+        "CWE-682",
+        "CWE-1286",
+        "CWE-606",
+        "CWE-435",
+        "CWE-1284",
+        "CWE-703",
+        "CWE-20",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Refunds of fees being paid should be processed for all assets",
+            "description": "The function `process_farm_creation_fee` handles refunds when a user pays more than the required farm creation fee. However, it only refunds the difference if the fee denomination differs from the farm asset denomination. When both are the same, the function enforces a strict equality between the sum of the farm asset and fee amount and the paid amount, disallowing any overpayment even if it would be refundable.\n\nThe root cause is the lack of a refund mechanism when the fee and asset denoms are identical. This creates an inconsistent user experience and may lead to loss of funds if users accidentally overpay in the same denomination.\n\nAn attacker or user could exploit this by intentionally overpaying in a different denom to receive a refund, while being unable to do so in the same denom, leading to permanent loss of excess funds.\n\nThe impact is user fund loss due to inability to receive refunds when overpaying in the same denomination as the farm asset, reducing usability and trust in the system.\n"
+        },
+        {
+            "title": "Emergency unlock penalty should not be allowed to be up to 100%",
+            "description": "The `validate_emergency_unlock_penalty` function allows penalties up to 100%, which effectively discourages users from using the emergency unlock feature, as they would lose all funds.\n\nThe root cause is lack of a reasonable upper bound below 100%.\n\nWhile admin-controlled, a malicious or compromised admin could set 100% penalty to trap user funds.\n\nThe impact is reduced utility of the emergency feature and potential user fund loss under adversarial governance.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The helper functions are generally defensive, but several security-relevant edge cases exist around (a) unchecked arithmetic on u64 epoch IDs/timestamps, (b) assumptions about MessageInfo.funds structure (single coin per denom, fee coin always present), (c) use of saturating math that can mask invariant violations (e.g., claimed_amount > farm_asset.amount), and (d) reliance on correct integration ordering between helpers (fee processing vs. asset assertion). These issues can lead to denial-of-service, incorrect “expired” state, or (if composed incorrectly by callers) acceptance of insufficient funding.\n",
+            "findings": [
+                {
+                    "title": "Unchecked u64 addition can overflow epoch calculations (start_epoch default and epoch query id)",
+                    "description": "Two places add to u64 epoch IDs without checked arithmetic:\n- validate_farm_epochs: `current_epoch + 1u64` when deriving the default start epoch.\n- is_farm_expired: `farm.preliminary_end_epoch + 1u64` when querying the epoch manager.\nIf `current_epoch` or `preliminary_end_epoch` approaches `u64::MAX`, these additions overflow (wrapping in release builds), potentially querying an unintended epoch id, bypassing intended validation, or causing unexpected errors/DoS in downstream logic.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Zero-fee configuration may be unusable due to mandatory fee-denom presence checks",
+                    "description": "process_farm_creation_fee always requires finding a coin with `farm_creation_fee.denom` in `info.funds`, returning `FarmFeeMissing` if absent, even when `farm_creation_fee.amount` is zero. Similarly, assert_farm_asset enforces `info.funds.len() == 2` (or `== 1` when denoms match), implicitly requiring the fee-denom entry to exist.\nOn chains/SDK settings where sending a 0-amount coin is disallowed or normalized away, a zero-fee configuration could make farm creation impossible (persistent DoS).\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Farm expiration check can be bypassed/miscomputed if claimed_amount exceeds farm_asset.amount due to saturating_sub",
+                    "description": "is_farm_expired computes remaining rewards as:\n`farm.farm_asset.amount.saturating_sub(farm.claimed_amount) == 0`.\nIf `claimed_amount > farm_asset.amount` due to a separate bug/state corruption/race, saturating_sub returns 0 and the farm is treated as having no rewards left, marking it expired. If expiration gates cleanup, withdrawals, or future claims, this can prematurely transition farm state and lock users out or enable unintended lifecycle actions.\nUsing checked arithmetic (and treating over-claim as an error) better preserves resource-lifetime invariants.\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Fee processing and farm-asset assertion are separable; incorrect integration can accept underfunded farm creation",
+                    "description": "process_farm_creation_fee validates only the fee-denom payment amount. When `farm_creation_fee.denom == params.farm_asset.denom`, it only validates fee+asset sum in the overpayment branch; if the paid amount equals exactly the fee amount, the function succeeds without validating that the farm asset amount was also provided.\nThis is safe only if callers always also invoke assert_farm_asset afterward. If any create-farm path calls process_farm_creation_fee but forgets/skips assert_farm_asset (or calls it conditionally), an attacker could create a farm by paying only the fee and omitting the farm funding.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.66
+                },
+                {
+                    "title": "Assumes a single Coin entry per denom in info.funds (uses find, not sum); can cause unexpected behavior/DoS with duplicate denoms",
+                    "description": "process_farm_creation_fee and assert_farm_asset use `.iter().find(|coin| coin.denom == ...)` and then compare that single entry's amount, rather than summing all entries of the same denom.\nIf upstream components ever allow/produce multiple Coin entries with the same denom, the contract may:\n- Reject valid payments (false negatives), causing DoS; or\n- Refund/validate against only the first entry, diverging from actual transferred totals.\nWhile some Cosmos SDK flows normalize funds, relying on that invariant without enforcing it can be fragile.\n",
+                    "category": "CWE-707",
+                    "severity": "low",
+                    "confidence": 0.6
+                }
+            ]
+        },
+        {
+            "reasoning": "The reviewed helper functions mostly perform parameter validation and message construction, but there are a few places where arithmetic and structural checks can be bypassed or behave unexpectedly under edge-case inputs. The main themes are:\n(1) insufficient validation of the exact funds structure in `assert_farm_asset` (it checks the number of coins but not that the “other” coin is the fee denom/amount),\n(2) unchecked `u64` additions that can wrap in release builds (`+ 1u64`), leading to querying/validating the wrong epoch or causing unexpected errors,\n(3) use of saturating arithmetic (`saturating_sub`) in a security-relevant condition, which can mask an inconsistent internal state (e.g., claimed > total) and lead to incorrect “expired” decisions.\n",
+            "findings": [
+                {
+                    "title": "Fee bypass possibility due to incomplete funds structure validation in assert_farm_asset",
+                    "description": "In `assert_farm_asset`, when `farm_creation_fee.denom != params.farm_asset.denom`, the function enforces:\n- the farm asset amount matches (`coin_sent.amount == params.farm_asset.amount`), and\n- exactly two coins were sent (`info.funds.len() == 2`).\n\nHowever, it does NOT verify that the second coin is actually the fee denom, nor that its amount equals `farm_creation_fee.amount`.\n\nIf any call site relies on `assert_farm_asset` alone (or calls it before/without `process_farm_creation_fee`), an attacker can satisfy the `len() == 2` requirement by attaching an arbitrary second denom (e.g., a dust coin) instead of paying the required farm creation fee denom/amount. This is an input validation gap on a structured message (`info.funds` is effectively a structured list).\n",
+                    "category": "CWE-20",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Unchecked u64 addition can wrap and query/validate the wrong epoch",
+                    "description": "There are multiple unchecked additions on `u64` that can wrap in optimized/release builds:\n\n1) `validate_farm_epochs`:\n   `let start_epoch = params.start_epoch.unwrap_or(current_epoch + 1u64);`\n   If `current_epoch == u64::MAX`, `current_epoch + 1` wraps to 0 in release builds. While the subsequent `ensure!(start_epoch > 0)` will fail and return an error, the use of unchecked arithmetic here is still risky and inconsistent with the rest of the function (which uses `checked_add` elsewhere).\n\n2) `is_farm_expired`:\n   It queries `Epoch { id: farm.preliminary_end_epoch + 1u64 }` without `checked_add`.\n   If `farm.preliminary_end_epoch == u64::MAX`, the id wraps to 0, resulting in:\n   - querying the wrong epoch (potentially genesis),\n   - unintended early/late expiration decisions, or\n   - runtime query failure/DoS for farm operations that depend on `is_farm_expired`.\n\nThese are classic integer wraparound hazards for boundary inputs.\n",
+                    "category": "CWE-190",
+                    "severity": "medium",
+                    "confidence": 0.83
+                },
+                {
+                    "title": "Saturating subtraction may mask inconsistent accounting and cause incorrect 'expired' decisions",
+                    "description": "In `is_farm_expired`, the “no more assets to claim” condition is computed as:\n`farm.farm_asset.amount.saturating_sub(farm.claimed_amount) == Uint128::zero()`.\n\nIf `claimed_amount > farm_asset.amount` (due to any upstream bug, rounding issue, or state manipulation elsewhere), `saturating_sub` yields zero and the farm is treated as depleted/expired instead of surfacing an invariant violation.\n\nThis can produce a security-relevant incorrect decision (treating an inconsistent farm as expired), potentially enabling premature cleanup/expiration behavior or masking an accounting error that should be handled explicitly.\n",
+                    "category": "CWE-191",
+                    "severity": "low",
+                    "confidence": 0.66
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains several input-validation weaknesses around numeric ranges and structural consistency of inputs. The most severe issues stem from unchecked `u64` arithmetic on epoch IDs (e.g., `current_epoch + 1` and `preliminary_end_epoch + 1`), where attacker-controlled epoch parameters can reach boundary values and trigger overflow/wrap or panics/DoS, and also produce incorrect epoch queries. Additionally, some validators (e.g., `validate_identifier`) only partially enforce the intended syntax (it allows empty identifiers), and fee/funds validation is split across helpers such that extra/unexpected funds may not be rejected unless callers always remember to invoke all relevant checks, creating consistency risks.\n",
+            "findings": [
+                {
+                    "title": "Unchecked epoch arithmetic can overflow (current_epoch+1, end_epoch+1) causing wrong epoch queries or DoS",
+                    "description": "Epoch arithmetic is performed with unchecked `+ 1u64` in multiple places:\n- `validate_farm_epochs`: `let start_epoch = params.start_epoch.unwrap_or(current_epoch + 1u64);`\n- `is_farm_expired`: queries `id: farm.preliminary_end_epoch + 1u64`\n\nIf `current_epoch == u64::MAX`, `current_epoch + 1` overflows. Similarly, if a user supplies\n`params.preliminary_end_epoch == u64::MAX`, the later `+ 1u64` in `is_farm_expired` overflows.\nDepending on compilation settings (overflow checks enabled/disabled), this can:\n- panic and abort execution (DoS for any operation that reaches this code path), or\n- wrap to 0, causing an incorrect epoch ID to be queried and potentially misclassifying farms as expired/not expired.\n\n`validate_farm_epochs` also does not enforce an upper bound on user-supplied `preliminary_end_epoch`,\nso boundary values can pass the current checks and later break invariants when used elsewhere.\n",
+                    "category": "CWE-1284",
+                    "severity": "high",
+                    "confidence": 0.83
+                },
+                {
+                    "title": "Missing upper-bound validation for time/duration quantities may overflow Timestamp computations",
+                    "description": "`validate_farm_expiration_time` enforces only a minimum (`>= MONTH_IN_SECONDS`) but no maximum.\nLater, `is_farm_expired` computes:\n  `farm_ending_at.plus_seconds(config.farm_expiration_time)`\nIf `config.farm_expiration_time` is extremely large (whether set by governance/admin or indirectly),\n`plus_seconds` can overflow internal timestamp arithmetic (implementation-dependent), leading to\npanics/DoS or incorrect time comparisons.\n\nSimilar \"quantity without bounds\" patterns exist for epoch ranges, where extremely large values are accepted.\n",
+                    "category": "CWE-1284",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Identifier validation allows empty string, enabling syntactically invalid identifiers and potential collisions",
+                    "description": "`validate_identifier` checks maximum length and allowed characters, but it does not require the\nidentifier to be non-empty (or otherwise meet a minimum length / structure):\n  `identifier.len() <= MAX_IDENTIFIER_LENGTH && identifier.chars().all(...)`\n\nAn empty identifier (`\"\"`) passes these checks. If identifiers are used as keys for farms/positions,\nthis can cause unintended collisions, ambiguous references, or bypass of logic that assumes a meaningful identifier format.\n",
+                    "category": "CWE-1286",
+                    "severity": "medium",
+                    "confidence": 0.76
+                },
+                {
+                    "title": "Fee processing does not independently enforce that only expected denoms are provided (relies on external call ordering)",
+                    "description": "`process_farm_creation_fee` validates the paid fee denom/amount and may refund overpayment in the fee denom,\nbut it does not validate that `info.funds` contains only the expected denoms (fee denom and possibly farm asset denom).\nThat constraint is enforced separately in `assert_farm_asset`.\n\nIf any call path invokes `process_farm_creation_fee` without also invoking `assert_farm_asset` (or does so in an unexpected order),\na transaction could include additional, unexpected denoms. This creates inconsistent complex input handling:\n- extra coins could become stuck in the contract (user fund loss / griefing), or\n- downstream logic could accidentally operate under assumptions that no longer hold.\n\nThis is primarily an input consistency problem arising from splitting validation across helpers.\n",
+                    "category": "CWE-1288",
+                    "severity": "low",
+                    "confidence": 0.62
+                }
+            ]
+        },
+        {
+            "reasoning": "The reviewed helper functions contain iterations over caller-controlled collections without explicit bounds checks. Under CWE-606, the concern is that untrusted inputs can influence loop conditions/iteration counts, potentially causing excessive computation and out-of-gas (denial of service). In this code, the primary risks come from iterating over (a) `info.funds` (user-supplied list of coins attached to the message) and (b) a `Vec<Position>` passed into a helper that constructs a `HashSet` and then collects again, amplifying the cost. While transaction size limits may constrain `info.funds`, the contract itself does not enforce any maximum sizes, and the `positions` vector may originate from user-influenced state or message parameters in calling code.\n",
+            "findings": [
+                {
+                    "title": "Unbounded iteration over user-supplied `info.funds` may cause gas exhaustion",
+                    "description": "`process_farm_creation_fee` and `assert_farm_asset` iterate over `info.funds` using `.iter().find(...)` and also check `info.funds.len()`.\nBecause `info.funds` is controlled by the transaction sender (they can attach many different denoms/coins), a malicious user can attempt to maximize the number of entries, increasing the cost of these linear scans.\n\nA sufficiently large `info.funds` vector can increase execution cost and may cause out-of-gas failures, resulting in a denial-of-service for operations that rely on these helpers.\n\nAffected code patterns:\n- `info.funds.iter().find(|coin| ...)` in `process_farm_creation_fee`\n- `info.funds.iter().find(|sent| ...)` in `assert_farm_asset`\n",
+                    "category": "CWE-606",
+                    "severity": "medium",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Unbounded iteration and allocation over `positions` vector in unique-denom extraction",
+                    "description": "`get_unique_lp_asset_denoms_from_positions(positions: Vec<Position>)` performs multiple passes and allocations over the entire `positions` vector:\n- Iterates through all positions to map denoms\n- Collects into a `HashSet` (hashing/allocation per element)\n- Iterates again to collect into a `Vec<String>`\n\nIf `positions` can be influenced by a user (directly via inputs, or indirectly by allowing creation of many positions and then calling a method that loads them all), an attacker can force very large iteration counts and memory allocations, increasing gas usage and potentially causing out-of-gas failures (DoS).\n\nThe helper itself does not enforce any maximum length or short-circuit behavior.\n",
+                    "category": "CWE-606",
+                    "severity": "high",
+                    "confidence": 0.81
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-221",
+            "CWE-393",
+            "CWE-1038",
+            "CWE-116",
+            "CWE-911",
+            "CWE-188",
+            "CWE-1339",
+            "CWE-495",
+            "CWE-369",
+            "CWE-118",
+            "CWE-170",
+            "CWE-1229",
+            "CWE-240",
+            "CWE-138",
+            "CWE-397",
+            "CWE-404",
+            "CWE-191",
+            "CWE-673",
+            "CWE-704",
+            "CWE-1335",
+            "CWE-913",
+            "CWE-228",
+            "CWE-669",
+            "CWE-410",
+            "CWE-436",
+            "CWE-580",
+            "CWE-501",
+            "CWE-463",
+            "CWE-1426",
+            "CWE-172",
+            "CWE-190",
+            "CWE-665",
+            "CWE-20",
+            "CWE-662",
+            "CWE-755",
+            "CWE-496",
+            "CWE-439",
+            "CWE-666",
+            "CWE-706",
+            "CWE-922",
+            "CWE-193",
+            "CWE-1329",
+            "CWE-668",
+            "CWE-754",
+            "CWE-128",
+            "CWE-400",
+            "CWE-487",
+            "CWE-610",
+            "CWE-135",
+            "CWE-372",
+            "CWE-74"
+        ],
+        [
+            "CWE-1287",
+            "CWE-179",
+            "CWE-1286",
+            "CWE-1288",
+            "CWE-1285",
+            "CWE-1284",
+            "CWE-1173",
+            "CWE-1289"
+        ],
+        [
+            "CWE-606"
+        ]
+    ]
+}

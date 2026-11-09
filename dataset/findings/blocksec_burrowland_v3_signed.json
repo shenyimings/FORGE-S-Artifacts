@@ -1,0 +1,164 @@
+{
+    "path": "reports/blocksec_burrowland_v3_signed.pdf",
+    "project_info": {
+        "url": "https://github.com/burrowHQ/burrowland/pull/1/files",
+        "commit_id": "5eb851cf361ce53e460ab8d5bd4a265487df5993",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-10-24",
+        "project_path": "contracts/blocksec_burrowland_v3_signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Improper Round Direction",
+            "description": "The function asset_amount_to_shares() uses a rounding direction parameter that, when set to true, causes shares to be rounded down and amounts to be rounded up, leading to potential under-recording of user shares. The root cause is the improper configuration of the inverse_round_direction parameter in internal_borrow(), where it is set to true. An attacker could exploit this by borrowing assets in small amounts repeatedly to accumulate a discrepancy in recorded shares. The impact is minor financial loss for users due to slightly lower recorded borrowed shares than expected.\n",
+            "severity": "low",
+            "files": [
+                "contract/src/actions.rs"
+            ],
+            "location": [
+                "actions.rs#internal_borrow"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Interactions Required for Newly Added Rewards",
+            "description": "When a new reward token is added to a farm via add_asset_farm_reward(), users cannot claim the new rewards until internal_account_farm_claim() is manually invoked, even if they already hold the required tokens. This is caused by the lack of automatic reward accumulation upon addition of a new reward. An attacker or malicious user could exploit this by timing their claims to maximize gaps in reward accrual. The impact is that users receive fewer rewards than expected, reducing trust and utility in the protocol.\n",
+            "severity": "medium",
+            "files": [
+                "contract/src/config.rs",
+                "contract/src/account_farm.rs"
+            ],
+            "location": [
+                "config.rs#add_asset_farm_reward",
+                "account_farm.rs#internal_account_farm_claim"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Precision Loss during Token Transfer",
+            "description": "The function internal_ft_transfer() converts input amounts using extra_decimals by performing integer division, which truncates any remainder and results in precision loss. The root cause is the lack of handling for remainder values during division when standardizing token amounts. An attacker could exploit this by making many small transfers to accumulate lost fractions. The impact is that users receive fewer tokens than expected, leading to financial loss and reduced confidence in the system.\n",
+            "severity": "medium",
+            "files": [
+                "contract/src/fungible_token.rs"
+            ],
+            "location": [
+                "fungible_token.rs#internal_ft_transfer",
+                "fungible_token.rs#internal_ft_transfer_prot_own",
+                "fungible_token.rs#internal_ft_transfer_reserved"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Lack of Updating Affected Farm",
+            "description": "In the function after_ft_transfer(), when a token transfer fails, the system redeposits the deducted amount back to the user's account but fails to update the affected farms via internal_account_apply_affected_farms(). The root cause is the omission of this update call after redeposit. An attacker could exploit failed transfers (e.g., via gas exhaustion) to trigger redeposits without farm updates. The impact is that redeposited tokens do not contribute to farming rewards, resulting in lower user rewards than expected.\n",
+            "severity": "medium",
+            "files": [
+                "contract/src/fungible_token.rs"
+            ],
+            "location": [
+                "fungible_token.rs#after_ft_transfer#173-191"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Inconsistency of Modifiable booster_token_id and booster_decimals",
+            "description": "The booster_token_id and booster_decimals fields in the Config struct can be modified by the owner via update_config(), even while users are staking. If changed during active staking, a user calling account_unstake_booster() may receive a different token or amount than originally deposited. The root cause is the mutability of critical configuration parameters that should remain immutable after initialization. An attacker with owner privileges could change the booster token to drain user stakes. The impact is that users may withdraw incorrect tokens, leading to significant financial loss.\n",
+            "severity": "medium",
+            "files": [
+                "contract/src/config.rs",
+                "contract/src/booster_staking.rs"
+            ],
+            "location": [
+                "config.rs#update_config",
+                "booster_staking.rs#account_unstake_booster"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Improper Discount Value Check",
+            "description": "The internal_liquidate() function requires that a liquidated account must remain in risk after liquidation, based on compute_max_discount(), which prevents full liquidation. This contradicts the protocol's intended design to allow complete liquidation of undercollateralized positions. The root cause is an incorrect condition check that enforces residual risk. An attacker could exploit this by partially liquidating accounts and leaving bad debt in the system. The impact is reduced protocol solvency and inefficiency in risk management.\n",
+            "severity": "n/a",
+            "files": [
+                "contract/src/actions.rs"
+            ],
+            "location": [
+                "actions.rs#internal_liquidate#371-374"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant Invocation of add_affected_farm()",
+            "description": "The function add_affected_farm() is called redundantly in multiple locations, such as ft_on_transfer() and internal_deposit(), where the same farm type (Supplied) is recorded more than once for the same action. The root cause is poor code organization and lack of deduplication in farm tracking logic. While not directly exploitable, this increases gas costs and reduces efficiency. The impact is unnecessary gas consumption and reduced performance, though no direct financial loss occurs.\n",
+            "severity": "n/a",
+            "files": [
+                "contract/src/actions.rs",
+                "contract/src/booster_staking.rs",
+                "contract/src/fungible_token.rs"
+            ],
+            "location": [
+                "actions.rs#51",
+                "actions.rs#76",
+                "actions.rs#83",
+                "actions.rs#345",
+                "booster_staking.rs#103",
+                "fungible_token.rs#60"
+            ]
+        }
+    ]
+}

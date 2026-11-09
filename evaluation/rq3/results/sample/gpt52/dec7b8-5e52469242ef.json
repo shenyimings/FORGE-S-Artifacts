@@ -1,0 +1,132 @@
+{
+    "project": "ackee-blockchain-neon-evm-report.pdf.json",
+    "files": [
+        "dataset/contracts/ackee-blockchain-neon-evm-report.pdf.json/evm_loader/program/src/instruction/transaction_step_from_account.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.16666666666666666,
+        "recall": 0.5,
+        "f1": 0.25
+    },
+    "cwe_ground_truth": [
+        "CWE-1041",
+        "CWE-710"
+    ],
+    "cwe_detected": [
+        "CWE-573",
+        "CWE-758",
+        "CWE-284",
+        "CWE-710",
+        "CWE-703",
+        "CWE-684"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Unnecessary holder owner validation",
+            "description": "The TransactionStepFromAccount instruction performs a holder account owner check, but this is duplicated in the State::new function. \nThe cause is redundant validation logic that does not enhance security. \nThis leads to unnecessary compute unit consumption. \nThe impact is informational, as it is a code quality and efficiency issue rather than a security flaw.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code has multiple places where it assumes well-formed inputs (instruction buffer length and minimum account count) and performs unchecked indexing/slicing via `array_ref!` and `&accounts[N]`. In Solana BPF, these out-of-bounds accesses typically trigger a panic/abort, turning malformed transactions into a reliable denial-of-service vector for the instruction (CWE-703/CWE-710/CWE-691).\n\nAdditionally, the Holder path explicitly enforces ownership (`holder.validate_owner(&accounts.operator)?`), but the State continuation path does not perform any analogous ownership/authority check in this function before calling `do_continue`. If `State::restore(...)` does not strictly bind the state account to the expected operator/authority (and/or transaction hash/caller), an attacker could potentially continue another user's in-progress transaction by supplying their State account and their own operator account, resulting in improper access control (CWE-284). This is a common integration pitfall where security relies on an implicit check in another component.\n",
+            "findings": [
+                {
+                    "title": "Unchecked instruction length causes out-of-bounds read/panic",
+                    "description": "`process` reads `treasury_index` and `step_count` using `array_ref![instruction, 0, 4]` and `array_ref![instruction, 4, 4]` without validating `instruction.len() >= 8`.\nIf a caller provides an instruction data buffer shorter than 8 bytes, the macro will index out of bounds and can panic/abort the program execution, creating a denial-of-service condition for this instruction.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unchecked accounts length causes out-of-bounds indexing/slicing",
+                    "description": "`process` assumes at least 6 accounts and unconditionally indexes `accounts[0]..accounts[5]` and slices `&accounts[6..]` without checking `accounts.len()`.\nA transaction providing fewer accounts will trigger out-of-bounds access/panic, again enabling denial-of-service against this instruction entrypoint.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "State continuation path lacks explicit operator/owner authorization check",
+                    "description": "In the `Holder::TAG` branch, the code enforces authority with `holder.validate_owner(&accounts.operator)?`.\nIn the `State::TAG` branch, the function directly calls `State::restore(...)` and then `do_continue(...)` without an explicit authorization check in this function that the provided `accounts.operator` is allowed to operate on `holder_or_storage_info` (the State account).\nIf `State::restore` does not strictly validate operator authority/ownership (and binding to the same transaction/caller), an attacker may be able to continue/advance another user's State by supplying that State account and their own operator, resulting in unauthorized state transitions.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Reliance on panics instead of explicit input validation (coding-standard / control-flow robustness)",
+                    "description": "The combination of unchecked `array_ref!` reads and unchecked account indexing makes control flow depend on Rust panics for invalid input handling rather than returning deterministic `ProgramError`s.\nThis is an anti-pattern in on-chain programs because it increases the attack surface for reliable aborts and complicates downstream protection mechanisms and monitoring.\n",
+                    "category": "CWE-710",
+                    "severity": "low",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains multiple denial-of-service and memory-safety risks stemming from unsafe parsing and missing length validation. First, the instruction data is parsed using `array_ref!` without checking `instruction.len()`. The `arrayref` macro uses unsafe pointer casts and can invoke undefined behavior (read past the end of the slice) if the instruction is too short, which is especially problematic in on-chain programs. Second, the accounts array is indexed/sliced (`accounts[0]`, `accounts[1]`…`accounts[6..]`) without validating `accounts.len()`. An attacker can supply too few accounts (including via CPI) to force an out-of-bounds panic/abort rather than a clean `ProgramError`, producing a reliable DoS vector. Additionally, `step_count` is constructed from only 4 bytes and widened to `u64`; if the documented/spec’d instruction format expects an 8-byte step count, this mismatch can lead to incorrect behavior or interoperability issues.\n",
+            "findings": [
+                {
+                    "title": "Unsafe instruction parsing via `array_ref!` without bounds checks (potential UB)",
+                    "description": "`process()` reads `treasury_index` and `step_count` using:\n- `u32::from_le_bytes(*array_ref![instruction, 0, 4])`\n- `u32::from_le_bytes(*array_ref![instruction, 4, 4])`\n\nThe `arrayref` macro performs unsafe pointer casts and does not inherently validate that `instruction` is long enough. If `instruction.len() < 8`, the code can read past the end of the slice, which is reliance on undefined/unspecified behavior and can cause unpredictable failures.\n\nMitigation: validate `instruction.len() >= 8` before parsing, and/or use safe slicing (`instruction.get(0..4)`, `instruction.get(4..8)`) returning a `ProgramError` on failure.\n",
+                    "category": "CWE-758",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Out-of-bounds account indexing/slicing can panic and abort execution (DoS)",
+                    "description": "`process()` assumes at least 6 fixed accounts exist and then slices the remainder:\n- `let holder_or_storage_info = &accounts[0];`\n- `Operator::from_account(&accounts[1])?`, …, `program::Neon::from_account(program_id, &accounts[5])?`\n- `remaining_accounts: &accounts[6..]`\n\nIf the transaction (or a CPI caller) provides fewer than 6 accounts, Rust indexing will panic/abort rather than returning a controlled `ProgramError`. On Solana, panics typically fail the instruction and can be used as a reliable denial-of-service trigger for this entrypoint.\n\nMitigation: check `accounts.len() >= 6` (and any additional minimums) and return `ProgramError::NotEnoughAccountKeys` (or a custom error) before indexing/slicing.\n",
+                    "category": "CWE-573",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Potential instruction format mismatch: `step_count` read from 4 bytes but treated as `u64`",
+                    "description": "`step_count` is parsed as a `u32` from 4 bytes and then widened to `u64`:\n`let step_count = u64::from(u32::from_le_bytes(*array_ref![instruction, 4, 4]));`\n\nIf the intended instruction ABI specifies an 8-byte step count (common for `u64`), this implementation will not follow that specification, potentially causing inconsistent behavior across clients and unexpected limits/truncation semantics.\n\nMitigation: confirm the ABI; if `step_count` is truly `u64`, parse 8 bytes (`instruction[4..12]`) and validate length accordingly.\n",
+                    "category": "CWE-684",
+                    "severity": "medium",
+                    "confidence": 0.55
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-758",
+            "CWE-1061",
+            "CWE-573",
+            "CWE-571",
+            "CWE-1092",
+            "CWE-1044",
+            "CWE-1126",
+            "CWE-1164",
+            "CWE-477",
+            "CWE-684",
+            "CWE-1177",
+            "CWE-1101",
+            "CWE-570",
+            "CWE-1059",
+            "CWE-1065",
+            "CWE-1209",
+            "CWE-1048",
+            "CWE-1041",
+            "CWE-1127",
+            "CWE-1357",
+            "CWE-1076",
+            "CWE-1093",
+            "CWE-1120",
+            "CWE-657",
+            "CWE-1066",
+            "CWE-1068"
+        ]
+    ]
+}

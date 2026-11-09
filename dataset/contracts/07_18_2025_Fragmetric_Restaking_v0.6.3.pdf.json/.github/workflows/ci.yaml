@@ -1,0 +1,219 @@
+# credit to: https://github.com/jito-foundation/restaking/blob/master/.github/workflows/ci.yaml
+#
+# to test workflow locally (macOS):
+#  docker pull --platform linux/amd64 ghcr.io/catthehacker/ubuntu:full-latest
+# now test with:
+#  act push --container-architecture linux/amd64 --platform ubuntu-latest=ghcr.io/catthehacker/ubuntu:full-latest
+#  use --reuse to reuse previous container (cache might be stale)
+#  use --rm --bind to totally clear previous container
+#
+# local container debugging
+#   docker run --platform linux/amd64 --rm -it -v "$PWD":/app -w /app node:20 bash
+name: fragmetric-contracts CI
+
+env:
+  RUSTUP_TOOLCHAIN_VERSION: stable
+  RUSTUP_PERMIT_COPY_RENAME: 1
+  SOLANA_VERSION: stable #v2.1.21
+  ANCHOR_VERSION: v0.31.1
+  NODE_VERSION: 20.19.0
+  CI: true
+  DEBUG: true
+  RUNTIME: ${{(github.ref_name == 'main' || github.ref_name == 'dev' ||
+    (github.event_name == 'push' && contains(github.event.head_commit.message, '[svm]')) ||
+    (github.event_name == 'pull_request' && contains(github.event.pull_request.title, '[svm]'))) && 'svm' || 'litesvm' }}
+
+on:
+  push:
+    branches: ['main', 'dev']
+  pull_request:
+    branches: ['main', 'dev']
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    if: ${{ github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[skip ci]') }}
+    name: build and test
+    runs-on: macos-latest-xlarge # arch: arm64 (M1)
+    steps:
+      # checkout
+      - uses: actions/checkout@v4
+
+      # setup Node runtime
+      - name: setup Node $PATH
+        run: |
+          NODE_BIN=$(command -v node || true)
+          if [ -n "$NODE_BIN" ]; then
+            NODE_DIR=$(dirname "$NODE_BIN")
+            echo "Detected node at: $NODE_DIR"
+            echo "$NODE_DIR" >> $GITHUB_PATH
+          else
+            echo "Node not found, skipping PATH patch"
+          fi
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 10
+          run_install: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          #cache-dependency-path: ./pnpm-lock.yaml
+
+      # setup Rust and Solana runtime
+      - run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/${{ env.SOLANA_VERSION }}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN_VERSION }}
+          components: rustfmt, clippy
+          override: true
+          #cache-key: ./Cargo.lock
+      - uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-audit
+          version: "0.21.2"
+          locked: true
+      - uses: baptiste0928/cargo-install@v3
+        with:
+          crate: anchor-cli
+          git: https://github.com/solana-foundation/anchor
+          tag: ${{ env.ANCHOR_VERSION }}
+          locked: true
+      - uses: baptiste0928/cargo-install@v3
+        with:
+          crate: solana-verify
+
+      # lint Rust codes and audit dependencies
+      - run: cargo audit --ignore RUSTSEC-2022-0093 --ignore RUSTSEC-2024-0344 --ignore RUSTSEC-2024-0421 --ignore RUSTSEC-2025-0022
+      - run: cargo fmt --check
+      - run: cargo clippy -- --allow warnings
+      - run: cargo test-sbf
+      - run: anchor build
+      - run: pnpm build
+      - name: Run integration tests
+        shell: bash
+        run: |
+          shopt -s globstar
+          files=(./programs/**/*.test.ts)
+          # run test with LiteSVM or SVM
+          pnpm test "${files[@]}"
+
+      # build artifacts
+      # TODO: anchor build --verifiable
+      - name: build and package release candidates
+        if: github.ref_name == 'dev' || github.ref_name == 'main'
+        id: package
+        shell: bash
+        env:
+          KEYPAIR_RESTAKING_PROGRAM_DEVNET: ${{ secrets.KEYPAIR_RESTAKING_PROGRAM_DEVNET }}
+          KEYPAIR_RESTAKING_PROGRAM_MAINNET: ${{ secrets.KEYPAIR_RESTAKING_PROGRAM_MAINNET }}
+          KEYPAIR_SOLV_PROGRAM_DEVNET: ${{ secrets.KEYPAIR_SOLV_PROGRAM_DEVNET }}
+          KEYPAIR_SOLV_PROGRAM_MAINNET: ${{ secrets.KEYPAIR_SOLV_PROGRAM_MAINNET }}
+        run: |
+          set -euo pipefail
+          
+          PKG=$(mktemp -d)
+          echo "path=$PKG" >> "$GITHUB_OUTPUT"
+          
+          # common artifacts
+          cp target/idl/restaking.json "$PKG/common.restaking.anchor-idl.json"
+          cp target/types/restaking.ts "$PKG/common.restaking.anchor-idl.ts"
+          cp target/idl/solv.json "$PKG/common.solv.anchor-idl.json"
+          cp target/types/solv.ts "$PKG/common.solv.anchor-idl.ts"
+          (cd clients/js/fragmetric-sdk/src/generated && zip -r "$PKG/common.codama-generated-typescript.zip" .)
+
+          echo "### Programs" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster | Program | Address | Hash |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+        
+          # devnet artifacts
+          printf '%s\n' "$KEYPAIR_RESTAKING_PROGRAM_DEVNET" > target/deploy/restaking-keypair.json
+          printf '%s\n' "$KEYPAIR_SOLV_PROGRAM_DEVNET" > target/deploy/solv-keypair.json
+          anchor build --no-idl -- --features devnet
+          
+          ADDRESS=$(solana address -k target/deploy/restaking-keypair.json)
+          echo $ADDRESS > "$PKG/devnet.restaking.address.txt"
+          HASH=$(solana-verify get-executable-hash target/deploy/restaking.so)
+          echo $HASH > "$PKG/devnet.restaking.hash.txt"
+          cp target/deploy/restaking.so "$PKG/devnet.restaking.so"
+          echo "| devnet | restaking.so | $ADDRESS | $HASH |" >> $GITHUB_STEP_SUMMARY
+          
+          ADDRESS=$(solana address -k target/deploy/solv-keypair.json)
+          echo $ADDRESS > "$PKG/devnet.solv.address.txt"
+          HASH=$(solana-verify get-executable-hash target/deploy/solv.so)
+          echo $HASH > "$PKG/devnet.solv.hash.txt"
+          cp target/deploy/solv.so "$PKG/devnet.solv.so"
+          echo "| devnet | solv.so | $ADDRESS | $HASH |" >> $GITHUB_STEP_SUMMARY
+          
+          # mainnet artifacts
+          printf '%s\n' "$KEYPAIR_RESTAKING_PROGRAM_MAINNET" > target/deploy/restaking-keypair.json
+          printf '%s\n' "$KEYPAIR_SOLV_PROGRAM_MAINNET" > target/deploy/solv-keypair.json
+          anchor build --no-idl -- --features mainnet
+          
+          ADDRESS=$(solana address -k target/deploy/restaking-keypair.json)
+          echo $ADDRESS > "$PKG/mainnet.restaking.address.txt"
+          HASH=$(solana-verify get-executable-hash target/deploy/restaking.so)
+          echo $HASH > "$PKG/mainnet.restaking.hash.txt"
+          cp target/deploy/restaking.so "$PKG/mainnet.restaking.so"
+          echo "| mainnet | restaking.so | $ADDRESS | $HASH |" >> $GITHUB_STEP_SUMMARY
+          
+          ADDRESS=$(solana address -k target/deploy/solv-keypair.json)
+          echo $ADDRESS > "$PKG/mainnet.solv.address.txt"
+          HASH=$(solana-verify get-executable-hash target/deploy/solv.so)
+          echo $HASH > "$PKG/mainnet.solv.hash.txt"
+          cp target/deploy/solv.so "$PKG/mainnet.solv.so"
+          echo "| mainnet | solv.so | $ADDRESS | $HASH |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          {
+            echo "### Hash Verification Example"
+            echo "The program binary hashes listed above were computed on a macOS-arm system for now."
+            echo '```'
+            echo "# install solana-verify"
+            echo "$ cargo install solana-verify"
+            echo "# verify local build"
+            echo "$ solana-verify get-executable-hash ./target/deploy/restaking.so"
+            echo "# verify program buffer"
+            echo "$ solana-verify get-buffer-hash tg1aXtRpWgbLP7PtyqrJoeaVfB67rMRbyqnRF8SjSSH -u mainnet"
+            echo "# verify deployed program"
+            echo "$ solana-verify get-program-hash fragnAis7Bp6FTsMoa6YcH8UffhEw43Ph79qAiK3iF3 -u mainnet"
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Artifacts List" >> $GITHUB_STEP_SUMMARY
+          {
+            echo '```'
+            (cd "$PKG" && find . -type f ! -name '.DS_Store' | sort)
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+          
+          cat "$GITHUB_STEP_SUMMARY" > "$PKG/README.md"
+
+      - uses: actions/upload-artifact@v4
+        if: github.ref_name == 'dev' || github.ref_name == 'main'
+        with:
+          name: fragmetric-contracts-${{ github.sha }}
+          path: ${{ steps.package.outputs.path }}
+
+      - if: github.ref_name == 'main'
+        uses: actions/download-artifact@v4
+        with:
+          name: fragmetric-contracts-${{ github.sha }}
+          path: release-artifacts
+
+      - if: github.ref_name == 'main'
+        uses: softprops/action-gh-release@v2
+        continue-on-error: true # idk why but release draft created but failed with Not Found error, ref: https://github.com/softprops/action-gh-release/issues/373
+        with:
+          token: '${{ secrets.RELEASE_GITHUB_PAT }}'
+          files: release-artifacts/**
+          fail_on_unmatched_files: true
+          draft: true
+
+          body_path: "${{ steps.package.outputs.path }}/README.md"

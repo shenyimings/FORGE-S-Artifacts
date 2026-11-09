@@ -1,0 +1,101 @@
+{
+    "project": "Squads-Multisig-v4.pdf.json",
+    "files": [
+        "dataset/contracts/Squads-Multisig-v4.pdf.json/programs/multisig/src/instructions/vault_transaction_create.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.42857142857142855,
+        "recall": 1.0,
+        "f1": 0.6
+    },
+    "cwe_ground_truth": [
+        "CWE-228",
+        "CWE-707"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-240",
+        "CWE-703",
+        "CWE-20",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "TransactionMessage Not Validated",
+            "description": "1. **Description:** Users can create Vault or Batch transactions containing invalid or nonsensical transaction messages, which are not validated before being stored on-chain.\n2. **Cause:** The program does not parse or validate the inner `TransactionMessage` structure when creating a VaultTx or BatchTx.\n3. **Exploitation:** Attackers or users could submit malformed or syntactically incorrect transaction data, bloating storage or creating confusion during execution attempts.\n4. **Impact:** While not directly exploitable for fund loss, this wastes resources and could interfere with off-chain tooling or user experience.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract has several potential vulnerabilities:\n1. The transaction index in the multisig account is incremented without checking for overflow. If the index reaches the maximum value (2^64-1), subsequent attempts to create a transaction will panic, freezing the multisig. This is an improper handling of an exceptional condition (CWE-703).\n2. The `ephemeral_signers` argument is not bounded, which can lead to excessive computation during PDA derivation. An attacker can provide a large value (up to 255) to cause the transaction to consume too many compute units, resulting in a DoS. This is a protection mechanism failure (CWE-693) because the lack of input validation allows an attacker to disrupt the service.\n3. The `TransactionMessage` deserialization may be vulnerable to inconsistencies because the structure does not explicitly store the total number of account keys and the indices in the compiled instructions are not checked against the account keys length. This could lead to deserialization errors or out-of-bounds access during execution. This is an improper neutralization issue (CWE-707) because the data is not sufficiently validated to ensure well-formedness.\n",
+            "findings": [
+                {
+                    "title": "Transaction Index Overflow Leading to Multisig Freeze",
+                    "description": "The multisig's transaction index is incremented using `checked_add(1).unwrap()` without handling the case when the index reaches the maximum value (u64::MAX). This will cause a panic, and the multisig will be unable to create any further transactions, effectively freezing it.",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unbounded Ephemeral Signers Leading to Compute Exhaustion",
+                    "description": "The `ephemeral_signers` argument in `VaultTransactionCreateArgs` is not bounded. An attacker can specify a large value (e.g., 255) which causes the loop for deriving ephemeral signer bumps to run many times, consuming excessive compute units and potentially causing the transaction to fail due to exceeding the compute budget. This can be used to deny service to legitimate transactions.",
+                    "category": "CWE-693",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Insufficient Validation of Transaction Message Structure",
+                    "description": "The `TransactionMessage` structure lacks a field for the total number of account keys, making it difficult to ensure consistent deserialization. Additionally, the `CompiledInstruction` structure contains indices that are not checked against the length of the `account_keys` vector. This could lead to deserialization errors or out-of-bounds accesses during transaction execution.",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract exhibits two security vulnerabilities:\n1. The `TransactionMessage` input contains account count fields (`num_signers`, `num_writable_signers`, `num_writable_non_signers`) that are not validated against the actual `account_keys` vector length. This structural inconsistency (CWE-240) could cause the Solana runtime to misinterpret account roles during transaction execution.\n2. The `CompiledInstruction` account indices are not validated against the `account_keys` vector bounds (CWE-20). During execution, out-of-bounds indices would cause a program panic, resulting in failed transactions and potential multisig denial-of-service.\n",
+            "findings": [
+                {
+                    "title": "Unvalidated Transaction Message Structure",
+                    "description": "The `TransactionMessage` input does not validate that its `num_signers`, `num_writable_signers`, \nand `num_writable_non_signers` fields match the actual length of the `account_keys` vector. \nThis inconsistency could cause the runtime to misinterpret account roles during transaction execution.\n",
+                    "category": "CWE-240",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unvalidated Account Indices in Transaction Instructions",
+                    "description": "`CompiledInstruction` account indices are not validated against the `account_keys` vector length. \nDuring execution, out-of-bounds indices would cause a program panic, resulting in transaction failure \nand potential denial-of-service for multisig operations.\n",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.95
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-240",
+            "CWE-116",
+            "CWE-463",
+            "CWE-138",
+            "CWE-74",
+            "CWE-1426",
+            "CWE-20",
+            "CWE-228",
+            "CWE-170",
+            "CWE-172"
+        ]
+    ]
+}

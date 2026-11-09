@@ -1,0 +1,151 @@
+{
+    "path": "reports-without-source/2025-08-29-cyfrin-securitize-solana-redemption-v2.0.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/securitize-io/bc-solana-redemption-sc"
+        ],
+        "commit_id": [
+            "36051ebd273978920a6a69192f08c4b4761bec95"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-08-19",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-240"
+                ]
+            },
+            "title": "Broken identity-to-wallet binding in redeem allows country restriction bypass",
+            "description": "The redeem instruction accepts three identity objects—IdentityRegistryAccount, IdentityAccount, and WalletIdentity—but fails to verify that the IdentityAccount is linked to the WalletIdentity and the redeemer. While the account constraints ensure each object is valid in isolation, there is no on-chain check to confirm they all refer to the same user and wallet. This allows an attacker to pair a valid WalletIdentity (tied to their wallet) with another user’s IdentityAccount that has an allowed country code. As a result, a wallet from a restricted country can bypass country restrictions by using a permitted IdentityAccount. The impact is a complete bypass of geographic compliance controls, undermining a core security assumption of the protocol.\n",
+            "severity": "high",
+            "location": [
+                "redeem instruction"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "DoS in initialize via pre-created ATA for off_ramp_authority",
+            "description": "The initialize instruction creates a liquidity vault as an associated token account (ATA) for the program's PDA off_ramp_authority. Since ATAs are globally derivable and can be created by any party without permission, an attacker can precompute and create the ATA before the legitimate initialization. When the legitimate admin calls initialize, Anchor's account validation will fail with \"already in use,\" reverting the transaction. This allows an attacker to permanently block the initialization of a specific OffRamp instance by pre-creating the vault, leading to a denial-of-service condition. The impact is a hard DoS on program deployment for specific configurations, which can be exploited cheaply and repeatedly.\n",
+            "severity": "medium",
+            "location": [
+                "initialize instruction"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Permissionless OffRampState initialization under official program ID enables spoofed “official” instances",
+            "description": "The initialize instruction allows any signer to create a new OffRampState and become its admin. The OffRampCounter is initialized idempotently without access control, and the OffRampState PDA is derived from public seeds, making it predictable. There is no authorization check to ensure the initializer is an official operator. This allows any third party to deploy a seemingly legitimate OffRamp instance under the same program ID, with arbitrary parameters such as fees, NAV provider, and asset policy. The impact is the potential for spoofing attacks where malicious actors present their instance as an official Securitize off-ramp, leading to user deception and potential financial loss.\n",
+            "severity": "medium",
+            "location": [
+                "initialize instruction"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Silent truncation on u128 to u64 cast in liquidity token amount calculator",
+            "description": "The calculate_liquidity_token_amount function computes output in u128 but returns it via an unchecked as u64 cast. If the result exceeds u64::MAX, the high bits are silently truncated, resulting in a significantly smaller value than intended. This truncation occurs without any error or warning, and since both the quote and redeem instructions use this function, users may be silently underpaid. The impact is incorrect accounting and potential loss of funds due to undetected underpayment, especially in high-value transactions where the NAV-based output exceeds 2^64 - 1.\n",
+            "severity": "low",
+            "location": [
+                "utils::token_calculator::calculate_liquidity_token_amount"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ]
+            },
+            "title": "Fee collector field ambiguity wallet vs token account",
+            "description": "The FeeManager::collector field is of type Pubkey and named as if it represents a wallet, but it is used exclusively as a token account address for the liquidity mint. The code enforces that the provided fee_collector_ta.address matches fee_manager.fee_collector(), and that the token mint matches the liquidity_token_mint. However, the naming is misleading and could lead integrators to pass a wallet pubkey instead of the correct token account pubkey. This would cause instruction failures or misdirected fees. The impact is operational confusion and potential misrouting of fees due to ambiguous naming, though no direct fund loss occurs if used correctly.\n",
+            "severity": "informational",
+            "location": [
+                "FeeManager::collector"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Missing Two Step Ownership And Authority Transfer Validation",
+            "description": "The change_admin_handler and change_liquidity_withdraw_authority_handler functions allow direct reassignment of critical authority fields in a single transaction without requiring acceptance from the new authority. This one-step model increases the risk of accidental misconfiguration or malicious key injection. Additionally, the functions do not validate against setting the new authority to the default zero address (Pubkey::default()), which would permanently lock administrative or withdrawal capabilities. The impact includes irreversible loss of control and lack of consent in authority transfers, reducing operational safety and increasing governance risk.\n",
+            "severity": "informational",
+            "location": [
+                "change_admin_handler",
+                "change_liquidity_withdraw_authority_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Missing Liquidity Vault Balance Validation",
+            "description": "The withdraw_liquidity_handler transfers liquidity tokens from the vault to the withdrawer's ATA but does not verify that the vault holds a sufficient balance before the transfer. While it checks that the amount is greater than zero and that the system is not paused, it omits a critical balance check. If the requested amount exceeds the vault's balance, the token transfer will fail, causing the entire transaction to revert. The impact is unnecessary transaction failures and potential user confusion or gas loss, especially in scenarios where the vault balance is low or drained.\n",
+            "severity": "informational",
+            "location": [
+                "withdraw_liquidity_handler"
+            ],
+            "files": []
+        }
+    ]
+}

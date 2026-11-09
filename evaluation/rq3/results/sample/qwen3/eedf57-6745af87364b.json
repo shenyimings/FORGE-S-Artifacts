@@ -1,0 +1,138 @@
+{
+    "project": "sherlock-presale-audit-nov-2025-50862dad540c07ca5f41ffca25e0d5bd7cab8246.pdf.json",
+    "files": [
+        "dataset/contracts/sherlock-presale-audit-nov-2025-50862dad540c07ca5f41ffca25e0d5bd7cab8246.pdf.json/programs/presale/src/presale_mode_handler/fixed_price_presale.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.16666666666666666,
+        "recall": 0.2,
+        "f1": 0.1818181818181818
+    },
+    "cwe_ground_truth": [
+        "CWE-1339",
+        "CWE-707",
+        "CWE-682",
+        "CWE-1284",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-697",
+        "CWE-682",
+        "CWE-1335",
+        "CWE-284",
+        "CWE-703",
+        "CWE-369"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "registry can consume other registry supply",
+            "description": "The `get_remaining_deposit_quota` function in the fixed-price presale handler calculates deposit limits based on global and personal quotas but fails to enforce that a registry's total claimed tokens do not exceed its allocated `presale_supply`. The root cause is the missing validation check against `registry.presale_supply` when processing deposits. This allows one registry to consume tokens beyond its supply limit by exhausting the global pool, effectively depriving other registries of their rightful allocation. For example, one registry could end up with 200 tokens claimed against a 100-token supply, while another receives nothing. The impact is unfair distribution of presale tokens and potential denial of access for legitimate participants in other registries.\n"
+        },
+        {
+            "title": "fixed price presale may unable to complete",
+            "description": "In fixed-price presales, the `suggest_deposit_amount` function truncates deposits to ensure they align with token price, which can prevent the total deposit from ever reaching the `presale_maximum_cap`. The root cause is the truncation logic that removes excess amounts during deposit, leading to a final total that falls short of the cap by a small margin (e.g., 99 out of 100). When `presale_minimum_cap` equals `presale_maximum_cap`, this prevents the presale from transitioning to the `Completed` state via `end_presale_if_max_cap_reached`, forcing the presale to run until the `presale_end_time` even if the cap is effectively reached. The impact is that the presale cannot end early, leading to user frustration and reduced efficiency, especially in cases with long end times.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code implements a fixed-price presale mechanism on Solana, handling token purchases, vesting, withdrawals, and quota management. Upon analyzing the code with respect to the specified CWEs, several issues were identified:\n\n1. **CWE-284: Improper Access Control** - The `process_withdraw` function in the `FixedPricePresaleHandler` trait implementation calls `presale.withdraw(escrow, amount)` without validating whether the caller (via `escrow`) is authorized to withdraw funds. While `can_withdraw()` checks if withdrawals are globally disabled, it does not verify ownership or authorization of the `escrow` account. This could allow unauthorized actors to trigger withdrawals if access control is not enforced at the caller level.\n\n2. **CWE-682: Incorrect Calculation** - In `calculate_min_quote_amount_for_base_lamport`, the function uses `div_ceil(SCALE_MULTIPLIER)` to compute the minimum quote amount. However, in the test case `test_calculate_quote_token_for_base_lamport`, when `q_price` corresponds to 0.1 quote tokens per base token (i.e., subunit pricing), the result yields 9 base tokens instead of 1. This suggests a miscalculation in how fractional pricing is handled, potentially leading to incorrect minimum deposit amounts and user confusion or exploitation.\n\n3. **CWE-703: Improper Check or Handling of Exceptional Conditions** - The `suggest_withdraw_amount` function assumes that if `escrow.total_deposit == max_withdraw_amount`, the full amount can be withdrawn. However, it does not validate that `max_withdraw_amount` is actually available or consistent with the escrow state. Additionally, `calculate_quote_token_without_surplus` includes a `require!` that should \"never happen\", but does not handle potential arithmetic edge cases (e.g., rounding errors due to `div_ceil`), leading to potential panics or reverts under unexpected conditions.\n\n4. **CWE-697: Incorrect Comparison** - In `initialize_presale`, the function compares `presale_extra_param.presale == presale_pubkey` to validate the presale account. However, this comparison is done after deserializing from remaining accounts, and there is no explicit check that the `presale_extra_param_ai` account is owned by the program or is signer. An attacker could pass a fake or maliciously crafted account with a matching pubkey but not under program control, leading to potential parameter injection.\n",
+            "findings": [
+                {
+                    "title": "Lack of Escrow Ownership Check in Withdraw",
+                    "description": "The `process_withdraw` function calls `presale.withdraw(escrow, amount)` without verifying that the `escrow` account belongs to the caller or is authorized. This could allow unauthorized withdrawal if the `escrow` is not properly validated by the caller. Access control should be enforced within the function or ensured via CPI guards.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Incorrect Minimum Quote Amount Calculation for Subunit Prices",
+                    "description": "The function `calculate_min_quote_amount_for_base_lamport` miscalculates the minimum quote amount when the price is less than 1 quote token per base token. The test case shows that a price of 0.1 results in 9 base tokens being purchasable, indicating a flaw in the scaling logic. This could lead to incorrect user deposits and economic loss.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient Validation of Withdraw Amount in suggest_withdraw_amount",
+                    "description": "The `suggest_withdraw_amount` function returns `max_withdraw_amount` if it equals `escrow.total_deposit`, but does not validate that this amount is actually withdrawable or consistent with the current state. This could lead to incorrect suggestions or reverts during withdrawal due to unhandled edge cases.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unsecured Account Comparison in Presale Initialization",
+                    "description": "During presale initialization, the code compares `presale_extra_param.presale == presale_pubkey` but does not validate that the `presale_extra_param_ai` account is owned by the program or is a signer. This allows an attacker to pass a forged account with a matching pubkey, potentially leading to parameter tampering.",
+                    "category": "CWE-697",
+                    "severity": "high",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code implements a fixed-price presale mechanism on Solana using Anchor. After analyzing the code with respect to the given CWE list, several potential issues were identified.\n\nFirst, in the `calculate_quote_token_without_surplus` function, there is a division operation using `div_ceil(SCALE_MULTIPLIER)` without validating that `SCALE_MULTIPLIER` is non-zero. Although `SCALE_MULTIPLIER` is likely defined elsewhere as a constant (and presumably non-zero), if it were ever set to zero (e.g., due to misconfiguration or incorrect assumptions), this would result in a division by zero. Since the code does not enforce or verify this invariant within the function, it introduces a potential CWE-369 vulnerability.\n\nSecond, multiple arithmetic operations use `.safe_mul`, `.safe_div`, `.safe_shl`, and `.safe_cast` helpers, which suggests awareness of overflow/underflow risks. However, in the `calculate_token_bought` function, the shift operation uses `SCALE_OFFSET` as a shift amount in `safe_shl(SCALE_OFFSET)`. If `SCALE_OFFSET` is greater than or equal to the bit width of `u128` (i.e., >= 128), this would cause an invalid shift. While `SCALE_OFFSET` is likely a small compile-time constant, the code does not validate this at runtime or during initialization, making this a potential CWE-1335 (Incorrect Bitwise Shift of Integer) if misconfigured.\n\nThird, the `ensure_enough_presale_supply` function compares `max_presale_supply_bought` (a `u128`) with `presale_supply` (a `u64`) after casting to `u128`. This comparison is safe in terms of value, but the function `calculate_token_bought` returns a `u128`, and later it is cast to `u64` in other contexts (e.g., `get_total_base_token_sold`). If the calculated token amount exceeds `u64::MAX`, even though checked in `ensure_token_buyable`, there is a risk of inconsistent handling. However, this is already guarded by checks, so no direct overflow occurs.\n\nLastly, no authentication or ownership checks (e.g., `CWE-287`, `CWE-285`) are performed directly in the functions analyzed, but these are likely handled at a higher level by the framework (e.g., Anchor constraints). The `process_withdraw` function calls `presale.withdraw(...)`, but the actual access control depends on the implementation of that method, which is not shown. Therefore, we cannot confirm improper authorization based on this file alone.\n\nBased on the analysis, two concrete issues are found related to potential divide-by-zero and unsafe bitwise shift.\n",
+            "findings": [
+                {
+                    "title": "Potential Divide-by-Zero in calculate_quote_token_without_surplus",
+                    "description": "The function `calculate_quote_token_without_surplus` uses `div_ceil(SCALE_MULTIPLIER)` without ensuring that `SCALE_MULTIPLIER` is non-zero. If `SCALE_MULTIPLIER` is zero due to misconfiguration or incorrect assumptions, this will result in a division by zero, leading to a runtime panic or abort. Although it is likely defined as a constant, the absence of validation introduces a potential vulnerability.",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Potential Invalid Bitwise Shift in calculate_token_bought",
+                    "description": "The function `calculate_token_bought` performs a left shift using `safe_shl(SCALE_OFFSET)`. If `SCALE_OFFSET` is greater than or equal to 128 (the bit width of `u128`), this would result in an undefined or zero value, leading to incorrect calculations. The code does not validate that `SCALE_OFFSET` is within a safe range, making this a potential CWE-1335 issue if the constant is misconfigured.",
+                    "category": "CWE-1335",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-183",
+            "CWE-193",
+            "CWE-269",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-191",
+            "CWE-393",
+            "CWE-1270",
+            "CWE-190",
+            "CWE-923",
+            "CWE-1267",
+            "CWE-135",
+            "CWE-1077",
+            "CWE-1254",
+            "CWE-1024",
+            "CWE-369",
+            "CWE-228",
+            "CWE-397",
+            "CWE-1023",
+            "CWE-1025",
+            "CWE-185",
+            "CWE-128",
+            "CWE-1339",
+            "CWE-282",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-754",
+            "CWE-1335",
+            "CWE-755"
+        ]
+    ]
+}

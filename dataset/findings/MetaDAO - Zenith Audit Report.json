@@ -1,0 +1,864 @@
+{
+    "path": "reports/zenith/MetaDAO - Zenith Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/metaDAOproject/programs"
+        ],
+        "commit_id": [
+            "ea1879c89d08cdfc47706b0458b2859a7e990f82",
+            "087e0992a7f4b9a3a510d5b27565024fcdb10b65",
+            "5beb60de00523ed90b36ecec9e9da244c8f1f27d"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-02-04",
+        "project_path": "contracts/MetaDAO - Zenith Audit Report.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Bid wall can be abused by non-sale participants",
+            "description": "The bid wall is designed to act as a buyer of last resort for project tokens at the launch price, providing a fair exit mechanism for sale participants. However, the pricing mechanism for sellers does not account for tokens distributed outside of the initial sale, such as \"additional tokens\" minted during launch, tokens from the DAO, or tokens from the v2 performance package. As a result, recipients of these tokens can immediately sell them to the bid wall, draining its quote token reserves and leaving no liquidity for actual sale participants. If the dilution is significant, attackers can sell into the bid wall and later buy back tokens from AMMs like Futarchy or Meteora at a lower price, locking in a risk-free profit. This undermines the fairness and intended function of the bid wall mechanism.\n",
+            "severity": "high",
+            "location": [
+                "bid_wall/src/instructions/sell_tokens.rs#94-105",
+                "v07_launchpad/src/instructions/claim_additional_token_allocation.rs#55-60",
+                "v07_launchpad/src/instructions/complete_launch.rs#653",
+                "performance_package_v2/src/instructions/initialize_performance_package.rs#74"
+            ],
+            "files": [
+                "programs/programs/bid_wall/src/instructions/sell_tokens.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-128"
+                ]
+            },
+            "title": "price_based_performance_package will be DOSed when the TWAP wraps",
+            "description": "The v1 performance package calculates the Time-Weighted Average Price (TWAP) using a saturating subtraction between the current and start aggregator values. However, if the underlying price oracle's aggregator wraps (overflows), the subtraction will result in zero because saturating subtraction does not handle modular arithmetic correctly. This causes the calculated TWAP to be zero, making the performance package permanently locked and unable to unlock tokens, even if the price later recovers. This denial-of-service condition arises because the system fails to account for accumulator wraparound, unlike the v2 implementation which uses wrapping subtraction. The impact is high as it can permanently freeze user funds.\n",
+            "severity": "medium",
+            "location": [
+                "futarchy/src/state/futarchy_amm.rs#407-409",
+                "price_based_performance_package/src/instructions/complete_unlock.rs#127-129"
+            ],
+            "files": [
+                "programs/programs/price_based_performance_package/src/state/performance_package.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "performance_package_v2 unlocks may be DOSed by TWAP update saturations",
+            "description": "During long periods without oracle updates, the weighted observation calculation in the TWAP oracle may exceed the maximum value of the data type, causing saturation. Although the code uses saturating multiplication, this leads to an incorrect accumulator update, which in turn distorts the TWAP calculation. The performance package unlock logic relies on accurate TWAP values, and if the projected aggregator value is incorrect due to prior saturation, the unlock condition may never be met. Additionally, the projection logic in the v2 performance package itself repeats this error by using saturating multiplication instead of wrapping multiplication, compounding the issue. This can result in a denial of service where tokens remain locked indefinitely.\n",
+            "severity": "medium",
+            "location": [
+                "futarchy/src/state/futarchy_amm.rs#407-409",
+                "performance_package_v2/src/state/performance_package.rs#203-205",
+                "performance_package_v2/src/state/performance_package.rs#80-81"
+            ],
+            "files": [
+                "programs/programs/performance_package_v2/src/state/performance_package.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-128"
+                ]
+            },
+            "title": "TwapOracle accumulator wrap desynchronization in update_twap",
+            "description": "The TwapOracle in the Futarchy system uses a u128 accumulator that wraps modulo 2^128, but it does not track the number of wraps. When comparing the cumulative observations of the \"pass\" and \"fail\" pools during proposal finalization, a wrap in one accumulator but not the other can flip the comparison result, leading to an incorrect governance outcome. For example, a true value of 260 in the pass pool and 170 in the fail pool would correctly indicate a pass, but after modulo reduction (e.g., mod 100), the on-chain values become 60 and 70, incorrectly suggesting a fail. Additionally, if the accumulator wraps to zero, the system may block finalization due to a check requiring a non-zero aggregator, creating a liveness issue.\n",
+            "severity": "medium",
+            "location": [
+                "launch_proposal.rs#124-150",
+                "futarchy_amm.rs#395-412",
+                "futarchy_amm.rs#452-463",
+                "finalize_proposal.rs#139-156"
+            ],
+            "files": [
+                "programs/programs/futarchy/src/state/futarchy_amm.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Proposal launches with zero liquidity will need to be failed by the admin",
+            "description": "When launching a proposal, the system transfers half of the spot market's token reserves to the Futarchy AMM pools. If this amount is zero for either token, the AMM will reject all trades. Since the finalize_proposal function requires a trade to calculate the TWAP for pass/fail determination, it will fail to execute. This leaves the proposal in a pending state indefinitely, and the only way to resolve it is for an admin to manually cancel it. This creates a denial-of-service vector where a proposal cannot be finalized without administrative intervention, undermining the autonomy of the governance system.\n",
+            "severity": "medium",
+            "location": [
+                "futarchy/src/instructions/launch_proposal.rs#133-148",
+                "futarchy/src/state/futarchy_amm.rs#509-510",
+                "futarchy/src/instructions/finalize_proposal.rs#119-127",
+                "v07_launchpad/src/instructions/complete_launch.rs#426-427",
+                "v06_launchpad/src/instructions/complete_launch.rs#403-404"
+            ],
+            "files": [
+                "programs/programs/futarchy/src/instructions/launch_proposal.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "CliffLinear allows non-linear cliff payout configuration",
+            "description": "The CliffLinear vesting schedule allows the cliff_amount to be set independently of the linear progression between start_value and cliff_value, as long as cliff_amount ≤ total_amount. This means that the payout at the cliff can be arbitrarily set, deviating from the expected behavior where the cliff payout corresponds to the linearly accrued amount up to that point. For example, a configuration could pay out 100 tokens at the cliff when 250 are expected, or 600 when 250 are expected, leading to either underpayment or overpayment. While the total amount is still capped, this can lead to disputes or unintended financial outcomes in governance or compensation contexts.\n",
+            "severity": "medium",
+            "location": [
+                "performance_package.rs#238-256",
+                "performance_package.rs#321-327"
+            ],
+            "files": [
+                "programs/tests/performancePackageV2/utils.ts"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-1265"
+                ]
+            },
+            "title": "Squads multisig team addresses cannot be used for optimistic proposals",
+            "description": "The initiate_vault_spend_optimistic_proposal instruction builds and submits a Squads multisig transaction internally. However, if this instruction is called from within another Squads multisig execution context, it will fail due to Solana's restriction on reentrancy for non-system programs. This prevents team addresses that are themselves governed by Squads from initiating optimistic proposals, limiting composability and usability for DAOs that rely on Squads for governance. The issue stems from the instruction's design, which assumes direct invocation rather than nested execution.\n",
+            "severity": "medium",
+            "location": [
+                "futarchy/src/instructions/initiate_vault_spend_optimistic_proposal.rs#37-39",
+                "futarchy/src/instructions/initiate_vault_spend_optimistic_proposal.rs#138"
+            ],
+            "files": [
+                "programs/programs/futarchy/src/instructions/initiate_vault_spend_optimistic_proposal.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Bid wall double-counts LP reserves when liquidity is withdrawn to the DAO treasury",
+            "description": "The bid wall calculates the Net Asset Value (NAV) by including the DAO's treasury balance, which is correct for accounting spending. However, it fails to adjust for the fact that the DAO owns the LP position in the Futarchy AMM. If the DAO withdraws liquidity and transfers the tokens to its treasury, those tokens are counted twice: once as part of the initial liquidity and again as treasury funds. This inflates the NAV, allowing users to sell tokens to the bid wall at an artificially high price, extracting more value than is fairly available. This creates an arbitrage opportunity and undermines the economic integrity of the bid wall mechanism.\n",
+            "severity": "medium",
+            "location": [
+                "bid_wall/src/instructions/sell_tokens.rs#94-100",
+                "v07_launchpad/src/instructions/complete_launch.rs#518"
+            ],
+            "files": [
+                "programs/programs/bid_wall/src/instructions/sell_tokens.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-636"
+                ]
+            },
+            "title": "Delayed performance package initialization may lock its tokens",
+            "description": "The v7 launchpad mints tokens for a performance package to its own vault during launch, to be transferred later upon initialization. However, the initialization function includes a check that the current timestamp must be before the unlock timestamp (i.e., within the lockup period). If the package is not initialized before the 18-month lockup ends, this check will fail, preventing initialization. As a result, the tokens remain permanently locked in the launch program's vault, inaccessible to the intended recipients. This creates a risk of permanent fund loss due to delayed initialization, especially if the package creator fails to act in time.\n",
+            "severity": "medium",
+            "location": [
+                "v07_launchpad/src/instructions/initialize_performance_package.rs#175-176",
+                "price_based_performance_package/src/instructions/initialize_performance_package.rs#119-124"
+            ],
+            "files": [
+                "programs/programs/v07_launchpad/src/instructions/initialize_performance_package.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Performance packages calculate incorrect TWAP prior to the TWAP's start delay",
+            "description": "The vulnerability arises because the TwapOracle's aggregator value is initialized to zero and remains unchanged until the start delay has passed. Programs like price_based_performance_package rely on this aggregator to determine if price thresholds have been met, but they do not handle the case where the aggregator is still zero. This results in an incorrect TWAP calculation—specifically, the starting value is treated as zero instead of using the initial observation—leading to a final TWAP that is half the actual value. Consequently, performance packages may fail to unlock when they should. The issue also affects performance_package_v2, where the aggregator history is effectively erased when transitioning from zero to actual values after the delay. Although mitigated in current launchpad configurations due to hardcoded delays, standalone usage or governance-driven oracle changes could expose this flaw.\n",
+            "severity": "medium",
+            "location": [
+                "price_based_performance_package/src/instructions/start_unlock.rs#59-86",
+                "futarchy/src/state/futarchy_amm.rs#317",
+                "v06_launchpad/src/instructions/complete_launch.rs#408",
+                "v06_launchpad/src/instructions/initialize_launch.rs#152-156",
+                "performance_package_v2/src/state/performance_package.rs#80-81"
+            ],
+            "files": [
+                "programs/programs/price_based_performance_package/src/instructions/start_unlock.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "initialize_launch omits additional_tokens_amount from the premine ceiling enforcement",
+            "description": "The initialize_launch instruction enforces a premine ceiling (MAX_PREMINE) only on performance_package_token_amount but fails to include additional_tokens_amount in the check. Both amounts are minted together, yet only one is bounded, allowing projects to bypass the intended supply cap. An attacker (or malicious team) could set a minimal value for the enforced field and a very large value for additional_tokens_amount, resulting in an outsized premine allocation—up to ~88% of total supply in worst-case scenarios. This undermines the fairness of token distribution and dilutes participant holdings. The root cause is the omission of the second premine channel from the validation logic, leaving a critical invariant unenforced during state initialization.\n",
+            "severity": "low",
+            "location": [
+                "v07_launchpad/src/instructions/initialize_launch.rs"
+            ],
+            "files": [
+                "programs/programs/v07_launchpad/src/instructions/initialize_launch.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Proposals cannot be finalized without trades after the proposal duration",
+            "description": "Finalizing a proposal requires calculating the TWAP over its full duration, but the current implementation uses last_updated_timestamp as the reference point for time elapsed. If no trades occur after the proposal duration ends, the TWAP will not update, preventing finalization even if market equilibrium has been reached. This forces at least one user to make a trade (and pay fees) solely to update the timestamp, creating unnecessary friction and cost. The issue stems from the lack of a mechanism to project the TWAP to the current clock time independently of trading activity, which breaks liveness under low-activity conditions.\n",
+            "severity": "low",
+            "location": [
+                "futarchy/src/instructions/finalize_proposal.rs#119-127"
+            ],
+            "files": [
+                "programs/programs/futarchy/src/instructions/finalize_proposal.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Possible to fund after funds have been returned",
+            "description": "The return_funds instruction allows an admin to withdraw all quote tokens from the vault but does not transition the launch into a final state. As a result, the fund instruction can still be called afterward, locking new funds in the vault until the claim period. This creates a potential usability issue where users might deposit funds into a launch that was already terminated, leading to unexpected lockups. The root cause is the absence of a dedicated state (e.g., \"Returned\") to prevent further funding once funds have been withdrawn by the admin.\n",
+            "severity": "low",
+            "location": [
+                "v06_launchpad/src/instructions/return_funds.rs#52"
+            ],
+            "files": [
+                "programs/programs/v06_launchpad/src/instructions/return_funds.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-460"
+                ]
+            },
+            "title": "admin_approve_execute_multisig_proposal permits optimistic-proposal self-deadlock",
+            "description": "The admin_approve_execute_multisig_proposal instruction allows an admin to execute a queued optimistic proposal but does not properly handle the cleanup of dao.optimistic_proposal state. If the admin executes the proposal after its window has passed, finalize_optimistic_proposal fails to clear the state because the Squads proposal is no longer active. This leaves the dao.optimistic_proposal field set, blocking the creation of new optimistic proposals and halting governance. The issue is exacerbated by initialize_proposal also requiring an active proposal, making recovery impossible without manual intervention. The root cause is insufficient validation before execution and lack of a recovery path.\n",
+            "severity": "low",
+            "location": [
+                "admin_approve_execute_multisig_proposal.rs#59",
+                "finalize_optimistic_proposal.rs#60",
+                "initialize_proposal.rs#62-66"
+            ],
+            "files": [
+                "programs/programs/futarchy/src/instructions/admin_approve_execute_multisig_proposal.rs"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "Proposals may use stale proposal durations",
+            "description": "When a proposal is initialized, it stores the current Dao.seconds_per_proposal value as its duration. If the DAO later updates this global setting, existing proposals retain the old duration. This allows teams to queue long-lived proposals with outdated, favorable durations and activate them later to manipulate governance timing. In contrast, optimistic proposals use the live duration, making this inconsistency a potential vector for strategic abuse. The root cause is the decision to bake in the duration at initialization rather than reading it dynamically at launch.\n",
+            "severity": "low",
+            "location": [
+                "futarchy/src/instructions/initialize_proposal.rs#112"
+            ],
+            "files": [
+                "programs/programs/futarchy/src/instructions/initialize_proposal.rs"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Users can still stake to invalidated transactions",
+            "description": "The stake_to_proposal instruction does not verify whether the underlying Squads transaction has been invalidated due to staleness. If a proposal was initialized before a configuration change increased the stale threshold, users can still stake to it even though it can never be launched. This dilutes staking power across invalid proposals and misleads participants about the legitimacy of their stake. The root cause is the lack of a staleness check in the staking path, despite such checks existing in other parts of the flow (e.g., launch_proposal).\n",
+            "severity": "low",
+            "location": [
+                "futarchy/src/instructions/stake_to_proposal.rs#45"
+            ],
+            "files": [
+                "programs/programs/futarchy/src/instructions/stake_to_proposal.rs"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ]
+            },
+            "title": "A DAO's team can prevent legitimate proposals by continuously sponsoring and launching proposals",
+            "description": "The team can spam the proposal queue by repeatedly sponsoring and launching proposals (even failing ones), effectively drowning out community-backed proposals. Since there is no cooldown or token lockup requirement, this creates a denial-of-service vector where the team can monopolize governance bandwidth. While the impact is limited by community response (e.g., liquidation), it undermines decentralized governance. The root cause is the absence of rate-limiting or economic barriers to proposal sponsorship by the team.\n",
+            "severity": "low",
+            "location": [
+                "futarchy/src/instructions/sponsor_proposal.rs#14-27"
+            ],
+            "files": [
+                "programs/programs/futarchy/src/instructions/sponsor_proposal.rs"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "DAO initialization checks from v07 missing in v06",
+            "description": "The v07 launchpad includes validation that monthly_spending_limit_members is non-empty and contains no duplicates, ensuring correct multisig creation. These checks are missing in v06, making it possible to initialize a DAO with invalid member configurations. Additionally, v06 retains the MAX_PREMINE check that was intentionally removed in v07, creating inconsistency between versions. The root cause is a divergence in validation logic between the two versions, increasing the risk of misconfiguration in the older version.\n",
+            "severity": "low",
+            "location": [
+                "v06_launchpad/src/instructions/initialize_launch.rs#140-150",
+                "v07_launchpad/src/instructions/initialize_launch.rs#157-168"
+            ],
+            "files": [
+                "programs/programs/v06_launchpad/src/instructions/initialize_launch.rs"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "DAO initialization ignores the user's TWAP start delay for the spot market",
+            "description": "During DAO initialization, the user-provided twap_start_delay_seconds is stored for future use but is not applied to the initial spot market, which hardcodes the delay to zero. This means the spot market's TWAP oracle begins with no delay, potentially exposing external consumers (e.g., performance_package_v2) to insecure or manipulated prices before sufficient observations are collected. The root cause is inconsistent application of the TWAP delay parameter—used for proposals but ignored for the initial market.\n",
+            "severity": "low",
+            "location": [
+                "futarchy/src/instructions/initialize_dao.rs#203"
+            ],
+            "files": [
+                "programs/programs/futarchy/src/instructions/initialize_dao.rs"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Performance packages may lose dust amounts due to rounding",
+            "description": "The performance package amount is divided into five equal tranches using integer division, which discards the remainder. If the initial amount is not divisible by five, the leftover \"dust\" tokens remain locked in the vault indefinitely. This results in a permanent loss of funds for the recipient. The root cause is the lack of handling for the remainder in the tranche calculation logic, which could be resolved by adding the remainder to the final tranche.\n",
+            "severity": "low",
+            "location": [
+                "v06_launchpad/src/instructions/initialize_launch.rs#158-162",
+                "v07_launchpad/src/instructions/initialize_launch.rs#176-180",
+                "v06_launchpad/src/instructions/complete_launch.rs#476",
+                "v07_launchpad/src/instructions/initialize_performance_package.rs#172"
+            ],
+            "files": [
+                "programs/programs/v06_launchpad/src/instructions/initialize_launch.rs"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-708"
+                ]
+            },
+            "title": "The execute_change() instructions return rent to the wrong recipient",
+            "description": "When executing a performance package change, the instruction closes the proposer's PDA and sends the rent to the executor's account. However, the executor is intentionally restricted from being the proposer, so sending rent to them is incorrect. The rent should be returned to the proposer, as they funded the PDA. The root cause is a flawed account closure logic that assumes the executor is entitled to the rent, violating ownership semantics.\n",
+            "severity": "low",
+            "location": [
+                "price_based_performance_package/src/instructions/execute_change.rs#12",
+                "performance_package_v2/src/instructions/execute_change.rs#16"
+            ],
+            "files": [
+                "programs/programs/price_based_performance_package/src/instructions/execute_change.rs"
+            ]
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Performance packages' change requests ignore package re-creations",
+            "description": "When a performance package is closed and re-created, previously approved but unexecuted change requests remain valid. If the new package has different parameters (e.g., oracle, recipient), executing an old change request could lead to unintended outcomes, such as transferring tokens based on outdated conditions. Similarly, changes in admin or recipient after proposal approval can lead to execution under invalid assumptions. The root cause is the lack of versioning or timestamping in change requests to bind them to a specific package instance.\n",
+            "severity": "low",
+            "location": [
+                "price_based_performance_package/src/instructions/burn_performance_package.rs#18",
+                "performance_package_v2/src/instructions/close_performance_package.rs#21"
+            ],
+            "files": [
+                "programs/programs/price_based_performance_package/src/instructions/burn_performance_package.rs"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "No upper limit on performance package v2's unlock window",
+            "description": "Unlike the v1 version, performance_package_v2 does not enforce an upper bound on the unlock window duration (min_duration). If set too large, once an unlock begins, there is no way to cancel or modify it, even via admin controls. This creates a risk of funds being locked for excessively long periods due to misconfiguration or malicious setup. The root cause is the absence of a validation check on the maximum allowable unlock duration during initialization.\n",
+            "severity": "low",
+            "location": [
+                "performance_package_v2/src/state/performance_package.rs#96-99"
+            ],
+            "files": [
+                "programs/programs/performance_package_v2/src/state/performance_package.rs"
+            ]
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Events may be dropped if the SVM truncates its logs",
+            "description": "The Solana Virtual Machine (SVM) may truncate logs if instructions generate excessive log output. If prior instructions in a transaction are log-heavy, events emitted by instructions in the mint_governor and performance_package_v2 programs may be silently dropped. This occurs because Solana imposes a limit on the total size of logs per transaction, and exceeding this limit results in truncation without explicit failure. As a result, off-chain systems relying on these events for tracking will fail to detect certain state changes. Although the impact is limited due to low likelihood and existing use of CPI emissions in some cases, the risk remains for instructions using standard event emission.\n",
+            "severity": "low",
+            "location": [
+                "mint_governor/src/instructions/**/*.rs",
+                "performance_package_v2/src/instructions/**/*.rs"
+            ],
+            "files": [
+                "programs/programs/mint_governor/src/instructions",
+                "programs/programs/performance_package_v2/src/instructions"
+            ]
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-636"
+                ]
+            },
+            "title": "Strict PDA derivations may require client programs to re-deploy",
+            "description": "The PDA derivation for MintGovernor and PerformancePackage enforces a strict seed structure that limits the number of instances per create_key signer. For MintGovernor, the admin is not required to be a signer, so a typo in the admin's Pubkey prevents recreation of the account without changing the create_key. Since the create_key must be a signer and is used to prevent front-running, generating a new key requires redeployment of the integrating program, which may be infeasible. The PerformancePackage has a similar issue but is less severe because it includes a close_performance_package instruction to destroy misconfigured accounts. This design increases operational risk due to human error during initialization.\n",
+            "severity": "low",
+            "location": [
+                "mint_governor/src/instructions/initialize_mint_governor.rs#L14-L22",
+                "performance_package_v2/src/instructions/initialize_performance_package.rs#L23-L47"
+            ],
+            "files": [
+                "programs/programs/mint_governor/src/instructions/initialize_mint_governor.rs"
+            ]
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Bid wall closure may send ATA rent to wrong recipient",
+            "description": "The close_bid_wall instruction is permissionless and sends the rent from the bid wall's PDA to the correct authority. However, the rent associated with the bid wall's quote token Account (ATA) is sent to a signer controlled by the caller, not the bid wall authority. This creates a small financial loss for the intended recipient, as the ATA rent should also be returned to the authority. An attacker could exploit this by calling the closure and collecting the ATA rent themselves, leading to a minor but avoidable loss of funds. The issue stems from incorrect recipient assignment in the rent refund logic.\n",
+            "severity": "low",
+            "location": [
+                "bid_wall/src/instructions/close_bid_wall.rs#L124"
+            ],
+            "files": [
+                "programs/programs/bid_wall/src/instructions/close_bid_wall.rs"
+            ]
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Early start_unlock()s by the performance_package_v2 authority may DOS recipient payouts",
+            "description": "The performance_package_v2 program allows the authority to initiate the unlock process via start_unlock, unlike v1 which restricted this to the recipient. If the authority calls start_unlock prematurely—before spot price reaches any threshold—the unlock period begins and cannot be reset. The unlock completion requires the TWAP duration to elapse, which has no upper bound. If the early start results in a failed unlock, the recipient must wait the full duration before retrying, effectively delaying their payout for an extended period. This can be used to deny timely access to funds, constituting a denial-of-service (DOS) vector against the recipient.\n",
+            "severity": "low",
+            "location": [
+                "performance_package_v2/src/instructions/start_unlock.rs#L24-L28"
+            ],
+            "files": [
+                "programs/programs/performance_package_v2/src/instructions/start_unlock.rs"
+            ]
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-1293"
+                ]
+            },
+            "title": "FundingRecords incompletely Verified",
+            "description": "The FundingRecord PDA is validated only by its seed derivation (including launch and funder keys) and bump. While PDA collisions are currently improbable due to SHA256's collision resistance, a theoretical future weakness in SHA256 (e.g., second pre-image attacks) could allow an attacker to create a malicious launch with colliding PDA seeds. This could enable the attacker to refund from a victim launch while receiving payouts from a second, malicious launch. Although SHA256 remains secure, relying solely on seed derivation without an explicit account constraint (e.g., has_one = launch) is a minor security oversight. The impact is purely theoretical at present.\n",
+            "severity": "informational",
+            "location": [
+                "v07_launchpad/src/instructions/claim.rs#L20-L26",
+                "v06_launchpad/src/instructions/claim.rs#L20-L26",
+                "v07_launchpad/src/instructions/refund.rs#L18-L24",
+                "v06_launchpad/src/instructions/refund.rs#L18-L24"
+            ],
+            "files": [
+                "programs/programs/v07_launchpad/src/instructions/claim.rs"
+            ]
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Accounts need not be marked as mutable",
+            "description": "Several accounts across multiple instructions are marked as mutable (mut) despite not being modified during execution. Examples include launch_signer, base_mint, squads_multisig, and others. Marking accounts as mutable when unnecessary increases transaction cost and contention, as validators must lock the account for write access even when no write occurs. This is a code quality and efficiency issue that could lead to higher fees and reduced throughput. The root cause is oversight in account permission specification within Anchor account structs.\n",
+            "severity": "informational",
+            "location": [
+                "v07_launchpad/src/instructions/claim_additional_token_allocation.rs#L23-L35",
+                "v07_launchpad/src/instructions/claim.rs#L31-L32",
+                "v06_launchpad/src/instructions/claim.rs#L31-L32",
+                "futarchy/src/instructions/finalize_optimistic_proposal.rs#L6-L7",
+                "futarchy/src/instructions/admin_approve_execute_multisig_proposal.rs#L18-L20",
+                "futarchy/src/instructions/admin_approve_execute_multisig_proposal.rs#L35-L48",
+                "futarchy/src/instructions/admin_cancel_proposal.rs#L67-L68",
+                "price_based_performance_package/src/instructions/propose_change.rs#L30-L31",
+                "bid_wall/src/instructions/sell_tokens.rs#L23-L24",
+                "v07_launchpad/src/instructions/initialize_performance_package.rs#L28-L30"
+            ],
+            "files": [
+                "programs/programs/v07_launchpad/src/instructions/claim_additional_token_allocation.rs"
+            ]
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "Missing events in some instructions",
+            "description": "Several instructions, including admin_approve_execute_multisig_proposal, execute_spending_limit_change, burn_performance_package, and propose_change, are expected to emit CPI events but do not. Although some use the #[event_cpi] macro, the corresponding event emission is missing in the handler logic. This breaks off-chain monitoring tools that rely on events for state tracking. The issue arises from incomplete implementation of event emission in these instruction handlers. While some admin-only instructions were intentionally left without events, the initial omission represented a gap in observability.\n",
+            "severity": "informational",
+            "location": [
+                "futarchy/src/instructions/admin_approve_execute_multisig_proposal.rs#L11",
+                "futarchy/src/instructions/execute_spending_limit_change.rs#L7",
+                "price_based_performance_package/src/instructions/burn_performance_package.rs#L14",
+                "price_based_performance_package/src/instructions/propose_change.rs#L15"
+            ],
+            "files": [
+                "programs/programs/futarchy/src/instructions/admin_approve_execute_multisig_proposal.rs"
+            ]
+        },
+        {
+            "id": 30,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Squads TransactionMessage compilation does not match Squads SDK",
+            "description": "The compile_squads_transaction_message function in the MetaDAO code marks the first readonly signer as the vault, whereas the official Squads SDK designates the vault as the first writable signer. Although the Squads program currently ignores signer flags and treats the account as writable, this discrepancy could cause transaction failures if the function were used to spend SOL from the vault. The inconsistency increases the risk of integration errors in future use cases. The root cause is a deviation from the expected account compilation logic defined in the SDK.\n",
+            "severity": "informational",
+            "location": [
+                "programs/futarchy/src/squads.rs#L18-L46"
+            ],
+            "files": [
+                "programs/programs/futarchy/src/squads.rs"
+            ]
+        },
+        {
+            "id": 31,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-193"
+                ]
+            },
+            "title": "Funding is allowed for one second longer than expected",
+            "description": "The funding period validation uses require_gte! to check if the current timestamp is greater than or equal to the launch start time plus duration. This allows funding for one additional second beyond the intended period if the launch starts exactly at the boundary. While currently mitigated by validation that prevents zero-duration launches, the logic is imprecise. A similar issue exists in funding approval and TWAP start checks. The v1 performance package has the inverse problem. The root cause is the use of >= instead of > in time boundary checks, leading to a one-second overreach in eligibility.\n",
+            "severity": "informational",
+            "location": [
+                "v07_launchpad/src/instructions/fund.rs#L65-L69",
+                "v06_launchpad/src/instructions/fund.rs#L65-L69",
+                "v07_launchpad/src/instructions/set_funding_record_approval.rs#L44",
+                "futarchy/src/state/futarchy_amm.rs#L393-L395",
+                "price_based_performance_package/src/instructions/initialize_performance_package.rs#L120-L124"
+            ],
+            "files": [
+                "programs/programs/v07_launchpad/src/instructions/fund.rs"
+            ]
+        },
+        {
+            "id": 32,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-908"
+                ],
+                "4": [
+                    "CWE-457"
+                ]
+            },
+            "title": "OracleReader/can_end() reports the wrong answer if record_start() has not been called",
+            "description": "The can_end() function in OracleReader uses start_time without validating whether record_start() was previously called. If start_time is zero (uninitialized), the elapsed time is calculated as the current Unix timestamp minus zero, which will always exceed min_duration. This causes can_end() to incorrectly return true, potentially allowing premature termination of a performance period. Although no current code path triggers this, it introduces a latent bug risk if future changes call can_end() without prior initialization. The issue stems from missing validation of initialization state.\n",
+            "severity": "informational",
+            "location": [
+                "performance_package_v2/src/state/performance_package.rs#L168"
+            ],
+            "files": [
+                "programs/programs/performance_package_v2/src/state/performance_package.rs"
+            ]
+        },
+        {
+            "id": 33,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unused instruction accounts",
+            "description": "Multiple instructions include accounts in their context that are not used during execution. Examples include launch_signer, system_program, associated_token_program, and others across various modules. Including unused accounts increases transaction size and cost unnecessarily, as each account adds to the fee calculation and validation overhead. This is a code hygiene issue resulting from oversight during development or refactoring. Removing unused accounts improves efficiency and reduces user costs.\n",
+            "severity": "informational",
+            "location": [
+                "v07_launchpad/src/instructions/fund.rs#L28",
+                "v06_launchpad/src/instructions/fund.rs#L28",
+                "v07_launchpad/src/instructions/refund.rs#L39",
+                "v06_launchpad/src/instructions/refund.rs#L39",
+                "v07_launchpad/src/instructions/claim.rs#L48",
+                "v06_launchpad/src/instructions/claim.rs#L48",
+                "v06_launchpad/src/instructions/return_funds.rs#L48",
+                "futarchy/src/instructions/stake_to_proposal.rs#L40",
+                "futarchy/src/instructions/unstake_from_proposal.rs#L36",
+                "performance_package_v2/src/instructions/complete_unlock.rs#L56",
+                "bid_wall/src/instructions/collect_fees.rs#L37",
+                "bid_wall/src/instructions/sell_tokens.rs#L49"
+            ],
+            "files": [
+                "programs/programs/v07_launchpad/src/instructions/fund.rs",
+                "programs/programs/v07_launchpad/src/instructions/initialize_launch.rs",
+                "programs/programs/v07_launchpad/src/instructions/refund.rs",
+                "programs/programs/v07_launchpad/src/instructions/claim.rs"
+            ]
+        },
+        {
+            "id": 34,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Misleading comments",
+            "description": "The comments in several source files are outdated or incorrect, leading to confusion during code review and potential misinterpretation of the code's intent. \nThe root cause is failure to update comments after code changes, such as modifying token amounts without updating associated comments, leaving commented-out validation code, and describing non-existent functionality (e.g., locking liquidity for proposals). \nAn attacker or developer could be misled by these comments into making incorrect assumptions about security checks or economic parameters, potentially leading to flawed integrations or governance decisions. \nWhile the impact is primarily on code maintainability and developer experience, misleading comments can indirectly contribute to security issues if relied upon during audits or upgrades.\n",
+            "severity": "informational",
+            "location": [
+                "v07_launchpad/src/lib.rs#L32-L41",
+                "v06_launchpad/src/lib.rs#L30-L40",
+                "v07_launchpad/src/instructions/initialize_launch.rs#L109-L114",
+                "v06_launchpad/src/instructions/initialize_launch.rs#L104-L109",
+                "v07_launchpad/src/instructions/initialize_launch.rs#L191-L196",
+                "v06_launchpad/src/instructions/initialize_launch.rs#L166-L171",
+                "v07_launchpad/src/instructions/complete_launch.rs#L305-L308",
+                "v06_launchpad/src/instructions/complete_launch.rs#L295-L298",
+                "programs/futarchy/src/state/dao.rs#L41-L46",
+                "futarchy/src/state/dao.rs#L150-L155",
+                "futarchy/src/instructions/conditional_swap.rs#L29-L37",
+                "price_based_performance_package/src/events.rs#L25-L26",
+                "futarchy/src/instructions/collect_meteora_damm_fees.rs#L17-L18"
+            ],
+            "files": [
+                "programs/programs/v07_launchpad/src/lib.rs"
+            ]
+        },
+        {
+            "id": 35,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unused account fields waste rent",
+            "description": "Several account state structs contain fields that are initialized but never used during program execution, such as pda_bump and pda_nonce. \nThe root cause is the retention of these fields for potential future use despite no current functionality requiring them. \nWhile these fields cannot be directly exploited by an attacker, they increase the rent cost for account creation and consume additional compute units during serialization. \nThe impact is economic inefficiency and higher transaction costs for users, with no functional benefit in the current implementation.\n",
+            "severity": "informational",
+            "location": [
+                "v07_launchpad/src/state/launch.rs#L28-L29",
+                "v06_launchpad/src/state/launch.rs#L28-L29",
+                "performance_package_v2/src/state/change_request.rs#L23-L24",
+                "price_based_performance_package/src/state/performance_package.rs#L143-L144"
+            ],
+            "files": [
+                "programs/programs/v07_launchpad/src/state/launch.rs"
+            ]
+        }
+    ]
+}

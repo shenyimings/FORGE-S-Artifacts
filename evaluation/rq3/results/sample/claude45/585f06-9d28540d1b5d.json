@@ -1,0 +1,68 @@
+{
+    "project": "blocksec_burrow_v2.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrow_v2.0_signed.pdf.json/contract/src/asset_config.rs",
+        "dataset/contracts/blocksec_burrow_v2.0_signed.pdf.json/contract/src/config.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-20",
+        "CWE-707"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-682"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incomplete asset configuration check",
+            "description": "The assert_valid function in AssetConfig performs only partial validation of the configuration. It checks reserve_ratio, target_utilization, and rate bounds, but fails to validate critical fields such as extra_decimal and volatility_ratio. The extra_decimal field must remain unchanged to prevent inconsistencies in token decimal handling, and volatility_ratio should be constrained between 0 and 10000 (basis points). The root cause is an incomplete validation routine. An attacker with owner privileges could update an asset with an altered extra_decimal, causing miscalculations in value conversion, or set an out-of-bounds volatility_ratio, affecting risk parameters. This could lead to incorrect collateral valuations, unfair liquidations, or insolvency of the protocol.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code (which appears to be NEAR Protocol code based on near_sdk usage), I've examined it from the perspective of each CWE in the candidate list:\n\n1. **CWE-284 (Improper Access Control)**: The code has proper access control with `assert_owner()` checks on sensitive functions like `update_config`, `add_asset`, `update_asset`, and `add_asset_farm_reward`. All require one yoctoNEAR payment and owner verification.\n\n2. **CWE-435 (Improper Interaction Between Multiple Correctly-Behaving Entities)**: No clear issues found related to entity interaction problems.\n\n3. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The `add_asset_farm_reward` function modifies `reward_asset.reserved` by subtracting `reward_amount.0`, but there's a potential issue: the function checks `reward_asset.available_amount() >= reward_amount.0` but `available_amount()` is not shown in the provided code. If this method doesn't properly account for reserved amounts, there could be a resource management issue.\n\n4. **CWE-682 (Incorrect Calculation)**: In `asset_config.rs`, the `get_rate` function performs complex calculations involving BigDecimal operations. There's a potential division by zero issue if `target_utilization` is 0, though the `assert_valid` function checks `target_utilization < MAX_POS` (not `<= 0`). However, if `target_utilization` is 0, the division `/ target_utilization` would fail. Additionally, the calculation `/ BigDecimal::from_ratio(MAX_POS - self.target_utilization)` could fail if `target_utilization == MAX_POS`, but the assertion prevents this with `target_utilization < MAX_POS`.\n\n5. **CWE-691 (Insufficient Control Flow Management)**: No significant control flow issues detected.\n\n6. **CWE-693 (Protection Mechanism Failure)**: The `assert_one_yocto()` pattern is used but not shown in the code. If this is not properly implemented, it could be a protection mechanism failure.\n\n7. **CWE-697 (Incorrect Comparison)**: In `assert_valid()`, the check `self.target_utilization < MAX_POS` uses `<` instead of `<=`. This means `target_utilization` can be 9999 but not 10000. However, in `get_rate`, if `target_utilization` is very close to `MAX_POS`, the denominator `BigDecimal::from_ratio(MAX_POS - self.target_utilization)` becomes very small, potentially causing precision issues or unexpected behavior.\n\n8. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: The `get_rate` function doesn't handle the case where `total_supplied_balance` is 0 properly for all branches - it returns `BigDecimal::one()` but doesn't consider what happens if `borrowed_balance > 0` when `total_supplied_balance == 0`, which would be an invalid state.\n\n9. **CWE-707 (Improper Neutralization)**: No issues with data neutralization detected.\n\n10. **CWE-710 (Improper Adherence to Coding Standards)**: The code generally follows Rust standards, but there are some potential improvements in error handling and validation.\n\n**Key findings:**\n- Division by zero risk in `get_rate` if `target_utilization` is 0\n- Potential precision/calculation issues when `target_utilization` approaches `MAX_POS`\n- Inconsistent state handling when `total_supplied_balance == 0` but `borrowed_balance > 0`\n",
+            "findings": [
+                {
+                    "title": "Potential Division by Zero in get_rate Function",
+                    "description": "The `get_rate` function in `asset_config.rs` divides by `target_utilization` when `pos < target_utilization`. While `assert_valid` checks that `target_utilization < MAX_POS`, it doesn't prevent `target_utilization` from being 0. If `target_utilization` is set to 0, the calculation `/ target_utilization` will cause a division by zero panic.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Inadequate Validation of Edge Case in Rate Calculation",
+                    "description": "The `get_rate` function returns `BigDecimal::one()` when `total_supplied_balance == 0`, but doesn't validate whether `borrowed_balance` is also 0. Having borrowed balance without supplied balance represents an invalid state that should be explicitly checked and handled, as it violates the fundamental invariant that borrowed amount cannot exceed supplied amount.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Precision Loss Risk in Rate Calculation Near Maximum Utilization",
+                    "description": "In the `get_rate` function, when `target_utilization` approaches `MAX_POS` (10000), the denominator `BigDecimal::from_ratio(MAX_POS - self.target_utilization)` becomes very small. While the assertion `target_utilization < MAX_POS` prevents exact equality, values like 9999 would result in a denominator of 1, potentially causing precision loss or unexpected rate calculations that could affect interest rate computations.",
+                    "category": "CWE-682",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

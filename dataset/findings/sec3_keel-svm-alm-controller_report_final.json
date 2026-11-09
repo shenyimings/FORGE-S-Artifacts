@@ -1,0 +1,741 @@
+{
+    "path": "reports/sec3/sec3_keel-svm-alm-controller_report_final.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/keel-labs/svm-alm-controller",
+            "https://github.com/keel-fi/solana-psm",
+            "https://github.com/solana-program/token-2022"
+        ],
+        "commit_id": [
+            "ddf437f",
+            "c3836e1",
+            "658951e"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-07-15",
+        "project_path": "contracts/sec3_keel-svm-alm-controller_report_final.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Missing program id validation in integration initialization",
+            "description": "The integration initialization for spl_token_swap, cctp_bridge, and lz_bridge does not validate that the provided program accounts (e.g., swap_program, cctp_token_messenger_minter, lz_program) match the expected trusted program IDs. This lack of whitelist validation allows potentially malicious or incorrect programs to be used during integration setup. An attacker could exploit this by deploying a malicious program that mimics the interface of the legitimate program but performs unauthorized actions. The impact includes potential loss of funds or manipulation of cross-chain messaging and token swaps, as the system would trust a rogue program. This issue was resolved in a later commit.\n",
+            "severity": "low",
+            "location": [
+                "program/src/integrations/spl_token_swap/initialize.rs#133",
+                "program/src/integrations/cctp_bridge/initialize.rs#85-86",
+                "program/src/integrations/lz_bridge/initialize.rs#92"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1023"
+                ]
+            },
+            "title": "Missing mint account validation against configuration",
+            "description": "In the functions process_push_spl_token_swap and process_pull_spl_token_swap, the code fails to validate that the provided mint_a and mint_b accounts match the mints specified in the integration's configuration. It only checks that they match the reserve's mint, which could be any reserve under the controller. This allows an attacker to use incorrect mints as long as they match some reserve, potentially leading to incorrect accounting events being emitted with wrong mint data. Although the actual token transfers are protected by the swap state, off-chain systems relying on emitted events could be misled. The root cause is the absence of direct comparison with config.mint_a and config.mint_b. This could be exploited by crafting a transaction with mismatched mints that still pass validation, leading to data inconsistency in event-based monitoring systems.\n",
+            "severity": "low",
+            "location": [
+                "program/src/integrations/spl_token_swap/push.rs#126-177",
+                "program/src/integrations/spl_token_swap/pull.rs#126-177",
+                "program/src/integrations/spl_token_swap/push.rs#181-196",
+                "program/src/integrations/spl_token_swap/pull.rs#181-196",
+                "program/src/integrations/spl_token_swap/push.rs#410-424"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Possible outflow limit bypass",
+            "description": "The Reserve's vault and the SplTokenSwap integration's lp_token_account are both ATAs under the same controller_authority. If a Reserve is created for the same mint as an lp_mint in a SplTokenSwap integration, they share the same token account. When LP tokens are burned to withdraw tokens via process_pull_spl_token_swap, the outflow is only tracked in the integration's rate limit, not in the Reserve's outflow control. This allows bypassing the Reserve's outflow limits because the Reserve's state is not updated when LP tokens are spent. The root cause is the shared account and lack of coordination between the integration and Reserve logic. An attacker with appropriate permissions could exploit this to drain more funds than allowed by the Reserve's flow controls, undermining the intended security model.\n",
+            "severity": "low",
+            "location": [
+                "program/src/integrations/spl_token_swap/initialize.rs#120-138",
+                "program/src/processor/initialize_reserve.rs#63-72",
+                "program/src/integrations/spl_token_swap/pull.rs#336-381",
+                "program/src/integrations/spl_token_swap/pull.rs#456-464"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Multiple push instructions for a single send leads to fund theft",
+            "description": "The function process_push_lz_bridge transfers funds to an authority_token_account and verifies that a corresponding send instruction exists in the transaction for the LayerZero program. However, it does not prevent multiple process_push_lz_bridge instructions from being included in the same transaction for a single send. This allows an attacker to trigger multiple fund transfers to the authority_token_account while only one send occurs, leaving excess funds in the authority's account. The root cause is the lack of enforcement of a one-to-one relationship between push instructions and send calls. Although the can_invoke_external_transfer permission limits who can exploit this, it breaks the intended security model where such permissions only allow transfers to trusted destinations. The impact is potential theft of funds from the vault due to unbalanced transfers.\n",
+            "severity": "low",
+            "location": [
+                "program/src/integrations/lz_bridge/push.rs#58-117",
+                "program/src/integrations/lz_bridge/push.rs#119-235"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Possible integer overflow",
+            "description": "When the Reserve's vault and SplTokenSwap's lp_token_account are the same ATA, an integer overflow can occur in the calculation of step_1_balance_a and step_1_balance_b. If LP tokens are withdrawn externally, the last_balance_lp value in the integration state becomes outdated and may exceed the actual lp_mint_supply. During calculation, the ratio last_balance_lp / lp_mint_supply can exceed 1, causing the multiplication with swap_token_a_balance to overflow when cast to u64. The root cause is the shared account and lack of synchronization between external changes and internal state. Although this only affects emitted AccountingEvents and does not lead to direct fund loss, it can result in incorrect or missing events, misleading off-chain monitoring systems and potentially hiding malicious activity.\n",
+            "severity": "low",
+            "location": [
+                "program/src/integrations/spl_token_swap/pull.rs#216-249",
+                "program/src/integrations/spl_token_swap/push.rs#216-249",
+                "program/src/integrations/spl_token_swap/sync.rs#105-132"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing checks for the PullFeedAccountData account",
+            "description": "In process_refresh_oracle, the PullFeedAccountData account is deserialized starting from the 8th byte without verifying the account's owner or data discriminator. This creates a risk of type confusion or data spoofing if the account is later reinitialized or repurposed, for example, via Switchboard's pull_feed_close instruction. The root cause is the absence of runtime validation checks that ensure the account still belongs to the expected program and contains valid data. An attacker could exploit this by reclaiming and repurposing the account to feed malicious price data, potentially manipulating oracle-based logic. It is recommended to add owner and discriminator checks similar to verify_oracle_type to prevent such attacks.\n",
+            "severity": "low",
+            "location": [
+                "program/src/processor/oracle/refresh_oracle.rs#24-72"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant checks on mint",
+            "description": "The functions PushLzBridgeAccounts::checked_from_accounts and PushCctpBridgeAccounts::checked_from_accounts contain duplicate checks ensuring that the mint account matches the config.mint. These redundant validations increase code complexity without adding security benefits. The root cause is code duplication during implementation. While this does not introduce a direct security vulnerability, it makes the code harder to maintain and increases the risk of inconsistencies during future updates. Removing the duplicate checks would improve code clarity and reduce the attack surface related to account validation logic.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/integrations/cctp_bridge/push.rs#52-55",
+                "program/src/integrations/cctp_bridge/push.rs#72-75"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1099"
+                ]
+            },
+            "title": "Typos",
+            "description": "Several typographical errors exist in error messages and variable names throughout the codebase. For example, \"vault_b\" mismatch incorrectly returns InvalidAccountOwner instead of InvalidAccountData; \"mint: mismatch with reserve\" is used instead of \"vault: mismatch with reserve\"; \"desination\" is used instead of \"destination\"; \"cctp_program\" is referenced in error messages for lz_program; and MissingRequiredSignature is incorrectly used instead of InvalidSeeds in emit_event. These typos do not introduce security vulnerabilities but can mislead developers and users during debugging and error analysis. Correcting these improves code readability and ensures accurate error reporting, which is crucial for secure operation and incident response.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/integrations/spl_token_swap/push.rs#166-168",
+                "program/src/integrations/cctp_bridge/push.rs#143-145",
+                "program/src/instructions.rs#273-277",
+                "program/src/integrations/cctp_bridge/initialize.rs#57-89",
+                "program/src/integrations/lz_bridge/initialize.rs#35-42",
+                "program/src/processor/emit_event.rs#26-34",
+                "program/src/state/controller.rs#100-103"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "Wrong accounts checked in ManagePermissionAccounts::checked_from_accounts",
+            "description": "In the checked_from_accounts function for ManagePermissionAccounts, the condition on line 33 incorrectly checks super_permission.is_owned_by(&crate::ID) instead of the permission account. Due to the @owner(crate::ID) constraint on super_permission, this check is always true, rendering the entire condition ineffective. This allows the permission account to be owned by any program, bypassing intended ownership restrictions. The intended logic was to ensure the permission account is either owned by the current program or by the system program with no data. Although subsequent processor logic revalidates ownership, this flaw weakens the initial validation layer. The root cause is a coding error where the wrong account variable was used in the condition.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/processor/manage_permission.rs#30-36"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Ensure input_mint != output_mint",
+            "description": "The InitializeAtomicSwapAccounts structure does not validate that input_mint and output_mint are different when initializing an AtomicSwapConfig. This could allow a user to configure an atomic swap with identical input and output mints, which is logically invalid and could lead to unexpected behavior or denial of service. The root cause is the absence of a basic input validation check. It is recommended to add a condition to ensure *inner_ctx.input_mint.key() != *inner_ctx.output_mint.key(), returning InvalidArgument if they are the same. This prevents misconfiguration and ensures the swap logic operates under valid assumptions.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/integrations/atomic_swap/initialize.rs#16-21"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Insufficient ownership check for lp_token_account",
+            "description": "Both PushSplTokenSwapAccounts and PullSplTokenSwapAccounts require an initialized lp_token_account for balance checks. However, the current validation allows uninitialized accounts owned by pinocchio_system::ID, which is incorrect because the account must be a valid, initialized token account to perform balance operations. This could lead to runtime errors or incorrect state assumptions if an uninitialized account is accepted. The root cause is inadequate validation in the account checking logic, where ownership is checked but initialization status is not enforced. This could be exploited by passing an uninitialized system-owned account to bypass proper token account requirements, potentially leading to transaction failures or inconsistent state handling.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/integrations/spl_token_swap/push.rs",
+                "program/src/integrations/spl_token_swap/pull.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1099"
+                ]
+            },
+            "title": "Inconsistent variable naming in PullSplTokenSwapAccounts",
+            "description": "The function `process_pull_spl_token_swap` performs a withdrawal from a token swap, but uses variable names such as `post_deposit_balance_lp`, `post_deposit_balance_a`, and `post_deposit_balance_b`, which incorrectly imply a deposit operation. This misnaming can lead to confusion during code review and maintenance, increasing the risk of logic errors in related functionality.\n\nThe root cause is poor naming discipline in the codebase, where variable names do not reflect their actual usage in the context of a withdrawal operation.\n\nWhile this is not directly exploitable, an attacker could potentially leverage the confusion during a social engineering attack or if future developers introduce bugs based on the misleading names.\n\nThe impact is primarily on code readability and maintainability, increasing the likelihood of future vulnerabilities due to misunderstanding of the logic.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/integrations/spl_token_swap/pull.rs#334",
+                "program/src/integrations/spl_token_swap/pull.rs#386",
+                "program/src/integrations/spl_token_swap/pull.rs#394",
+                "program/src/integrations/spl_token_swap/pull.rs#398",
+                "program/src/integrations/spl_token_swap/pull.rs#399",
+                "program/src/integrations/spl_token_swap/pull.rs#400",
+                "program/src/integrations/spl_token_swap/pull.rs#401",
+                "program/src/integrations/spl_token_swap/pull.rs#402",
+                "program/src/integrations/spl_token_swap/pull.rs#403",
+                "program/src/integrations/spl_token_swap/pull.rs#404",
+                "program/src/integrations/spl_token_swap/pull.rs#406",
+                "program/src/integrations/spl_token_swap/pull.rs#407",
+                "program/src/integrations/spl_token_swap/pull.rs#413",
+                "program/src/integrations/spl_token_swap/pull.rs#423",
+                "program/src/integrations/spl_token_swap/pull.rs#428",
+                "program/src/integrations/spl_token_swap/pull.rs#438",
+                "program/src/integrations/spl_token_swap/pull.rs#446",
+                "program/src/integrations/spl_token_swap/pull.rs#447",
+                "program/src/integrations/spl_token_swap/pull.rs#448"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Arbitrage opportunities due to slippage-based repayments",
+            "description": "In the `atomic_swap_repay` process, users can repay tokenB at a price derived from the oracle value adjusted downward by a user-defined slippage parameter (`max_slippage_bps`). The minimum acceptable price (`min_swap_price`) is calculated as `oracle_price * (1 - max_slippage_bps / 10000)`.\n\nThe cause of the vulnerability is the lack of a protocol fee or price floor mechanism during repayment, allowing users to repay at a discounted rate relative to the oracle price.\n\nAn attacker can exploit this by borrowing tokenB when its market price is high, waiting for the oracle price to drop, then repaying at the lower oracle-adjusted price, effectively profiting from the difference.\n\nThis creates arbitrage opportunities that can result in financial loss for the protocol or other users, undermining the economic model of the system.\n",
+            "severity": "low",
+            "location": [
+                "program/src/integrations/atomic_swap/atomic_swap_repay.rs#223",
+                "program/src/integrations/atomic_swap/atomic_swap_repay.rs#224",
+                "program/src/integrations/atomic_swap/atomic_swap_repay.rs#225",
+                "program/src/integrations/atomic_swap/atomic_swap_repay.rs#226",
+                "program/src/integrations/atomic_swap/atomic_swap_repay.rs#227",
+                "program/src/integrations/atomic_swap/atomic_swap_repay.rs#230",
+                "program/src/integrations/atomic_swap/atomic_swap_repay.rs#231"
+            ],
+            "files": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Potential DoS due to rounding issue in refresh_rate_limit",
+            "description": "The `sync_reserve` and `sync_integration` instructions are publicly accessible and call `refresh_rate_limit`, which updates the `rate_limit_outflow_amount_available` by adding an increment based on elapsed time. The increment is calculated as `(rate_limit_slope * time_elapsed) / SECONDS_PER_DAY`, but the result is rounded down due to integer division.\n\nThe root cause is the truncation of fractional increments during the calculation, which discards remainder values.\n\nA malicious actor can repeatedly invoke the sync functions at small time intervals, causing the accumulated increment to remain near zero due to rounding down. If `rate_limit_max_outflow` is set to a low value, the rate limit will not replenish effectively, blocking legitimate outflows.\n\nThis can lead to a denial-of-service condition where valid operations are blocked due to an artificially constrained rate limit.\n",
+            "severity": "low",
+            "location": [
+                "program/src/processor/sync_reserve.rs#7",
+                "program/src/processor/sync_integration.rs#16",
+                "program/src/state/reserve.rs#192",
+                "program/src/state/reserve.rs#198",
+                "program/src/state/reserve.rs#203",
+                "program/src/state/integration.rs#217",
+                "program/src/state/integration.rs#223",
+                "program/src/state/integration.rs#228"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Unnecessary load_and_check_mut",
+            "description": "The `load_and_check_mut` function calls `account_info.try_borrow_mut_data()` to deserialize account data, but the deserialization process (via `NovaAccount::deserialize`) creates a copy of the data rather than operating in place. Therefore, borrowing mutable data is unnecessary, as changes to the deserialized struct do not affect the original account data until it is explicitly serialized back.\n\nThe cause is a misunderstanding of the deserialization behavior, leading to redundant use of mutable borrowing.\n\nWhile this does not introduce a direct security risk, it increases computational overhead and code complexity unnecessarily.\n\nThe impact is reduced efficiency and maintainability. Since the function behaves identically to `load_and_check`, maintaining both functions is redundant and increases the attack surface through unnecessary code.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/state/controller.rs#72",
+                "program/src/state/integration.rs#102",
+                "program/src/state/permission.rs#97",
+                "program/src/state/reserve.rs#95",
+                "program/src/state/oracle/account.rs#101"
+            ],
+            "files": []
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unnecessary drop()",
+            "description": "The `drop()` function is used in several locations (e.g., `drop(swap_data)`, `drop(lp_mint)`) to explicitly release references. However, in Rust, values are automatically dropped at the end of their scope when no further references exist.\n\nThe root cause is redundant explicit memory management where the compiler would already handle the drop safely and efficiently.\n\nThere is no direct exploitation path, but unnecessary `drop()` calls can mislead developers into thinking there is a critical lifetime issue, potentially masking real problems.\n\nThe impact is reduced code clarity and maintainability, with no runtime benefit.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/integrations/spl_token_swap/pull.rs#183",
+                "program/src/integrations/spl_token_swap/pull.rs#389",
+                "program/src/integrations/spl_token_swap/pull.rs#409",
+                "program/src/integrations/spl_token_swap/pull.rs#410",
+                "program/src/integrations/spl_token_swap/push.rs#183",
+                "program/src/integrations/spl_token_swap/push.rs#385",
+                "program/src/integrations/spl_token_swap/push.rs#407",
+                "program/src/integrations/spl_token_swap/push.rs#408"
+            ],
+            "files": []
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Missing signer check for message_sent_event_data",
+            "description": "In the `process_push_cctp_bridge` flow, the `message_sent_event_data` account is passed to a CPI that expects it to be a signer (as required by the CCTP `token-messenger-minter` program). However, the calling program does not verify that this account is marked as a signer in the instruction.\n\nThe cause is a missing access control check on a critical cross-chain messaging component.\n\nAn attacker could potentially set `message_sent_event_data` to `controller_authority` using PDA seeds, causing it to be signed during the CPI. This would change the account's owner to the `message-transmitter` program, breaking future instructions that expect it to be owned by the system program.\n\nAlthough a subsequent `emit_event` call and permission checks prevent full exploitation, this could still lead to a denial-of-service condition on the controller authority.\n",
+            "severity": "low",
+            "location": [
+                "program/src/integrations/cctp_bridge/push.rs#23",
+                "program/src/integrations/cctp_bridge/push.rs#33",
+                "program/src/integrations/cctp_bridge/push.rs#161",
+                "program/src/integrations/cctp_bridge/push.rs#181"
+            ],
+            "files": []
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Arbitrage enabled by improper single token withdraw parameters",
+            "description": "In `process_pull_spl_token_swap`, the `maximum_pool_token_amount` parameter in the `withdraw_single_token_type_exact_amount_out` CPI is hardcoded to `u64::MAX`, disabling slippage protection during single-token withdrawals.\n\nThe root cause is the lack of user-defined slippage tolerance, removing a critical economic safeguard.\n\nAn attacker can manipulate pool balances via prior swaps, then execute a single-token withdrawal to burn more LP tokens than economically fair. After rebalancing, they can redeem remaining LP tokens at an inflated value, extracting arbitrage profit.\n\nThis allows repeated extraction of value from the pool, leading to loss of funds for honest liquidity providers.\n",
+            "severity": "high",
+            "location": [
+                "program/src/integrations/spl_token_swap/pull.rs#140",
+                "program/src/integrations/spl_token_swap/pull.rs#141",
+                "program/src/integrations/spl_token_swap/pull.rs#142",
+                "program/src/integrations/spl_token_swap/pull.rs#143",
+                "program/src/integrations/spl_token_swap/pull.rs#144",
+                "program/src/integrations/spl_token_swap/pull.rs#145",
+                "program/src/integrations/spl_token_swap/pull.rs#146",
+                "program/src/integrations/spl_token_swap/cpi.rs#122",
+                "program/src/integrations/spl_token_swap/cpi.rs#123",
+                "program/src/integrations/spl_token_swap/cpi.rs#124",
+                "program/src/processor.rs#1264",
+                "program/src/processor.rs#1265",
+                "program/src/processor.rs#1266",
+                "program/src/processor.rs#1267",
+                "program/src/processor.rs#1268",
+                "program/src/processor.rs#1269"
+            ],
+            "files": [
+                "c3836e1/solana-psm/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-563"
+                ]
+            },
+            "title": "Unused accounts",
+            "description": "The `swap_fee_account` in `PushSplTokenSwapAccounts` is declared but never used in `process_push_spl_token_swap`. Similarly, the `lookup_table` field in the `Integration` struct is stored but never referenced in any logic.\n\nThe cause is incomplete cleanup or over-provisioning of account inputs and state fields.\n\nWhile not directly exploitable, unused accounts increase transaction complexity, cost, and potential for confusion.\n\nThe impact includes higher gas fees, reduced code clarity, and risk of accidental use in future code changes.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/integrations/spl_token_swap/push.rs#28",
+                "program/src/integrations/spl_token_swap/push.rs#45",
+                "program/src/state/integration.rs#31",
+                "program/src/state/integration.rs#38"
+            ],
+            "files": []
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Increment may be truncated to a small value in refresh_rate_limit",
+            "description": "In `refresh_rate_limit`, the `increment` value is calculated as `(rate_limit_slope * time_elapsed) / SECONDS_PER_DAY`, cast to `u128`, then truncated to `u64` using `as u64`. If the intermediate value exceeds `u64::MAX`, it will be truncated, resulting in a much smaller value than intended.\n\nThe root cause is unsafe casting without overflow checking.\n\nAn attacker could wait for a long period without refreshing, then trigger the function, causing the increment to overflow and truncate. This would result in minimal or no replenishment of `rate_limit_outflow_amount_available`.\n\nThis could lead to a denial-of-service condition where legitimate outflows are blocked due to an incorrectly low rate limit.\n",
+            "severity": "low",
+            "location": [
+                "program/src/state/reserve.rs#198",
+                "program/src/state/reserve.rs#203",
+                "program/src/state/integration.rs#223",
+                "program/src/state/integration.rs#228"
+            ],
+            "files": []
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing mint extension validation in integration initialization",
+            "description": "While `initialize_reserve` validates mint extensions against `VALID_MINT_EXTENSIONS`, various integration initialization functions (`spl_token_external`, `spl_token_swap`, `cctp_bridge`, `lz_bridge`, `atomic_swap`) do not perform this check.\n\nThe cause is inconsistent validation logic across initialization paths.\n\nAn attacker could initialize an integration with a mint containing unsupported extensions (e.g., `ConfidentialTransfer`), which may later prevent the creation of a corresponding reserve.\n\nThis could block future push/pull operations, leading to a denial of service for that integration.\n",
+            "severity": "low",
+            "location": [
+                "program/src/processor/initialize_reserve.rs#61",
+                "program/src/integrations/spl_token_external/initialize.rs#33",
+                "program/src/integrations/spl_token_swap/initialize.rs#85",
+                "program/src/integrations/cctp_bridge/initialize.rs#65",
+                "program/src/integrations/lz_bridge/initialize.rs#65",
+                "program/src/integrations/atomic_swap/initialize.rs#51",
+                "program/src/constraints.rs#108"
+            ],
+            "files": []
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing Token-2022 Mint and TokenAccount type checks",
+            "description": "The program checks that Token-2022 accounts are owned by the correct program and have sufficient data length, but does not validate the account type (Mint vs TokenAccount vs Multisig). Since these accounts have variable lengths due to extensions, a malicious Multisig account can be crafted to pass length checks and mimic a Mint or TokenAccount.\n\nThe root cause is insufficient account type discrimination for Token-2022 accounts.\n\nAn attacker could pass a Multisig account as a Mint or TokenAccount, potentially leading to type confusion and unauthorized state manipulation.\n\nThis could result in privilege escalation, fund loss, or denial of service.\n",
+            "severity": "high",
+            "location": [
+                "pinocchio-token-interface/src/lib.rs#15",
+                "pinocchio-token2022/src/state/token.rs#51",
+                "pinocchio-token-interface/src/lib.rs#49",
+                "pinocchio-token2022/src/state/mint.rs#37"
+            ],
+            "files": [
+                "c3836e1/solana-psm/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Potential DoS caused by PermanentDelegate extension",
+            "description": "The program allows the use of mints with the PermanentDelegate extension enabled, which permits an external permanent delegate to transfer tokens from any associated token account at any time. This violates the program's assumption that balance decreases in reserve vaults should not occur unexpectedly, as it only accounts for outflows it initiates. When such an unauthorized outflow occurs and exceeds the available outflow rate limit, the `sync_balance` function fails because `update_for_outflow` reverts on insufficient available outflow amount. This leads to a temporary Denial of Service (DoS), blocking all operations on the reserve—even deposits—until the rate limit recovers over time. Although temporary, this can disrupt critical functionality.\n",
+            "severity": "low",
+            "location": [
+                "program/src/processor/shared/token_extensions.rs::VALID_MINT_EXTENSIONS#23",
+                "program/src/state/reserve.rs::sync_balance#282-295",
+                "program/src/state/reserve.rs::update_for_outflow#240-253"
+            ],
+            "files": [
+                "c3836e1/solana-psm/program/src/constraints.rs"
+            ]
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Inaccurate inflow accounting if TransferFeeConfig is enabled",
+            "description": "The `process_pull_spl_token_swap` function uses the input amounts `amount_a` and `amount_b` directly for inflow accounting in `update_for_inflow`, without verifying the actual amount received by the reserve vault. However, if the mint has the TransferFeeConfig extension enabled, the actual received amount is less than the requested amount due to fees. This discrepancy causes the recorded `last_balance` to be higher than the real balance, leading to incorrect flow control and rate limiting. An attacker could potentially exploit this to manipulate accounting or bypass rate limits subtly. Although the impact is mitigated because Nova PSM no longer allows TransferFeeConfig, the flaw remains in the logic.\n",
+            "severity": "low",
+            "location": [
+                "program/src/processor/shared/token_extensions.rs::VALID_MINT_EXTENSIONS#15",
+                "program/src/integrations/spl_token_swap/pull.rs::process_pull_spl_token_swap#334-379",
+                "program/src/integrations/spl_token_swap/pull.rs::process_pull_spl_token_swap#457-462"
+            ],
+            "files": [
+                "c3836e1/solana-psm/program/src/constraints.rs",
+                "c3836e1/solana-psm/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "AtomicSwap should reject mints with the MintCloseAuthority extension",
+            "description": "During AtomicSwap initialization, the decimals of the input and output mints are recorded. However, if either mint has the MintCloseAuthority extension, it could be closed (if supply is zero) and a new mint with different properties (e.g., decimals) could be initialized at the same account. This would cause `check_swap_slippage` to use outdated decimal values, leading to incorrect slippage calculations and potential economic loss. While exploitation is difficult due to the requirement of zero supply, the risk exists and could be triggered by malicious mint issuers. The program should explicitly prohibit mints with the MintCloseAuthority extension during integration setup.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/integrations/atomic_swap/initialize.rs#54-65",
+                "program/src/integrations/atomic_swap/atomic_swap_repay.rs#169-177"
+            ],
+            "files": [
+                "658951e/token-2022/program/src/processor.rs",
+                "658951e/token-2022/program/src/extension/mint_close_authority.rs"
+            ]
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-570"
+                ]
+            },
+            "title": "MemoTransfer extension is not a mint extension",
+            "description": "The `VALID_MINT_EXTENSIONS` list includes `ExtensionType::MemoTransfer`, but this extension applies only to token accounts, not mints. It will never appear in a mint's extension data, so validating its presence on a mint is meaningless. This is a logical error in configuration that adds unnecessary complexity and confusion. The extension should be removed from the mint validation list to reflect correct semantics and avoid misleading developers.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/processor/shared/token_extensions.rs::VALID_MINT_EXTENSIONS#29",
+                "program/src/extension/mod.rs::get_account_type#1279-1284"
+            ],
+            "files": [
+                "658951e/token-2022/program/src/extension/memo_transfer/mod.rs",
+                "658951e/token-2022/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing MemoTransfer extension support in transfer_tokens",
+            "description": "The `transfer_tokens` function invokes a `TransferChecked` instruction without checking whether the recipient token account has the MemoTransfer extension enabled. If it is enabled, the Solana Token-2022 program requires a preceding memo instruction; otherwise, the transfer fails. This causes transactions to revert unexpectedly when users or integrations use MemoTransfer-enabled accounts. While users can avoid the issue by choosing different accounts, and administrators can reconfigure integrations, the lack of support reduces compatibility and usability. The function should either verify the extension and include a memo or reject such accounts explicitly.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/state/controller.rs::transfer_tokens#186-212",
+                "token-2022/program/src/processor.rs::process_transfer#496-498",
+                "token-2022/program/src/extension/memo_transfer/mod.rs::check_previous_sibling_instruction_is_memo#42-55"
+            ],
+            "files": [
+                "658951e/token-2022/program/src/processor.rs",
+                "658951e/token-2022/program/src/offchain.rs"
+            ]
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing mint Pausable extension validation",
+            "description": "The program does not validate whether a mint has the Pausable extension enabled during initialization or usage. It only deserializes the base mint state and proceeds without checking for the `PausableConfig` extension. As a result, if a mint is paused, the program may continue processing until a later transfer instruction fails, causing unnecessary computation and potential state inconsistency. Immediate validation would allow the program to fail fast and provide clearer error messages. The fix involves checking the `PausableConfig` extension and rejecting paused mints early.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/processor/shared/token_extensions.rs",
+                "https://github.com/solana-program/token-2022/blob/program@v8.0.1/program/src/processor.rs#361-365"
+            ],
+            "files": []
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Check payer_account_a mint in atomic_swap_repay",
+            "description": "In the `atomic_swap_repay` function, `payer_account_a` is a non-ATA token account whose mint is not validated against the expected mint (`mint_a`). While this does not introduce a security risk—because any mint mismatch would be caught later during transfer due to token program enforcement—it represents a code quality issue. Failing to validate inputs early can lead to unclear error sources and reduced robustness. Adding an explicit check `payer_account_a.mint == mint_a` would improve code clarity and defensive programming practices.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/integrations/atomic_swap/atomic_swap_repay.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Question on the ConfidentialTransferMint support",
+            "description": "The Nova PSM supports the `ConfidentialTransferMint` extension, but the controller's `VALID_MINT_EXTENSIONS` list does not include it. This creates a configuration conflict that prevents the controller from integrating with Nova PSM swap pools that use this extension. It raises a design question: should the controller support all Nova PSM pools, or is `ConfidentialTransferMint` intentionally excluded? If support is intended, the extension should be added to `VALID_MINT_EXTENSIONS`. This is not a direct vulnerability but a design consistency issue that affects interoperability.\n",
+            "severity": "informational",
+            "location": [
+                "https://github.com/keel-fi/solana-psm/blob/658951e/program/src/constraints.rs#L114-L119",
+                "program/src/processor/shared/token_extensions.rs::VALID_MINT_EXTENSIONS#15"
+            ],
+            "files": [
+                "c3836e1/solana-psm/program/src/constraints.rs"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,195 @@
+{
+    "project": "07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json",
+    "files": [
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd4_denormalize_nt.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-1164",
+        "CWE-710"
+    ],
+    "cwe_detected": [
+        "CWE-807",
+        "CWE-707",
+        "CWE-697",
+        "CWE-682",
+        "CWE-778",
+        "CWE-284",
+        "CWE-346",
+        "CWE-703",
+        "CWE-693",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Unused command imports in DenormalizeNT module",
+            "description": "The DenormalizeNT module imports ClaimUnstakedSOL and UndelegateVST commands but does not use them. The root cause is leftover imports from refactoring. While Rust optimizes these away, they create confusion about dependencies and module responsibilities. The impact is reduced code clarity and potential misdirection during maintenance or security reviews.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code implements a multi-step “command” that denormalizes a fund’s normalized token (NT) into supported tokens, using a normalized token pool and a pricing service. Several security-relevant checks are either incorrect or missing.\n\nThe most direct issue is an incorrect inequality check during post-CPI validation: it enforces `expected >= actual` rather than ensuring the actual amount received is at least the expected/minimum amount. This allows the program to accept receiving fewer supported tokens than expected while still burning/decrementing reserved NT, resulting in loss of fund value.\n\nAdditionally, `execute_execute` performs only one key check (normalized_token_pool_account == configured address) and does not independently validate that other critical accounts (supported mint, destination reserve token account, normalized reserve token account, fund reserve authority) match the fund’s expected PDAs/addresses. The preceding `execute_prepare` builds a “required accounts” list, but if the surrounding framework ever fails to enforce it perfectly, the on-chain code here would accept mismatched accounts and could route denormalized tokens to attacker-controlled accounts.\n\nThere are also arithmetic and exceptional-condition risks: a subtraction used to compute remaining participant amounts may underflow (wrapping in release or panicking depending on build flags), causing misallocation or DoS. Finally, the code assumes item vectors are bounded by a constant but does not enforce this at runtime; large vectors could cause excessive compute/heap via clones and repeated processing.\n",
+            "findings": [
+                {
+                    "title": "Incorrect validation inequality allows accepting under-delivery of denormalized tokens",
+                    "description": "In `execute_execute`, after calling `denormalize_supported_token`, the code validates:\n`require_gte!(expected_denormalized_supported_token_amount, denormalized_supported_token_amount);`\nThis check passes when the actual received amount is *less than or equal to* the expected amount, which is the opposite of the typical safety invariant needed to protect value (actual should be >= expected minimum).\n\nImpact: the fund can burn/decrement `normalized_token.operation_reserved_amount` while receiving fewer supported tokens than it should, resulting in value loss. An attacker could potentially exploit adverse pool state/manipulation/slippage to cause systematic under-delivery that still passes validation.\n",
+                    "category": "CWE-697",
+                    "severity": "critical",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Missing key/address validation for critical accounts in execute phase (potential token diversion if framework checks fail)",
+                    "description": "In `execute_execute`, only `normalized_token_pool_account` is validated against the configured pricing source address:\n`require_keys_eq!(normalized_token_pool_account.key(), address);`\n\nHowever, the following accounts are not explicitly validated against fund-derived expected addresses/PDAs or `item.supported_token_mint`:\n- `supported_token_mint` is not checked to equal `item.supported_token_mint`\n- `fund_supported_token_reserve_account` is not checked to equal `fund_account.find_supported_token_reserve_account_address(mint)`\n- `fund_normalized_token_reserve_account` is not checked to equal `fund_account.find_normalized_token_reserve_account_address()`\n- `fund_reserve_account` is not checked to equal `fund_account.get_reserve_account_address()` (nor checked for signer-ness here)\n\nThe prior `execute_prepare` step computes `required_accounts`, but if the surrounding “operation command” framework ever allows mismatched accounts (or required account enforcement is buggy/optional in some pathway), this on-chain function could accept attacker-provided token accounts and route denormalized supported tokens to an attacker-controlled destination while still updating the fund’s internal accounting as if reserves were funded.\n\nThis is fundamentally an on-chain access/control & input-validation gap: the instruction should re-derive and enforce the critical addresses it depends on, rather than relying purely on upstream enforcement.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Improper neutralization/validation of structured account inputs (account substitution risk)",
+                    "description": "`execute_execute` trusts a structured ordering of accounts and converts them with `try_from`, but does not enforce semantic correctness (that each account is the intended PDA/ATA/mint for the operation). This is an input-neutralization/validation issue for upstream-supplied structured data (the account list).\n\nEven when types match (e.g., a valid TokenAccount), a substituted account can change security properties (ownership/authority/destination). Without explicit key checks, the code can act on “well-formed but wrong” accounts.\n\nThis amplifies the impact of any weakness in the outer account-requirement mechanism and is a common source of account-confusion/token-redirection issues in Solana programs.\n",
+                    "category": "CWE-707",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Potential underflow/wrap in remaining allocation calculation",
+                    "description": "In `execute_new`, when building `WeightedAllocationParticipant`, the code computes:\n`pricing_service.get_token_amount_as_token(...)? - items[index].allocated_normalized_token_amount`\n\nIf the converted locked amount is smaller than the already-allocated normalized amount for that token, this subtraction can underflow.\n- If overflow checks are disabled in the BPF build, this will wrap to a very large u64, corrupting the allocation logic (incorrect calculation).\n- If overflow checks are enabled, it will trap/panic, causing a denial of service for the operation path (exceptional condition not handled).\n\nEither case can lead to incorrect allocation behavior or failed operations under certain price/rounding/locking edge cases.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Runtime does not enforce maximum items length; large vectors can cause compute/heap DoS",
+                    "description": "The enum variants annotate `#[max_len(FUND_ACCOUNT_MAX_SUPPORTED_TOKENS)]`, but this is primarily used for space calculation (`InitSpace`) and is not, by itself, a guaranteed runtime bound check.\n\nMultiple places clone and process `items`:\n- `execute_prepare(... items.clone() ...)` (from `SelfExecutable::execute`)\n- `execute_prepare(... items[1..].to_vec() ...)` repeatedly\n\nIf an attacker can ever supply a command state with an oversized `items` vector (e.g., via deserialization of externally-provided instruction data/state), this can lead to excessive heap allocations/compute and potential DoS. The code should enforce `items.len() <= FUND_ACCOUNT_MAX_SUPPORTED_TOKENS` at runtime before cloning/iterating.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.55
+                },
+                {
+                    "title": "Reliance on external protection mechanism for account correctness (defense-in-depth failure)",
+                    "description": "The security of `execute_execute` appears to rely on the surrounding operation-command framework enforcing `with_required_accounts(...)` produced in `execute_prepare`. The execute step itself does not re-derive and assert most required addresses.\n\nIf the protection mechanism (required-accounts enforcement) is incomplete, bypassable in any path, or has integration edge cases, the on-chain logic here lacks sufficient independent defenses.\n\nThis is a classic defense-in-depth gap: critical invariants (reserve accounts, mints, authorities) should be checked in the CPI-performing instruction itself.\n",
+                    "category": "CWE-693",
+                    "severity": "high",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains multiple issues rooted in arithmetic safety and trust/validation boundaries.\n\n1) There is a direct `u64` subtraction in the “remaining allocation” path:\n   `pricing_service.get_token_amount_as_token(...)? - items[index].allocated_normalized_token_amount`\n   If the converted locked amount is smaller than the already-allocated amount (e.g., due to differing mints/decimals, rounding, or a mismatched normalization mint), this underflows. On Solana (release build), this wraps, producing a huge value that can distort allocation decisions and potentially cascade into incorrect denormalization amounts.\n\n2) In `execute_execute`, the fund’s normalized-token `operation_reserved_amount` is decremented with `-=` without a checked subtraction. The code assumes `item.allocated_normalized_token_amount` is always <= the reserved amount, but that only holds if `items` is always internally generated and never attacker-influenced and if state can never become inconsistent. If an attacker can inject/modify the serialized command state (the type is AnchorDeserialize) or if prior steps produce inconsistent state, this can underflow and wrap, corrupting accounting.\n\n3) `execute_execute` does not robustly validate that several passed-in accounts match the expected on-chain addresses for the current `item` / fund configuration (e.g., it checks the pool address, but does not locally enforce that `supported_token_mint.key()` equals `item.supported_token_mint`, nor that reserve accounts match the fund-derived reserve addresses). The earlier `execute_prepare` computes expected addresses, but this function itself relies on the surrounding “required accounts” mechanism being perfectly enforced. Any weakness/alternate path in the command framework could allow account substitution, leading to incorrect token movement or bypass of intended constraints.\n\n4) Pricing inputs (`pricing_sources @ ..`) are taken from the caller-provided `accounts` slice and used in security-critical value computations. This file does not itself authenticate/validate those sources; it delegates to `FundService::new_pricing_service(...)`. If that service is permissive/misconfigured, this becomes a reliance on untrusted inputs in a security decision (token amount conversions and validations).\n\n5) The command performs sensitive state transitions (burning/denormalizing, moving reserved balances) but emits no explicit logs/events. This reduces forensic visibility during incidents.\n",
+            "findings": [
+                {
+                    "title": "u64 underflow/wraparound when computing remaining allocation participant amount",
+                    "description": "In `execute_new`, the remaining allocation strategy constructs a participant amount using:\n`pricing_service.get_token_amount_as_token(...) ? - items[index].allocated_normalized_token_amount`.\nIf the left-hand side is smaller than the allocated amount (due to rounding, differing mints, or inconsistent normalization configuration), the subtraction underflows a `u64`.\nIn Solana release builds this wraps, yielding a very large value and corrupting allocation logic, potentially leading to incorrect denormalization behavior or accounting.\nUse `checked_sub` (or `require_gte!` before subtracting) and ensure the conversion uses consistent mints/decimals.\n",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unchecked decrement of normalized_token.operation_reserved_amount can underflow on inconsistent or attacker-influenced state",
+                    "description": "In `execute_execute`, the code performs:\n`normalized_token.operation_reserved_amount -= item.allocated_normalized_token_amount;`\nwithout a checked subtraction. This assumes `item.allocated_normalized_token_amount` is always <= the current reserved amount.\nIf the serialized command `items` can be influenced by an external caller (the command types are AnchorDeserialize) or if state becomes inconsistent due to prior operations, this can underflow and wrap, corrupting reserved accounting and potentially impacting subsequent withdrawals/allocations.\nUse `checked_sub`/`require_gte!` before subtracting and/or re-derive `items` on-chain instead of trusting serialized state.\n",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Insufficient origin/account validation inside execute_execute allows account substitution if the command framework is bypassed",
+                    "description": "`execute_execute` only enforces `require_keys_eq!(normalized_token_pool_account.key(), address)` but does not locally verify other critical account relationships, such as:\n- `supported_token_mint.key()` equals `item.supported_token_mint`\n- `fund_supported_token_reserve_account` equals the fund-derived reserve ATA/address for that mint\n- `fund_normalized_token_reserve_account` equals the fund-derived normalized reserve address\n- `fund_reserve_account` equals the fund PDA reserve address\nThe function implicitly trusts that `execute_prepare(...).with_required_accounts(...)` and the surrounding dispatcher always enforce the correct accounts.\nIf an attacker can reach `execute_execute` through an alternate path or any weakness in required-account enforcement, they may substitute accounts to redirect transfers or break invariants.\nAdd explicit `require_keys_eq!` checks for all derived addresses and mint consistency within `execute_execute`.\n",
+                    "category": "CWE-346",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Reliance on caller-provided pricing source accounts for security-critical conversions",
+                    "description": "The conversion/validation logic depends on `pricing_sources @ ..` extracted from the caller-supplied `accounts` slice and passed into `new_pricing_service(...)`.\nThis file does not itself validate that the provided pricing accounts are authentic, current, or match the fund’s configured pricing sources, yet the results directly affect denormalization amounts and invariant checks.\nIf `new_pricing_service` is permissive, an attacker could feed manipulated pricing inputs to influence allocation and token amount computations.\nEnsure pricing accounts are strictly derived/verified against fund configuration and cannot be freely substituted by the caller.\n",
+                    "category": "CWE-807",
+                    "severity": "medium",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "No explicit logging/events for denormalization and reserved-balance mutations",
+                    "description": "The command performs sensitive actions (denormalization, burning, and updating reserved balances) but does not emit `msg!()` logs or Anchor events capturing key parameters (mints, amounts, pre/post reserved amounts).\nThis reduces auditability and incident response capability if abnormal behavior occurs.\n",
+                    "category": "CWE-778",
+                    "severity": "low",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-1254",
+            "CWE-1077",
+            "CWE-757",
+            "CWE-807",
+            "CWE-1267",
+            "CWE-393",
+            "CWE-656",
+            "CWE-778",
+            "CWE-287",
+            "CWE-116",
+            "CWE-1339",
+            "CWE-369",
+            "CWE-749",
+            "CWE-170",
+            "CWE-1280",
+            "CWE-240",
+            "CWE-285",
+            "CWE-345",
+            "CWE-397",
+            "CWE-286",
+            "CWE-191",
+            "CWE-269",
+            "CWE-1270",
+            "CWE-346",
+            "CWE-282",
+            "CWE-1335",
+            "CWE-228",
+            "CWE-463",
+            "CWE-1426",
+            "CWE-172",
+            "CWE-190",
+            "CWE-185",
+            "CWE-20",
+            "CWE-424",
+            "CWE-357",
+            "CWE-755",
+            "CWE-1023",
+            "CWE-1283",
+            "CWE-655",
+            "CWE-311",
+            "CWE-327",
+            "CWE-1024",
+            "CWE-923",
+            "CWE-193",
+            "CWE-182",
+            "CWE-1025",
+            "CWE-128",
+            "CWE-754",
+            "CWE-330",
+            "CWE-358",
+            "CWE-183",
+            "CWE-184",
+            "CWE-654",
+            "CWE-135",
+            "CWE-326",
+            "CWE-138",
+            "CWE-74"
+        ]
+    ]
+}

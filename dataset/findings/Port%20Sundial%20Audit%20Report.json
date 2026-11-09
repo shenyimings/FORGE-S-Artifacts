@@ -1,0 +1,82 @@
+{
+    "path": "reports/Port%20Sundial%20Audit%20Report.pdf",
+    "project_info": {
+        "url": "https://github.com/port-finance/sundial",
+        "commit_id": "c0879ae",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-03-14",
+        "project_path": "contracts/Port%20Sundial%20Audit%20Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Excess Collateral Liquidations",
+            "description": "The liquidate_sundial_profile instruction rounds up the amount of collateral received by the liquidator using a ceiling function, which allows an attacker to repeatedly liquidate small amounts of debt and receive disproportionately high collateral. The root cause is improper rounding during liquidation value calculation, specifically the use of `try_ceil_u64()` on the withdraw amount. An attacker can exploit this by depositing high-value collateral (e.g., BTC), borrowing low-value tokens (e.g., SOL), and then self-liquidating in small increments, each time receiving more value in collateral than repaid. This gradually drains the collateral while leaving an undercollateralized loan, ultimately leading to a loss of funds for the protocol as the attacker walks away with both the borrowed assets and the collateral.\n",
+            "severity": "critical",
+            "files": [
+                "programs/sundial/src/instructions/borrowing_instructions/liquidate_sundial_profile.rs"
+            ],
+            "location": [
+                "liquidate_sundial_profile.rs#10-11"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Inaccurate Yield Token Calculations",
+            "description": "When users deposit liquidity, the program mints yield tokens based on the raw amount of liquidity deposited, rather than the backdated principal token amount. This is incorrect because the principal tokens are adjusted to reflect the time value of early deposits, but yield tokens are not. The root cause is the use of the raw `amount` parameter instead of the calculated `principal_token_amount` when minting yield tokens. An attacker can exploit this by depositing a large amount of liquidity near the end of the Sundial period, receiving disproportionately more yield tokens relative to their contribution. This allows them to claim a larger share of the yield pool than deserved, effectively stealing yield from earlier depositors. The impact is economic imbalance and loss of expected yield for honest users.\n",
+            "severity": "high",
+            "files": [
+                "programs/sundial/src/instructions/lending_instructions/deposit_and_mint_tokens.rs"
+            ],
+            "location": [
+                "deposit_and_mint_tokens.rs#process_deposit_and_mint_tokens",
+                "deposit_and_mint_tokens.rs#mint_to"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ],
+                "4": [
+                    "CWE-1188"
+                ]
+            },
+            "title": "Config Changes Zero Critical Fields",
+            "description": "The `change_sundial_config` and `change_sundial_collateral_config` instructions use a `From` implementation that relies on `..SundialConfig::default()`, which silently zeroes out fields like `liquidity_decimals` and `collateral_decimals` that are not explicitly set. The root cause is the unsafe use of struct update syntax with default initialization, which fails to preserve existing non-configurable fields. An attacker (or misconfigured admin) can trigger this by calling the config update instruction, causing critical decimal fields to be reset to zero. This leads to massive miscalculations in obligation and collateral valuation\u2014since decimals are used in price scaling, setting them to zero inflates values by a factor of 10^9 or more. The impact is that new loans or collateral deposits become wildly overvalued, allowing users to borrow far more than their collateral supports, resulting in catastrophic loss of funds for the protocol.\n",
+            "severity": "high",
+            "files": [
+                "programs/sundial/src/instructions/lending_instructions/change_sundial_config.rs",
+                "programs/sundial/src/instructions/borrowing_instructions/change_sundial_collateral_config.rs",
+                "programs/sundial/src/instructions/lending_instructions/initialize_sundial.rs"
+            ],
+            "location": [
+                "change_sundial_config.rs#5",
+                "change_sundial_collateral_config.rs#5",
+                "initialize_sundial.rs#impl From<SundialInitConfigParams>"
+            ]
+        }
+    ]
+}

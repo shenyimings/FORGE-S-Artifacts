@@ -1,0 +1,99 @@
+{
+    "project": "sanctum_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/sanctum_audit_final.pdf.json/programs/s-controller/src/processor/swap_exact_in.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2,
+        "recall": 0.5,
+        "f1": 0.28571428571428575
+    },
+    "cwe_ground_truth": [
+        "CWE-682",
+        "CWE-1339"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-682",
+        "CWE-193",
+        "CWE-703",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Rounding Error During Swaps",
+            "description": "1. **Description:** The vulnerability arises in the `swap_exact_in` function where the `U64RatioFloor::reverse` method is used during a cross-program invocation to convert SOL value to LST amount. This method rounds up the resulting value, potentially allowing users to receive one more lamport than intended.\n2. **Cause:** The root cause is the use of a rounding-up operation in `U64RatioFloor::reverse`, which introduces a rounding error in favor of the user. This becomes exploitable when protocol fees are zero, as the absence of fees makes the exact output amount critical.\n3. **Exploitation:** An attacker could repeatedly perform small swaps with zero-fee configurations, benefiting from the upward rounding to extract slightly more tokens than deserved, accumulating gains over time.\n4. **Impact:** The impact includes gradual loss of funds from the liquidity pool due to inflated token payouts, undermining the economic model and potentially leading to imbalance or depletion of reserves.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The instruction performs a swap by (1) “syncing” SOL-value state via external CPI calculators, (2) obtaining quotes from external CPI programs, (3) transferring tokens, and (4) checking the pool did not lose SOL value. The security of this flow heavily depends on correct validation of user-supplied indexes and (especially) correctness/immutability of the external CPI programs and their accounts.\n\nI identified issues in four root-cause areas from the provided CWE list:\n- CWE-703: the code indexes into `lst_state_list` with a user-controlled index without a bounds check, which can panic (abort) instead of returning a controlled ProgramError.\n- CWE-693: the swap’s safety checks depend on untrusted CPI outputs, while the code explicitly calls `sync_sol_value_unchecked` and accepts CPI account sets from instruction args; if `verify_swap_cpis` does not strictly pin program IDs and validate all calculator/pricing accounts, a malicious CPI can falsify SOL values and pricing to pass the “pool would not lose SOL value” check while draining tokens.\n- CWE-682: even with trusted CPIs, the invariant check uses aggregate `total_sol_value` which may be subject to rounding/truncation. Small losses could evade detection and be repeated.\n- CWE-707: there is no local validation that `src_lst_index != dst_lst_index`; if upstream resolution/verification does not enforce distinct assets, “self-swaps” can create edge cases (fee extraction/rounding games/accounting inconsistencies) depending on pricing/valuation implementations.\n",
+            "findings": [
+                {
+                    "title": "Out-of-bounds index can panic when reading lst_state_list",
+                    "description": "In `verify_swap_exact_in`, `src_lst_index` is derived from user input and then used as:\n`let src_lst_state = lst_state_list[src_lst_index];`\nThis indexing will panic (abort) if `src_lst_index >= lst_state_list.len()`. Panics are not handled as a normal `ProgramError`, creating an exceptional-condition handling weakness and a cheap DoS vector (attackers can repeatedly submit failing transactions that consume compute and clutter logs).\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Swap safety depends on potentially untrusted CPI outputs ('unchecked' SOL value sync and pricing)",
+                    "description": "`process_swap_exact_in` relies on external CPI calculators and a pricing CPI to:\n- sync pool SOL-value state via `sync_sol_value_unchecked(...)`\n- compute `in_sol_value`, `out_sol_value`, and `dst_lst_out`\n- enforce the invariant `end_total_sol_value >= start_total_sol_value`\n\nThe CPI-related accounts are partially user-provided through `SwapExactInIxArgs` (`src_lst_value_calc_accs`, `dst_lst_value_calc_accs`) and remaining accounts are taken from the suffix slice (`accounts[SWAP_EXACT_IN_IX_ACCOUNTS_LEN..]`).\nIf `verify_swap_cpis(...)` does not strictly enforce *trusted program IDs* and *correct, canonical accounts* for the value calculators and pricing program, an attacker can supply a malicious CPI that:\n- inflates `total_sol_value()` during both “sync” calls,\n- returns manipulated quotes (e.g., overstating `dst_lst_out` or understating `out_sol_value`),\n- thereby passing the final SOL-value invariant check while extracting real tokens from `dst_pool_reserves`.\n\nThe local code gives a strong hint this is a trust boundary issue: the function is explicitly named `sync_sol_value_unchecked`, so correctness must come entirely from external verification of CPI programs/accounts.\n",
+                    "category": "CWE-693",
+                    "severity": "critical",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Invariant check may be bypassable via rounding/truncation in total_sol_value accounting",
+                    "description": "The only post-swap economic invariant enforced locally is:\n`if end_total_sol_value < start_total_sol_value { error }`.\n\nIf `pool_state.total_sol_value()` is computed using integer math with truncation/rounding (common for price/ratio conversions), the pool can potentially lose small value amounts that do not change the integer aggregate (or that are offset by rounding direction), allowing repeated “dust” extraction over many swaps while still satisfying `end >= start`.\nThis is an incorrect-calculation risk in a security-critical check.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.55
+                },
+                {
+                    "title": "Missing local validation that src and dst LST indexes are distinct",
+                    "description": "`verify_swap_exact_in` does not locally enforce `src_lst_index != dst_lst_index`.\nIf upstream resolution (`resolve_exact_in`) / `swap_exact_in_verify_account_keys` does not guarantee distinct assets, then a user could attempt a “self-swap” where source and destination are the same LST.\n\nDepending on the behavior of the pricing CPI and the LST<->SOL calculators (especially their min/rounding behavior), self-swaps can introduce edge cases like:\n- unintended fee extraction loops,\n- inconsistent accounting between reserves and SOL-value state,\n- rounding games that accumulate value over time.\n\nEven if currently prevented elsewhere, adding an explicit check here would harden the instruction at the trust boundary.\n",
+                    "category": "CWE-707",
+                    "severity": "low",
+                    "confidence": 0.5
+                }
+            ]
+        },
+        {
+            "reasoning": "The code is generally careful with arithmetic at the point of adding `dst_lst_out + to_protocol_fees_lst_amount` by using `checked_add`, and this file itself performs no divisions, bit shifts, or floating-point math.\n\nHowever, there is a potentially exploitable boundary-condition issue around LST index handling: `src_lst_index`/`dst_lst_index` are converted via `index_to_usize` but are not explicitly checked against the runtime length of the deserialized `lst_state_list` before being used for indexing. The statement `let src_lst_state = lst_state_list[src_lst_index];` will panic if `src_lst_index == lst_state_list.len()` (or greater), which on Solana aborts the instruction and can be used as a denial-of-service vector for this instruction path. This is effectively a classic boundary/off-by-one class issue: accepting an index at the boundary (len) rather than enforcing `index < len`.\n",
+            "findings": [
+                {
+                    "title": "Missing bounds check on LST index allows out-of-range indexing panic (DoS)",
+                    "description": "In `verify_swap_exact_in`, `src_lst_index` and `dst_lst_index` are derived from user-controlled instruction data and converted via `index_to_usize`, but the code does not validate that the resulting indexes are strictly within the bounds of `lst_state_list` before indexing.\n\nSpecifically:\n- `let src_lst_state = lst_state_list[src_lst_index];` will panic if `src_lst_index >= lst_state_list.len()`.\n- A common boundary case is `src_lst_index == lst_state_list.len()`, which is an off-by-one acceptance at the upper bound.\n- On-chain panics abort execution, so an attacker can reliably force the instruction to fail (denial of service for this path) by providing an out-of-range index.\n\nMitigation: explicitly check `src_lst_index < lst_state_list.len()` and `dst_lst_index < lst_state_list.len()` and return a controlled `ProgramError`/custom error instead of panicking.\n",
+                    "category": "CWE-193",
+                    "severity": "medium",
+                    "confidence": 0.72
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-135",
+            "CWE-191",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-1339"
+        ]
+    ]
+}

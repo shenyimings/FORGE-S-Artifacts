@@ -1,0 +1,88 @@
+{
+    "path": "reports/offside-labs-damm-v2-audit-oct-2025.pdf",
+    "project_info": {
+        "url": "https://github.com/MeteoraAg/damm-v2",
+        "commit_id": "122677027a44afbb0ffb4faf9e36cdb44a71a542",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-07-16",
+        "project_path": "contracts/offside-labs-damm-v2-audit-oct-2025.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect amount_in May Lead to Output Drain in ExactIn & PartialFill Mode",
+            "description": "1. **Description:** In exact_in and partial_fill swap modes, the smart contract uses the pre-fee input amount (`amount_in`) for swap calculations, while the actual amount transferred into the pool is reduced by the Token-2022 transfer fee. This discrepancy leads to an inflated output calculation.\n2. **Cause:** The root cause is a logic error where `amount_in` (including transfer fee) is passed to `get_swap_result_from_exact_input` instead of `excluded_transfer_fee_amount_in` (the actual amount after fee deduction), resulting in incorrect swap math.\n3. **Exploitation:** An attacker can exploit this by performing repeated swaps with tokens that have Token-2022 TransferFee enabled, causing the pool to miscalculate the output and release more output tokens than deserved.\n4. **Impact:** The pool transfers excess output tokens to the attacker, potentially leading to a complete drain of the pool's output_mint reserves over repeated transactions.\n",
+            "severity": "critical",
+            "location": [
+                "swap_exact_in.rs#L22-L28"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/swap/swap_exact_in.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Insufficient Checks on FeeRateLimiter.max_fee_bps",
+            "description": "1. **Description:** The `FeeRateLimiter` struct lacks sufficient validation on the `max_fee_bps` field in multiple functions, allowing potentially unsafe or inconsistent values to be set.\n2. **Cause:** Missing explicit checks in `validate`, `is_zero_rate_limiter`, and `is_non_zero_rate_limiter` functions to ensure `max_fee_bps` is within expected bounds or consistent with the rate limiter state (e.g., zero when disabled).\n3. **Exploitation:** While not directly exploitable for fund theft, an improperly configured `max_fee_bps` could lead to unexpected fee behavior or governance misalignment if set to extreme or inconsistent values.\n4. **Impact:** Could result in incorrect fee enforcement, undermining the intended economic model of the Rate Limiter mode, and increasing risk of misconfiguration in production.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "programs/cp-amm/src/base_fee/fee_rate_limiter.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "Incorrect Error Type on CollectFeeMode Type Conversion",
+            "description": "1. **Description:** When converting the `collect_fee_mode` parameter in `create_static_config`, a failed conversion returns `PoolError::TypeCastFailed`, whereas other parts of the code use `PoolError::InvalidCollectFeeMode` for the same type.\n2. **Cause:** Inconsistent error handling across the codebase when using `CollectFeeMode::try_from`, leading to non-uniform error codes for the same logical failure.\n3. **Exploitation:** This issue does not present a direct attack vector but complicates error monitoring and user feedback.\n4. **Impact:** Reduces code maintainability and clarity for frontend or monitoring systems that rely on consistent error codes, potentially leading to misdiagnosis of issues in production.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "programs/cp-amm/src/instructions/admin/ix_create_static_config.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ]
+            },
+            "title": "Inconsistent max_fee_numerator Validation Between Pool Creation and Swaps",
+            "description": "1. **Description:** When creating a pool with version V0, the contract allows `max_fee_numerator` values above `MAX_FEE_NUMERATOR_V0` as long as they are below `MAX_FEE_NUMERATOR_V1`, but during swaps, the value is capped at the V0 limit.\n2. **Cause:** A mismatch in validation logic between pool creation and swap execution, where creation-time checks are less strict than runtime behavior.\n3. **Exploitation:** A malicious or misconfigured pool creator could set a high `max_fee_numerator` that passes creation checks but is silently capped during swaps, leading to unexpected behavior.\n4. **Impact:** Creates inconsistency between configuration and execution, potentially misleading integrators or users about the actual fee parameters in effect, undermining trust and predictability.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "programs/cp-amm/src/state/pool.rs"
+            ]
+        }
+    ]
+}

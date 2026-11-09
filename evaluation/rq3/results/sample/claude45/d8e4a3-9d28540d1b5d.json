@@ -1,0 +1,92 @@
+{
+    "project": "blocksec_burrow_v1.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrow_v1.0_signed.pdf.json/contract/src/asset_config.rs",
+        "dataset/contracts/blocksec_burrow_v1.0_signed.pdf.json/contract/src/config.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-20",
+        "CWE-707"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-697",
+        "CWE-682",
+        "CWE-284",
+        "CWE-703"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incomplete asset configuration check",
+            "description": "1. **Description:** The `assert_valid` function in `AssetConfig` does not validate all critical fields, such as `extra_decimal` and `volatility_ratio`.\n2. **Cause:** Missing assertions allow configuration parameters to be changed in ways that could break system invariants.\n3. **Exploitation:** A privileged user (e.g., owner) could update an asset with invalid decimals or volatility settings, disrupting pricing or risk models.\n4. **Impact:** Risk of inconsistent or unsafe asset configurations, potentially leading to financial loss or system instability.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After thorough analysis of the provided Rust source code, I have identified several security issues stemming from the candidate CWE root causes:\n\n1. **CWE-284 (Improper Access Control)**: The `assert_owner()` function uses `env::predecessor_account_id()` for access control. This is vulnerable because in NEAR protocol (not Solana as initially stated), the predecessor can be a malicious contract that calls this contract. The proper check should use `env::signer_account_id()` to verify the actual transaction signer, not just the immediate caller.\n\n2. **CWE-682 (Incorrect Calculation)**: In `asset_config.rs`, the `get_rate()` function has a critical division-by-zero vulnerability when `target_utilization` equals 0. The assertion `assert!(self.target_utilization < MAX_POS)` allows `target_utilization` to be 0, but the calculation `pos * (BigDecimal::from(self.target_utilization_rate) - BigDecimal::one()) / target_utilization` will panic with division by zero.\n\n3. **CWE-682 (Incorrect Calculation)**: In the same `get_rate()` function, when utilization is above target, the denominator `BigDecimal::from_ratio(MAX_POS - self.target_utilization)` can be zero if `target_utilization == MAX_POS`. While the assertion prevents equality, the calculation logic doesn't handle edge cases properly.\n\n4. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: The `add_asset_farm_reward()` function checks `reward_asset.reserved >= reward_amount.0 && reward_asset.available_amount() >= reward_amount.0`, but doesn't verify that `available_amount()` implementation properly handles the reserved balance. This could lead to double-spending if the available_amount calculation is incorrect.\n\n5. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: In `update_asset()`, the check for changing `extra_decimals` only verifies that balances are zero, but doesn't prevent race conditions where deposits/borrows could occur between the check and the update, potentially corrupting the asset state.\n\n6. **CWE-697 (Incorrect Comparison)**: The assertion `assert!(self.target_utilization < MAX_POS)` uses strict inequality, but `MAX_POS` is defined as 10000 representing 100%. This means target_utilization can be 9999 (99.99%), which when used in calculations with `MAX_POS - self.target_utilization` results in a denominator of 1, causing extreme rate sensitivity.\n",
+            "findings": [
+                {
+                    "title": "Access Control Bypass via Predecessor Account",
+                    "description": "The `assert_owner()` function uses `env::predecessor_account_id()` instead of `env::signer_account_id()` for ownership verification. This allows a malicious contract to impersonate the owner by calling the contract as an intermediary. An attacker could deploy a contract that calls privileged functions like `update_config()`, `add_asset()`, or `add_asset_farm_reward()`, bypassing the intended access control.",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Division by Zero in Interest Rate Calculation",
+                    "description": "The `get_rate()` function in `asset_config.rs` performs division by `target_utilization` when calculating rates below target utilization. The validation `assert!(self.target_utilization < MAX_POS)` allows `target_utilization` to be 0, which will cause a panic when the division is executed. This can brick the contract's ability to calculate interest rates.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Potential Division by Near-Zero in Rate Calculation",
+                    "description": "In the `get_rate()` function, when utilization exceeds target, the calculation uses `BigDecimal::from_ratio(MAX_POS - self.target_utilization)` as denominator. If `target_utilization` is set to 9999 (maximum allowed value), this results in a denominator of 1, causing extreme rate sensitivity and potential overflow in interest calculations.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Insufficient Validation of Reserved Balance Availability",
+                    "description": "The `add_asset_farm_reward()` function checks both `reward_asset.reserved >= reward_amount.0` and `reward_asset.available_amount() >= reward_amount.0`, but the relationship between these two checks is unclear. If `available_amount()` doesn't properly account for reserved funds, this could allow double-spending of reserved assets or prevent legitimate reward distribution.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Race Condition in Asset Configuration Update",
+                    "description": "The `update_asset()` function checks if balances are zero before allowing `extra_decimals` changes, but this check is not atomic with the update. Between the balance check and the configuration update, other transactions could deposit or borrow assets, leading to inconsistent state where the extra_decimals change is applied to non-zero balances, corrupting the asset's decimal representation.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Inadequate Boundary Validation for Target Utilization",
+                    "description": "The assertion `assert!(self.target_utilization < MAX_POS)` allows values up to 9999 (99.99%), but doesn't enforce a reasonable upper bound. Values very close to MAX_POS create numerical instability in rate calculations and could lead to unexpected behavior in the interest rate model, potentially causing unfair rates or calculation errors.",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

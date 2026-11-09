@@ -1,0 +1,201 @@
+{
+    "project": "2024-11-orgaandmerk-securityreview.pdf.json",
+    "files": [
+        "dataset/contracts/2024-11-orgaandmerk-securityreview.pdf.json/src/coins/staking/delegator.rs",
+        "dataset/contracts/2024-11-orgaandmerk-securityreview.pdf.json/src/coins/staking/mod.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.08333333333333333,
+        "recall": 1.0,
+        "f1": 0.15384615384615385
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-1280",
+        "CWE-664",
+        "CWE-190",
+        "CWE-1229",
+        "CWE-682",
+        "CWE-435",
+        "CWE-285",
+        "CWE-284",
+        "CWE-221",
+        "CWE-703",
+        "CWE-400",
+        "CWE-749"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Slashing of re-delegated stake is computed incorrectly",
+            "description": "The staking module incorrectly computes the slashing percentage for re-delegated stake when a validator is slashed due to double-signing. The root cause is a miscalculation where the multiplier (1 - slash_fraction_double_sign) is treated as an amount to deduct, rather than the final balance after slashing. This leads to an incorrect forfeiture of funds—for example, 95% instead of the intended 5% if the slash fraction is 1/20. An attacker could exploit this by encouraging delegators to redelegate, then intentionally committing a double-sign fault, causing delegators to lose a disproportionate amount of stake while the attacker only loses the intended small percentage. The impact includes financial loss for delegators and potential manipulation of token supply by malicious validators.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "Several issues were identified from the provided staking module code when viewed through the listed CWE “root cause” lenses.\n\nThe most severe is an incorrect slashing calculation for redelegations after a double-sign (and light client attack, which reuses the same path). The code computes `multiplier = 1 - slash_fraction` and then (apparently) uses that multiplier as the *slash amount* against redelegations, which would slash ~95% when intending 5% (or generally slash the complement). This is a security-critical accounting bug.\n\nAdditionally, the `delegation_index` is only ever inserted into and is never pruned when delegations are fully removed or when a validator is removed. This creates lifetime/resource-control problems: unbounded state growth and potential denial-of-service for queries and `claim_all()` (which iterates the index and then hard-fails if a referenced validator is missing).\n\nThere is also a protocol-logic interaction issue: `redelegate()` makes redelegation immediate (`start_seconds = None`) when the *source* validator is `Unbonded`, meaning stake can be moved without waiting the unbonding period in that case. Depending on intended staking semantics, this can be a bypass of time-based restrictions that only appears when combining “validator status” + “redelegation” components.\n\nFinally, several state-mutating functions that accept arbitrary `*_address` parameters (e.g., `delegate`, `unbond`, `redelegate`, `deduct`, `declare`, `edit_validator`, `punish_downtime`) do not themselves enforce signer/authority checks. The intended protection seems to be that only the `#[call]` wrappers are externally callable. If that assumption is ever violated (e.g., another module can call these directly, an ABI export mistake, or future refactors), this becomes improper access control.\n",
+            "findings": [
+                {
+                    "title": "Incorrect redelegation slashing amount (slashes by 1 - fraction instead of fraction)",
+                    "description": "In `punish_double_sign()`, the code computes:\n`multiplier = (Decimal::one() - self.slash_fraction_double_sign)?;`\nbut then uses it to derive the amount passed into `Delegator::slash_redelegation()`:\n`delegator.slash_redelegation((multiplier * redelegation.amount)?.amount()?)?;`\n\n`slash_redelegation(amount)` interprets its parameter as the amount to slash/burn. Passing `(1 - slash_fraction) * amount` will over-slash (e.g., with a 5% slash fraction, it slashes 95% of the redelegated amount), likely causing catastrophic loss of funds for delegators redelegated to other validators.\n\nThe same path is used for light client attacks because `punish_light_client_attack()` calls `punish_double_sign()`.\n",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Delegation index never pruned (unbounded growth + stale references causing DoS)",
+                    "description": "`delegation_index: Map<Address, Map<Address, ()>>` is populated via `index_delegation()` on delegation/redelegation-in, but there is no corresponding removal when:\n- a delegator fully unbonds/has zero stake with a validator, or\n- a validator entry is removed (e.g., `repair()` removes validators with empty info).\n\nConsequences:\n1) Resource lifetime issue: unbounded on-chain storage growth over time (state bloat).\n2) Stale references can break flows: `delegations()` and `claim_all()` iterate `delegation_index` and then do `self.validators.get(*val_address)?;`.\n   If an indexed validator no longer exists, the whole call errors, potentially preventing a user from claiming rewards at all (denial-of-service until repaired).\n\nThis is an improper control of a resource throughout its lifetime (index entries outlive the referenced resources).\n",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Immediate redelegation when source validator is Unbonded may bypass unbonding delay",
+                    "description": "In `Staking::redelegate()`, `start_seconds` is set based on the *source* validator status:\n- Bonded => `Some(now)`\n- Unbonding => `Some(start_seconds)`\n- Unbonded => `None`\n\nThat `start_seconds` is then passed to `Delegator::redelegate_out()` and `Delegator::redelegate_in()`. When `None`, no redelegation record is enqueued and the destination receives stake immediately (`redelegate_in()` always `add_stake(coins)`), effectively moving stake without waiting the unbonding period in the `Unbonded` source-validator case.\n\nIf the intended protocol semantics require time-based restrictions (unbonding/redelegation cooldown) regardless of validator status, this is a cross-component interaction bug: validator lifecycle state + redelegation logic combine to create a timing bypass not present when considering each component independently.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Authorization relies on wrapper calls; core mutators accept arbitrary addresses without signer checks",
+                    "description": "Multiple public, state-mutating functions take explicit `val_address`/`delegator_address` parameters but do not verify that the caller is authorized (no signer/role check inside the function), for example:\n- `delegate(val_address, delegator_address, coins)`\n- `unbond(validator_address, delegator_address, amount)`\n- `redelegate(src_validator_address, dst_validator_address, delegator_address, amount)`\n- `deduct(val_address, delegator_address, amount, denom)`\n- `declare(val_address, declaration, coins)`\n- `edit_validator(val_address, ...)`\n- `punish_downtime(val_address)` (and other punishment functions)\n\nThe code appears to assume only `#[call]` entrypoints are externally reachable (e.g., `*_self` methods which bind `delegator_address`/`val_address` to `signer()`), but if these methods are callable by other modules, exported by mistake, or invoked through future refactors, unauthorized actors could mutate others’ staking positions (delegate/unbond/redelegate/deduct) or validator state.\n\nThis is an access-control hazard due to missing internal authorization checks at the mutation layer.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Exceptional-condition handling: unknown evidence mapping returns error (potential chain halt)",
+                    "description": "In `BeginBlock::begin_block()`, when processing `byzantine_validators` evidence, if `address_for_tm_hash.get(hash)?` returns `None`, the code returns an error:\n`return Err(Error::Coins(\"Invalid pubkey length from Tendermint\".into()));`\n\nThis error message is also misleading (the length can be valid; the mapping can simply be absent). More importantly, returning an error in BeginBlock can halt processing. If the system ever receives evidence for a validator not present in `address_for_tm_hash` (e.g., after state repair/removal, inconsistent mapping state, or other edge conditions), this becomes a denial-of-service via exceptional-condition mishandling.\n\nRobust behavior would typically ignore or log unknown evidence rather than erroring out.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The code implements a staking module with several externally-callable entrypoints (#[call]) that correctly bind actions to the current Signer, but it also exposes multiple security-sensitive Rust `pub fn` methods (e.g., `delegate`, `unbond`, `redelegate`, `deduct`, `declare`, `edit_validator`, `punish_downtime`) that do not perform any signer/authority checks. In frameworks where `pub` methods can be invoked by other modules/routers or become externally reachable due to macro/dispatch changes, this creates a fragile and potentially unsafe API surface (CWE-749/CWE-285/CWE-287).\n\nAdditionally, `redelegate` removes stake from the source delegation before validating destination validator eligibility (tombstoned/unbonding/unbonded checks). If state changes are not strictly rolled back on error in the hosting environment, this is a classic “check after asset access” pattern (CWE-1280).\n\nThe module also has multiple unbounded or poorly-bounded iterations and state growth vectors: delegation indices are only added and never pruned; queue processing can become very large in a single block when many entries mature simultaneously; and some query/call flows (`claim_all`) can iterate over attacker-inflated sets, potentially exhausting compute (CWE-400 / CWE-1229).\n\nFinally, there is at least one integer-overflow-prone arithmetic check in BeginBlock (`last_height + max_offline_blocks`) which can wrap in release mode and lead to incorrect downtime punishment decisions at extreme heights (CWE-190). There are also event/logging omissions or inaccuracies (e.g., wrong denom string for `take_as_funding`, missing amount/denom in `withdraw_rewards` events), which can hinder auditing/forensics and downstream security decisions (CWE-221).\n",
+            "findings": [
+                {
+                    "title": "Security-sensitive public methods lack authentication/authorization checks",
+                    "description": "Multiple security-relevant methods are `pub fn` and accept arbitrary `val_address` / `delegator_address` parameters without verifying that the caller is authorized:\n- `Staking::declare`, `Staking::edit_validator` (should generally require operator authority)\n- `Staking::delegate`, `Staking::unbond`, `Staking::redelegate` (can act on behalf of any delegator address)\n- `Staking::deduct` (can deduct another delegator’s liquid rewards by specifying their address)\n- `Staking::punish_downtime` (slashes/jails a validator)\n\nThe code relies on separate `#[call]` wrappers (e.g., `*_self`) to bind actions to `signer()`, but the unrestricted `pub` API remains dangerous if:\n- any other internal module calls these methods using user-controlled inputs without enforcing the same checks, or\n- future refactors/macros/dispatch accidentally expose these `pub` functions as transaction-callable endpoints.\n\nThis is an authorization/authentication root-cause issue: the identity/authority of the actor performing the action is not proven/checked in these functions.\n",
+                    "category": "CWE-749",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Authorization not enforced in core state-mutating functions (delegator/operator spoofing risk)",
+                    "description": "Closely related to the exposed-method surface: core routines such as `delegate(val_address, delegator_address, ...)`, `unbond(validator_address, delegator_address, ...)`, and `redelegate(src, dst, delegator_address, ...)` mutate balances based solely on passed addresses.\n\nIf any call path allows an attacker to reach these functions (directly or indirectly), they could:\n- unbond/redelegate someone else’s stake,\n- deduct someone else’s rewards (via `deduct`),\n- potentially grief validators (via `punish_downtime`) depending on exposure.\n\nWhile the current `#[call]` endpoints use `signer()` correctly, the absence of checks in the core functions is still a security weakness and an easy footgun for future integration.\n",
+                    "category": "CWE-285",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Destination validator eligibility checks occur after stake is removed in redelegation",
+                    "description": "In `Staking::redelegate`:\n1) The code first calls `src_delegator.redelegate_out(...)` which executes `self.staked.take(amount)?` (stake is removed from the source DVP).\n2) Only afterwards does it validate the destination validator (`consensus_key` exists, not tombstoned, not unbonding/unbonded).\n\nIf the destination checks fail, the function returns `Err` after the source stake has already been accessed/removed. In environments without strict transactional rollback of intermediate state writes, this can lead to partial state changes (stake removed but not re-added elsewhere), i.e., loss/freeze of funds.\n\nEven if the framework currently rolls state back on error, the ordering is still risky and violates the “check-then-act” pattern for asset movements.\n",
+                    "category": "CWE-1280",
+                    "severity": "high",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Unbounded state growth and iteration can exhaust compute (queues and delegation index)",
+                    "description": "Several structures can grow without effective pruning and can later force large per-block or per-call work:\n- `delegation_index`: entries are inserted in `index_delegation` but there is no removal when a delegator fully unbonds/withdraws, enabling persistent growth and long-term bloat.\n- Queue processing in EndBlock (`process_unbonding_delegation_queue`, `process_redelegation_queue`, `process_validator_queue`) can become extremely expensive in a single block if many entries mature at once (linear work per matured entry).\n- `claim_all` is a `#[call]` that iterates over all delegations returned by `delegations(signer)`. A user can inflate their own `delegation_index` by delegating tiny amounts to many validators, making `claim_all` exceed compute limits. While this primarily DoSes the caller, it is still uncontrolled resource consumption and can be abused for spam/compute griefing patterns.\n\nThis is a classic resource exhaustion/vector amplification issue due to unbounded loops and persistent indices.\n",
+                    "category": "CWE-400",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Persistent 'delegation_index' entries create emergent storage resource (state bloat vector)",
+                    "description": "`delegation_index` acts as an ever-growing index of (delegator -> validators delegated to). The code only ever inserts into this index and never deletes entries, even when a delegator’s stake becomes zero and all rewards are claimed.\n\nAttackers can create many small delegations across many validators and later remove their stake, leaving behind permanent index entries. This indirectly creates a long-lived storage resource that violates the likely intended “index only active delegations” policy, increasing state size and making future operations more expensive.\n",
+                    "category": "CWE-1229",
+                    "severity": "medium",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Potential integer overflow in downtime detection can cause incorrect slashing/jailing decisions",
+                    "description": "In `BeginBlock::begin_block`:\n`if *last_height + self.max_offline_blocks < height { ... punish_downtime ... }`\n\nThe addition `last_height + max_offline_blocks` can overflow `u64` in release builds and wrap around, potentially:\n- incorrectly marking validators as offline (or not offline),\n- triggering (or skipping) downtime punishment incorrectly.\n\nThis is security-relevant because it influences slashing/jailing behavior.\nUsing `checked_add` (and handling the overflow explicitly) would avoid wraparound.\n",
+                    "category": "CWE-190",
+                    "severity": "low",
+                    "confidence": 0.55
+                },
+                {
+                    "title": "Security-relevant event logging is inaccurate or incomplete (wrong denom / missing amount)",
+                    "description": "The module emits events that are likely relied on for auditing, monitoring, and off-chain accounting, but there are issues:\n- `take_as_funding` logs `amount` using `denom_as_string = S::NAME` even though the function takes a `denom: u8` parameter and deducts that denom from `delegator.liquid`. If rewards are in non-staking denoms, the emitted event amount string can be incorrect/misleading.\n- `claim_all` emits `withdraw_rewards` events without including the withdrawn amount and denom, reducing traceability and making it harder to reconstruct fund flows from logs.\n\nThis can hamper later analysis and can lead downstream systems to make incorrect security/accounting decisions based on incomplete/incorrect records.\n",
+                    "category": "CWE-221",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-221",
+            "CWE-1267",
+            "CWE-393",
+            "CWE-1038",
+            "CWE-287",
+            "CWE-911",
+            "CWE-188",
+            "CWE-1339",
+            "CWE-495",
+            "CWE-369",
+            "CWE-749",
+            "CWE-118",
+            "CWE-1229",
+            "CWE-1280",
+            "CWE-285",
+            "CWE-397",
+            "CWE-404",
+            "CWE-191",
+            "CWE-286",
+            "CWE-673",
+            "CWE-704",
+            "CWE-269",
+            "CWE-1270",
+            "CWE-346",
+            "CWE-282",
+            "CWE-1335",
+            "CWE-913",
+            "CWE-228",
+            "CWE-669",
+            "CWE-410",
+            "CWE-436",
+            "CWE-580",
+            "CWE-501",
+            "CWE-190",
+            "CWE-665",
+            "CWE-662",
+            "CWE-755",
+            "CWE-496",
+            "CWE-439",
+            "CWE-666",
+            "CWE-1283",
+            "CWE-706",
+            "CWE-922",
+            "CWE-193",
+            "CWE-1329",
+            "CWE-668",
+            "CWE-923",
+            "CWE-128",
+            "CWE-754",
+            "CWE-400",
+            "CWE-487",
+            "CWE-610",
+            "CWE-135",
+            "CWE-372"
+        ]
+    ]
+}

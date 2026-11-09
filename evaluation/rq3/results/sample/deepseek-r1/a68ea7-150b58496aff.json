@@ -1,0 +1,206 @@
+{
+    "project": "2022-12-driftlabs-driftprotocol-securityreview.pdf.json",
+    "files": [
+        "dataset/contracts/2022-12-driftlabs-driftprotocol-securityreview.pdf.json/programs/drift/src/instructions/keeper.rs",
+        "dataset/contracts/2022-12-driftlabs-driftprotocol-securityreview.pdf.json/programs/drift/src/state/state.rs",
+        "dataset/contracts/2022-12-driftlabs-driftprotocol-securityreview.pdf.json/programs/drift/src/instructions/admin.rs",
+        "dataset/contracts/2022-12-driftlabs-driftprotocol-securityreview.pdf.json/programs/drift/src/state/user.rs",
+        "dataset/contracts/2022-12-driftlabs-driftprotocol-securityreview.pdf.json/programs/drift/src/instructions/user.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.42857142857142855,
+        "recall": 0.25,
+        "f1": 0.3157894736842105
+    },
+    "cwe_ground_truth": [
+        "CWE-664",
+        "CWE-755",
+        "CWE-1164",
+        "CWE-285",
+        "CWE-435",
+        "CWE-284",
+        "CWE-863",
+        "CWE-1357",
+        "CWE-710",
+        "CWE-188",
+        "CWE-703",
+        "CWE-372"
+    ],
+    "cwe_detected": [
+        "CWE-697",
+        "CWE-862",
+        "CWE-285",
+        "CWE-284",
+        "CWE-703",
+        "CWE-754",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Inconsistent and incomplete exchange status checks",
+            "description": "The exchange status is managed via an enum that only allows one operation to be paused at a time, and status checks are implemented inconsistently across the codebase—some in function annotations, others in function bodies. The root cause is a lack of centralized, standardized access control logic for exchange status, combined with the use of an enum that cannot represent multiple paused states simultaneously. An attacker could exploit inconsistent checks by invoking functions that do not properly validate the exchange status, potentially executing operations (e.g., trading, liquidations) during intended downtime. This could lead to unauthorized operations during maintenance or emergency pauses, undermining system integrity and availability.\n"
+        },
+        {
+            "title": "Spot market access controls are incomplete",
+            "description": "Access controls for spot markets are only partially implemented, meaning certain functions may not fully validate permissions before execution. The cause is missing or incomplete checks for authority accounts or user permissions in specific instruction handlers related to spot markets. An attacker could invoke unprotected functions or bypass intended restrictions, potentially manipulating market state or accessing privileged operations. This could result in unauthorized modifications to spot markets, leading to financial loss or manipulation of market data. Additionally, some spot market instructions lack proper `access_control` annotations (e.g., `exchange_not_paused`), while equivalent perpetual market functions have them, allowing attackers to invoke spot market functions during paused exchange states and perform unauthorized actions like placing orders or withdrawing funds.\n"
+        },
+        {
+            "title": "The zero-copy feature in Anchor is experimental",
+            "description": "The project uses Anchor's `#[account(zero_copy)]` attribute on several state structs, which is documented as experimental and intended only for cases where Borsh serialization exceeds stack or heap limits. The root cause is reliance on unstable framework features. If the Anchor team introduces breaking changes or security flaws in the zero-copy implementation, it could compromise the integrity of account deserialization, allowing attackers to manipulate state. The impact could be severe, including loss of funds or unauthorized state modifications, especially if the feature has undefined behavior under certain conditions.\n"
+        },
+        {
+            "title": "Exchange status pausing mechanisms can lead to unintended unpausing",
+            "description": "The exchange's pausing mechanism uses a single status field that controls multiple operations, leading to potential unintended consequences. The root cause is the lack of independent flags for different operations (e.g., withdrawals, funding), which means pausing one operation can inadvertently affect another. An attacker could trick an administrator into pausing funding after withdrawals are already paused, which could unintentionally unpause withdrawals due to overlapping status logic. This could allow malicious actors to withdraw funds during a critical incident, increasing the damage from an ongoing exploit.\n"
+        },
+        {
+            "title": "Unused accounts in instruction contexts",
+            "description": "Some instruction contexts include accounts that are not used in the handler logic, such as drift_signer in initialize and spot_market/user_stats/state in initialize_insurance_fund_stake. The cause is likely outdated or refactored code where account definitions were not cleaned up. This can mislead developers into thinking these accounts are required or used, potentially leading to incorrect assumptions or integration errors. While not directly exploitable, it increases cognitive load and risk of misuse.\n"
+        },
+        {
+            "title": "Size of created accounts derived from in-memory representation",
+            "description": "Account sizes are calculated using std::mem::size_of::<T>() + 8, relying on the in-memory layout of structs rather than a fixed serialized size. The cause is the use of repr(C) and padding to align sizes, but this ties account size to memory layout assumptions. If a struct is modified such that its in-memory size is smaller than needed for serialization, account initialization will fail. This creates a fragility where code changes can break account creation without obvious intent, leading to denial of service.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "\"The analysis reveals four categories of vulnerabilities. First, multiple functions lack proper access control checks, allowing unauthorized users to perform critical operations (settle PnL, liquidate positions, fill orders). Second, an incorrect comparison in AMM curve updates could allow invalid state changes. Third, improper handling of insurance fund transfers may lead to insufficient collateral errors. Fourth, insufficient protection against bankrupt users during LP share removal could destabilize the system.\"\n",
+            "findings": [
+                {
+                    "title": "Unauthorized User Operations Access",
+                    "description": "Multiple handler functions (settle_pnl, liquidate_perp, liquidate_spot, fill_perp_order, fill_spot_order) lack proper authorization checks, allowing any caller to perform operations on arbitrary user accounts.",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Incorrect Adjustment Cost Comparison in AMM Update",
+                    "description": "The 'handle_update_k' function performs an incorrect comparison of adjustment costs without validating bounds, potentially allowing invalid curve parameter updates.",
+                    "category": "CWE-697",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Insufficient Insurance Fund Validation",
+                    "description": "'handle_resolve_perp_pnl_deficit' fails to properly handle cases where 'pay_from_insurance' exceeds available funds after initial validation, potentially leading to insufficient collateral errors.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Missing Bankruptcy Check in LP Removal",
+                    "description": "'handle_remove_perp_lp_shares' does not validate user bankruptcy status before processing share removal, potentially allowing invalid state transitions.",
+                    "category": "CWE-693",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The analysis revealed several potential security issues across multiple files. In keeper.rs, functions handling the resolution of perp and spot bankruptcy do not validate that the provided vault accounts correspond to the correct market indices, which could allow an attacker to drain funds by providing malicious vault accounts (CWE-285). In admin.rs, market initialization functions do not check if a market account already exists, risking reinitialization and overwriting (CWE-754). Additionally, depositing into the perp market fee pool does not validate the token type of the source vault, which could corrupt the fee pool (CWE-285). In user.rs, the deposit function allows deposits even when the market is in a paused state (CWE-754), and the transfer deposit function lacks an explicit balance check, risking negative balances (CWE-285).\n",
+            "findings": [
+                {
+                    "title": "Improper Validation of Vault Accounts in Bankruptcy Resolution",
+                    "description": "Functions `handle_resolve_perp_bankruptcy` and `handle_resolve_spot_bankruptcy` in keeper.rs do not validate that the provided vault accounts match the derived vault addresses for the given market indices. This could allow an attacker to provide malicious vault accounts and steal funds.",
+                    "category": "CWE-285",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Reinitialization of Market Accounts Without Existence Check",
+                    "description": "Functions `handle_initialize_spot_market` and `handle_initialize_perp_market` in admin.rs increment the state's market counter and use it as the market index without checking if the market account at that index already exists. This could lead to overwriting an existing market.",
+                    "category": "CWE-754",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Lack of Token Validation in Perp Market Fee Pool Deposit",
+                    "description": "Function `handle_deposit_into_perp_market_fee_pool` in admin.rs transfers tokens from an admin-provided vault to the market's fee pool vault without verifying that the token mint of the source vault is the quote asset. This could corrupt the fee pool if the wrong token is deposited.",
+                    "category": "CWE-285",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Deposit Allowed in Paused Market State",
+                    "description": "Function `handle_deposit` in user.rs allows deposits even when the spot market is in a paused state (e.g., ReduceOnly). The code only checks that the market is not being initialized, but does not check other paused states.",
+                    "category": "CWE-754",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Insufficient Balance Check in Transfer Deposit",
+                    "description": "Function `handle_transfer_deposit` in user.rs does not explicitly check that the `from_user` has sufficient balance before transferring. This could lead to a negative balance if the transfer amount exceeds the available balance.",
+                    "category": "CWE-285",
+                    "severity": "high",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The audit revealed several instances of missing authorization (CWE-862) in the keeper.rs file. Specifically:\n- The `handle_settle_funding_payment` function does not require any signer, allowing anyone to trigger funding settlement for any user.\n- The `handle_settle_lp` function similarly lacks a signer, enabling unauthorized settlement of LP positions.\n- The `handle_settle_pnl` function does not enforce that the signer is the user's authority, permitting arbitrary signers to settle PNL for any user.\n\nThese vulnerabilities could allow malicious actors to interfere with user accounts without permission.\n\nOther CWEs were not found in the provided code.\n",
+            "findings": [
+                {
+                    "title": "Missing Authorization in Funding Settlement",
+                    "description": "The function `handle_settle_funding_payment` does not require a signer, allowing anyone to call it for any user.",
+                    "category": "CWE-862",
+                    "severity": "high",
+                    "confidence": 0.99
+                },
+                {
+                    "title": "Missing Authorization in LP Settlement",
+                    "description": "The function `handle_settle_lp` does not require a signer, allowing anyone to call it for any user.",
+                    "category": "CWE-862",
+                    "severity": "high",
+                    "confidence": 0.99
+                },
+                {
+                    "title": "Incorrect Authorization in PNL Settlement",
+                    "description": "The function `handle_settle_pnl` requires a signer but does not check that the signer is the authority of the user account, allowing arbitrary signers to trigger PNL settlement for any user.",
+                    "category": "CWE-862",
+                    "severity": "high",
+                    "confidence": 0.99
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-269",
+            "CWE-749",
+            "CWE-393",
+            "CWE-754",
+            "CWE-1267",
+            "CWE-287",
+            "CWE-346",
+            "CWE-755",
+            "CWE-923",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-397",
+            "CWE-228",
+            "CWE-282",
+            "CWE-1280",
+            "CWE-286",
+            "CWE-1270"
+        ],
+        [
+            "CWE-863",
+            "CWE-927",
+            "CWE-732",
+            "CWE-862",
+            "CWE-1230",
+            "CWE-1328"
+        ]
+    ]
+}

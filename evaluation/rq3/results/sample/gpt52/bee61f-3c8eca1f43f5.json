@@ -1,0 +1,90 @@
+{
+    "project": "REP-NATIX-Network---audit__final-20240919T151356Z.pdf.json",
+    "files": [
+        "dataset/contracts/REP-NATIX-Network---audit__final-20240919T151356Z.pdf.json/programs/stake_V1/src/control_stake_amount.rs",
+        "dataset/contracts/REP-NATIX-Network---audit__final-20240919T151356Z.pdf.json/programs/stake_V1/src/cancel.rs",
+        "dataset/contracts/REP-NATIX-Network---audit__final-20240919T151356Z.pdf.json/programs/stake_V1/src/give_stakes.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-1325",
+        "CWE-664",
+        "CWE-691",
+        "CWE-770",
+        "CWE-670",
+        "CWE-372",
+        "CWE-400"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-284",
+        "CWE-682"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Concerns on Compute Unit and Account Size",
+            "description": "The program stores all stake information in a single account using a vector, which is constrained only by `maximum_stakers` (unique users), not total stake entries. A single user can create multiple stakes, potentially exhausting account size (10MB) or compute units (1.4M). Iterating over a large list increases compute cost and risks transaction failure. This design is inefficient and vulnerable to denial-of-service via resource exhaustion.\n"
+        },
+        {
+            "title": "Cancellation May Be Blocked Due to Stake Amount Limit Validation and Break `maximum_stakers` Limitation",
+            "description": "The `cancel` function calls `control_stake_amount`, which validates the total stake against `max_stake_amount`. If canceling unstake requests causes the user's total stake to exceed this limit, the cancellation is blocked. This creates a situation where users cannot cancel their unstake, trapping their funds. Additionally, the `maximum_stakers` limit can be violated if a new user joins during the unstake-cancel window, breaking the intended cap on unique stakers.\n"
+        },
+        {
+            "title": "Potential Missing Reward Handling While Gap Between `unstake` and `cancel`",
+            "description": "The `cancel` function does not reset or update the `stake_time` when an unstake request is canceled. This allows users to cancel their unstake and still earn rewards for the period they were in unstake status, effectively gaming the system. For example, a user can initiate unstake, wait for rewards to accrue, then cancel and retain full rewards as if they never unstaked. This creates an unfair advantage and distorts the reward mechanism.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code contains multiple security-relevant weaknesses that map to the provided CWE root causes:\n(1) `control_stake_amount` uses `expect()` on overflow paths, which can trigger a panic/abort rather than returning a controlled `ProgramError`, enabling denial-of-service style transaction failures when stake totals approach `u64::MAX` (CWE-703 / CWE-691).\n(2) The logic in `control_stake_amount` does not actually enforce the stated invariant “total amount staked ... is between min and max” because it only enforces `min_stake_amount` on the *delta* `amount` (when `Some`) and never enforces that the *total* `sum_stakes` is >= `min_stake_amount`. Calls such as `cancel(..., amount=None)` therefore bypass any minimum-total enforcement, which is an incorrect calculation/validation of a security-relevant quantity (CWE-682).\n(3) `cancel` mutates stake/unstake state for `user_account.key` based on accounts passed in, but the snippet itself does not enforce that the transaction signer is authorized to cancel for that user. It delegates this to `control_user_account` / `control_user_solana_address` (not shown). If those checks are incomplete (e.g., they don’t require `user_solana_address.is_signer` and/or don’t bind the signer to `user_account.key`), an attacker could cancel other users’ unstake requests (griefing / locking funds in stake longer than intended), which is improper access control (CWE-284). Additionally, `serialize(staking_pool, program_account)` is called without any local verification that `program_account` is the correct pool account and owned by this program; if `serialize` also lacks strict checks, this becomes another access control issue (CWE-284).\n",
+            "findings": [
+                {
+                    "title": "Panic-on-overflow in stake summation can be triggered to fail transactions",
+                    "description": "In `control_stake_amount`, stake totals are summed using `checked_add`, but overflow is handled via `.expect(\"Overflow during stake summation\")` and `.expect(\"Overflow during final addition\")`.\nOn Solana, a panic/abort fails the instruction abruptly rather than returning a controlled `ProgramError`. If an attacker can create or influence large `staker.amount` values (or the pool accumulates them over time), they can trigger these overflow paths and force instruction failure (denial-of-service for stake/unstake/cancel flows that call this check).\n\nAffected code:\n- `control_stake_amount.rs`: `... .expect(\"Overflow during stake summation\")` and `... .expect(\"Overflow during final addition\")`\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Minimum stake invariant not enforced on total staked amount (logic mismatch)",
+                    "description": "The function comment says it controls the *total* amount staked by an address to be between `min_stake_amount` and `max_stake_amount`.\nHowever, the code only checks `min_stake_amount` against the optional input `amount` (the delta) when `amount.is_some()`, and then checks only `sum_stakes > max_stake_amount`.\nThere is no check that `sum_stakes >= min_stake_amount` (or that the remaining stake after operations still meets the minimum), especially when `amount` is `None` (e.g., `cancel` calls `control_stake_amount(..., None)`).\n\nThis is an incorrect/insufficient validation of a security-relevant calculation (stake thresholds), and can allow states that violate the intended minimum-stake policy.\n\nAffected code:\n- `control_stake_amount.rs`: missing `if sum_stakes < min_stake_amount { ... }` style validation\n- `cancel.rs`: calls `control_stake_amount(&mut staking_pool, ..., None)` (bypasses min check entirely)\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Cancel may allow unauthorized cancellation of another user's unstake requests if upstream checks are insufficient",
+                    "description": "`cancel` selects entries to modify based solely on `user_account.key.to_bytes()` and then clears `unstake_time` / `instant` for all matching unstake requests.\nThe function itself does not directly enforce that the caller/signer is authorized to act for `user_account` (it delegates to `control_user_account` and `control_user_solana_address`, which are not shown).\n\nIf those controls do not strictly ensure that:\n- the expected authority account is a signer (`is_signer`), and\n- that signer is cryptographically bound to the stake address being modified (and/or to the token account owner),\nthen an attacker can pass a victim `user_account` and cancel the victim’s unstake requests (griefing / preventing timely withdrawals).\n\nAffected code:\n- `cancel.rs`: uses `give_unstakes(&mut staking_pool, user_account.key.to_bytes())` and mutates returned entries without an explicit local authorization check.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Potential improper access control when serializing state to program_account (depends on serialize implementation)",
+                    "description": "`cancel` writes updated state via `serialize(staking_pool, program_account)` but the shown code does not verify that `program_account`:\n- is the canonical pool PDA/address expected for this stake pool, and\n- is owned by the current program, and\n- is writable.\n\nIf `serialize` also does not enforce these properties, a malicious caller could supply an arbitrary account as `program_account` and cause unintended state writes or corruption.\n\nAffected code:\n- `cancel.rs`: `serialize(staking_pool, program_account)` without local ownership/address checks\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.55
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

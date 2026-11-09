@@ -1,0 +1,72 @@
+{
+    "path": "reports/meteora_dynamic_bonding_curve_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/MeteoraAg/dynamic-bonding-curve",
+        "commit_id": "48cdb05",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-04-18",
+        "project_path": "contracts/meteora_dynamic_bonding_curve_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect Quote Reserve Accounting",
+            "description": "1. **Description:** During a base-to-quote swap with fees on output, the `apply_swap_result` function subtracts the full output amount (including fees) from the `quote_reserve`, causing the on-chain reserve to understate the actual liquidity.\n2. **Cause:** The function uses the pre-fee output amount instead of the net amount after fees, which creates a discrepancy between the recorded reserve and the real token balance.\n3. **Exploitation:** An attacker could perform swaps that gradually deplete the actual quote token balance while the recorded reserve remains artificially low, potentially blocking migration or fee claims.\n4. **Impact:** The pool may fail to migrate or distribute fees correctly due to insufficient reported reserves, leading to denial of service and loss of functionality.\n",
+            "severity": "medium",
+            "files": [
+                "programs/virtual-curve/src/state/virtual_pool.rs"
+            ],
+            "location": [
+                "VirtualPool.apply_swap_result#-"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Stale Vault Balance Check",
+            "description": "1. **Description:** The `handle_swap` instruction checks migration readiness using a potentially stale `base_vault.amount`, which is read before the swap is executed.\n2. **Cause:** The vault account is not reloaded after the swap, so the balance check does not reflect the latest state, risking an incorrect assessment of liquidity.\n3. **Exploitation:** An attacker could trigger a swap that updates the base reserve but still passes the outdated balance check, causing the pool to emit `EvtCurveComplete` and mark itself as completed prematurely.\n4. **Impact:** The pool becomes stuck in a completed state with insufficient liquidity, blocking further swaps and preventing successful migration.\n",
+            "severity": "medium",
+            "files": [
+                "programs/virtual-curve/src/instructions/ix_swap.rs"
+            ],
+            "location": [
+                "handle_swap#-"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Risk of Zero Threshold Migration",
+            "description": "1. **Description:** The `migration_quote_threshold` can be set to zero during configuration, which causes the pool to immediately enter the migrated state upon creation.\n2. **Cause:** There is no validation enforcing a minimum threshold, allowing configurations that skip the launch phase entirely.\n3. **Exploitation:** A malicious or misconfigured deployment could set the threshold to zero, rendering the pool unusable from the start.\n4. **Impact:** Swaps are blocked because the pool is already marked as completed, resulting in a denial of service for users and loss of functionality.\n",
+            "severity": "low",
+            "files": [
+                "programs/virtual-curve/src/state/virtual_pool.rs"
+            ],
+            "location": []
+        }
+    ]
+}

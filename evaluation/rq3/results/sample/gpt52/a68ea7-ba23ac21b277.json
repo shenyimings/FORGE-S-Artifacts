@@ -1,0 +1,236 @@
+{
+    "project": "2022-12-driftlabs-driftprotocol-securityreview.pdf.json",
+    "files": [
+        "dataset/contracts/2022-12-driftlabs-driftprotocol-securityreview.pdf.json/sdk/src/accounts/webSocketUserAccountSubscriber.ts",
+        "dataset/contracts/2022-12-driftlabs-driftprotocol-securityreview.pdf.json/sdk/src/user.ts",
+        "dataset/contracts/2022-12-driftlabs-driftprotocol-securityreview.pdf.json/sdk/src/accounts/webSocketAccountSubscriber.ts"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.07142857142857142,
+        "recall": 0.5,
+        "f1": 0.125
+    },
+    "cwe_ground_truth": [
+        "CWE-691",
+        "CWE-362"
+    ],
+    "cwe_detected": [
+        "CWE-1339",
+        "CWE-431",
+        "CWE-664",
+        "CWE-697",
+        "CWE-393",
+        "CWE-755",
+        "CWE-682",
+        "CWE-691",
+        "CWE-435",
+        "CWE-703",
+        "CWE-369",
+        "CWE-704"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Race condition in Drift SDK",
+            "description": "A race condition exists in the Drift SDK that can cause client programs to operate on non-existent or stale data. The root cause is a lack of proper synchronization or state validation in the SDK when accessing or updating data, leading to timing-dependent behavior. An attacker or misbehaving client could exploit this race condition to read outdated market data or submit transactions based on stale state, potentially gaining an unfair advantage. The impact includes unreliable test results, potential for incorrect client behavior, and possible front-running or manipulation in production environments if not mitigated.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code is a TypeScript client-side account subscription + risk/math layer. While it is not an on-chain Solana program, it still makes security-critical decisions (e.g., liquidation price, max trade size, collateral/margin computations) and manages long-lived RPC websocket resources. Several issues arise from (1) incorrect control/ordering of interactions between components (subscriber -> emitter -> consumer), (2) insufficient control-flow/exception handling around undefined state and edge cases, (3) incorrect comparisons/truthiness checks that can break listener lifecycle management, and (4) calculation edge cases (division by zero, precision loss) that can produce wrong risk outputs and cause financially harmful actions by bots or UIs consuming this library.\n",
+            "findings": [
+                {
+                    "title": "Event emitted before subscription state is marked as subscribed (update emitted too early)",
+                    "description": "In `WebSocketUserAccountSubscriber.subscribe()`, after `await this.userDataAccountSubscriber.subscribe(...)`,\nthe code emits `this.eventEmitter.emit('update')` and only afterwards sets `this.isSubscribed = true`.\nConsumers that react to `'update'` by calling `getUserAccountAndSlot()` will hit `assertIsSubscribed()` and throw\n`NotSubscribedError`, despite the update being emitted from the subscription flow.\n\nThis is an interaction/order-of-operations bug between correctly-behaving components (subscriber and consumer)\nthat can cause client crashes/DoS in trading bots and UIs.\n\nCode path:\n- `WebSocketUserAccountSubscriber.subscribe()` emits `'update'` before `isSubscribed = true`.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Listener lifecycle bugs due to truthy checks on listenerId (0 treated as 'no listener')",
+                    "description": "`WebSocketAccountSubscriber.subscribe()` uses `if (this.listenerId) { return; }` and `unsubscribe()` uses\n`if (this.listenerId) { ... remove ... }`.\n\nIf the underlying connection ever returns a listener id of `0`, these checks will behave incorrectly:\n- `subscribe()` may register duplicate listeners (since `0` is falsy).\n- `unsubscribe()` may fail to remove the listener (leaking resources and continuing to process updates).\n\nThis is a security-relevant comparison mistake impacting resource lifetime control.\n\nRecommended: compare explicitly against `undefined` (`if (this.listenerId !== undefined)`).\n",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unsubscribe does not reliably return a Promise and may silently do nothing",
+                    "description": "`WebSocketAccountSubscriber.unsubscribe()` returns a Promise only when `this.listenerId` is truthy; otherwise it\nreturns `undefined` (despite the signature `Promise<void>`).\n\nThis can lead to:\n- Callers believing a resource was released when it was not (especially combined with the listenerId truthiness bug).\n- Inconsistent control of the websocket listener resource through its lifetime.\n\nRecommended: always return `Promise.resolve()` when there is nothing to unsubscribe, and fix listenerId checking.\n",
+                    "category": "CWE-664",
+                    "severity": "low",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Account deletion / null accountInfo not handled; stale data can persist indefinitely",
+                    "description": "In `WebSocketAccountSubscriber.handleRpcResponse()`, when `accountInfo` is missing/null, `newBuffer` becomes\n`undefined`. After initialization, the update path only updates internal state and calls `onChange()` when\n`newBuffer` is present and differs from `oldBuffer`.\n\nConsequences:\n- If the account is closed/deallocated (or temporarily unavailable), the subscriber will not clear `dataAndSlot`\n  and will not notify consumers, leaving stale account state in memory.\n- Consumers may continue making risk decisions from stale data.\n\nRecommended: explicitly handle `accountInfo === null/undefined` as a state transition (clear cached data and emit).\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Dropping updates due to slot-only ordering and ignoring same-slot changes",
+                    "description": "`handleRpcResponse()` discards any update where `newSlot <= this.bufferAndSlot.slot`.\nOn Solana, multiple account notifications can occur at the same slot (and different commitment levels / fork\nscenarios). Ignoring same-slot updates can cause legitimate changes to be missed, leaving consumers with stale data.\n\nThis is a security-relevant incorrect comparison/ordering choice because downstream risk calculations assume the\nlatest state.\n\nRecommended: consider processing same-slot updates when the buffer differs, or incorporate `context` commitment\nsemantics and/or a monotonic update id.\n",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Use of possibly-undefined positions leading to runtime exceptions (DoS of clients)",
+                    "description": "Multiple methods assume a perp position exists but do not handle `undefined`:\n- `getPerpBidAsks()` calls `const position = this.getPerpPosition(marketIndex);` and then uses\n  `position.openBids` / `position.openAsks` without checking for `undefined`.\n- `getSettledLPPosition()` clones `_position` returned from `getPerpPosition()` without checking for `undefined`.\n\nIf a user has no position in that market, these will throw at runtime. For bots/UIs, this is an availability issue\nand can cause incorrect risk behavior or halted liquidation/hedging logic.\n\nRecommended: fall back to `getEmptyPosition(marketIndex)` or return `[ZERO, ZERO]` / a safe default early.\n",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Subscribed flag does not guarantee data presence; getUserAccountAndSlot can return undefined",
+                    "description": "`WebSocketUserAccountSubscriber.getUserAccountAndSlot()` returns `this.userDataAccountSubscriber.dataAndSlot`,\nbut `dataAndSlot` is optional in `WebSocketAccountSubscriber`.\n\nEven after `isSubscribed` is set, `dataAndSlot` may still be `undefined` if:\n- initial fetch returned null (account missing),\n- decoding failed,\n- the account was deleted and not handled (see other finding).\n\nThis is an exceptional-condition handling gap that can crash consumers expecting a value.\n\nRecommended: return `DataAndSlot<UserAccount> | undefined` (or throw a distinct error) and ensure data is present\nbefore emitting `\"update\"`.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Division-by-zero and unsafe numeric conversions in risk calculations",
+                    "description": "In `user.ts`, several computations can hit division-by-zero or lose precision in security-critical math:\n\n1) `liquidationPriceAfterClose()`:\n   - Divides/mods by `currentPosition.quoteAssetAmount.abs()`.\n   - If `quoteAssetAmount` is zero (possible for an empty position or inconsistent state), this will throw or\n     produce nonsensical results.\n\n2) `getSettledLPPosition()`:\n   - Uses `remainderBaa.toNumber()` and compares against `orderStepSize.toNumber()`.\n   - BN->number conversion can overflow/lose precision for large values, corrupting `remainderBaseAssetAmount`\n     and subsequent standardization logic (affecting position settlement, pnl, and margin computations).\n\nThese are incorrect/unsafe calculations that can mislead liquidation/max trade size decisions made by clients.\n\nRecommended:\n- Add explicit zero checks before division/mod operations (return sentinel or handle as no-close/no-liq-price).\n- Avoid `toNumber()` for values that can exceed JS safe integer; keep as BN and compare in BN space.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The reviewed code is TypeScript client-side subscription and risk/margin computation logic. Even though it is not an on-chain Solana program, it is security-relevant because it can drive automated trading/liquidation decisions and can be attacked via malformed/missing RPC data or edge-case account states.\n\nFrom the provided CWE candidates, the main issues stem from:\n- multiple unchecked divisors that can become zero (CWE-369), producing runtime exceptions or invalid calculations;\n- missing handling for undefined/empty positions (CWE-755), leading to crashes when a position is absent;\n- lossy conversion from BN (big integers) to JS number (CWE-704 / CWE-1339), which can silently corrupt comparisons and state updates;\n- incomplete handling of account deletion / null accountInfo updates on websocket (CWE-431), leaving stale cached state and never notifying consumers;\n- an unsubscribe method that can return undefined despite a Promise<void> signature (CWE-393), causing callers to treat an unsubscribe as successful while skipping expected cleanup.\n",
+            "findings": [
+                {
+                    "title": "Divide-by-zero in liquidationPriceAfterClose when quoteAssetAmount is zero",
+                    "description": "In `User.liquidationPriceAfterClose`, `closeBaseAmount` is computed using:\n`div(currentPosition.quoteAssetAmount.abs())` and `mod(currentPosition.quoteAssetAmount.abs())`.\nFor an empty position (e.g., returned by `getEmptyPosition`) `quoteAssetAmount` is `0`, so the divisor becomes zero.\nThis will throw at runtime (BN division by zero) and can break risk checks or automation that calls this helper on accounts without an existing position.\n",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Potential divide-by-zero in getMaxLeverage due to zero margin ratio",
+                    "description": "In `User.getMaxLeverage`, the code computes:\n`additionalLiabilities = freeCollateral.mul(MARGIN_PRECISION).div(new BN(marginRatio))`.\nIf `calculateMarketMarginRatio(...)` returns `0` for any edge state (e.g., a market configuration bug, a settlement-like condition, or unexpected inputs), this becomes a division by zero.\nThis can crash callers or produce undefined behavior in leverage calculations.\n",
+                    "category": "CWE-369",
+                    "severity": "medium",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Potential divide-by-zero in liquidationPrice due to (marketMaxLeverage - TEN_THOUSAND) == 0",
+                    "description": "In `User.liquidationPrice`, for the long branch the code computes:\n`div(marketMaxLeverage.sub(TEN_THOUSAND))`.\nIf `marketMaxLeverage == TEN_THOUSAND` (i.e., 1x max leverage), the divisor is zero and the function will throw.\nThis can be triggered by configuration changes or unusual collateral/liability states that make max leverage converge to 1x.\n",
+                    "category": "CWE-369",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Missing checks for undefined positions cause runtime exceptions",
+                    "description": "Several methods assume `getPerpPosition(marketIndex)` returns a position, but it can return `undefined`:\n- `User.getPerpBidAsks`: immediately reads `position.openBids/openAsks` without guarding against `undefined`.\n- `User.getSettledLPPosition`: calls `getClonedPosition(_position)` where `_position` may be `undefined`, leading to `Object.assign({}, undefined)` exceptions or subsequent access failures.\nThese are improper exceptional-condition checks and can be exploited as a denial-of-service vector against bots/services by inducing calls for markets where the user has no position.\n",
+                    "category": "CWE-755",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Lossy BN->number conversion can corrupt remainder/step-size logic",
+                    "description": "In `User.getSettledLPPosition`, the code performs:\n- `position.remainderBaseAssetAmount += remainderBaa.toNumber();`\n- comparisons against `market.amm.orderStepSize.toNumber()`\nBN values can exceed JS safe integer range (2^53-1). Converting via `.toNumber()` can lose precision or overflow, causing:\n- incorrect remainder accumulation,\n- incorrect threshold checks (e.g., failing to standardize when it should, or vice versa),\n- downstream wrong position sizing, PnL, and margin computations.\nThis is an incorrect type conversion that also creates insufficient precision/accuracy for large values.\n",
+                    "category": "CWE-704",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Insufficient precision/accuracy due to BN->number conversions in critical comparisons",
+                    "description": "Related to the above, using `Math.abs(position.remainderBaseAssetAmount)` and comparing it to `orderStepSize.toNumber()` relies on floating-point `number` semantics and can mis-evaluate near boundaries once precision is lost.\nThis can lead to off-by-some-large-amount behavior in standardized position updates for large accounts.\n",
+                    "category": "CWE-1339",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Websocket subscriber does not handle account deletion/None accountInfo updates (stale cache)",
+                    "description": "In `WebSocketAccountSubscriber.handleRpcResponse`, when `accountInfo` is absent (e.g., account closed, RPC returns null), `newBuffer` becomes `undefined`.\nFor the already-initialized path, the code only updates state if `newBuffer` is truthy:\n`if (newBuffer && (!oldBuffer || !newBuffer.equals(oldBuffer))) { ... }`\nTherefore, account deletion is never propagated:\n- `bufferAndSlot`/`dataAndSlot` remain as the last known value,\n- `onChange` is never called to notify consumers,\n- any logic relying on \"account no longer exists\" will be incorrect.\nThis is effectively a missing handler for an important state transition.\n",
+                    "category": "CWE-431",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "unsubscribe() can return undefined despite Promise<void> signature",
+                    "description": "`WebSocketAccountSubscriber.unsubscribe()` returns a `Promise<void>` only when `listenerId` is set; otherwise it returns nothing (`undefined`).\nCallers (e.g., `WebSocketUserAccountSubscriber.unsubscribe` using `Promise.all([ ... ])`) may treat this as a successful async cleanup step, but it does not reliably convey completion via a Promise in all cases.\nThis mismatch can cause higher-level lifecycle logic to proceed under incorrect assumptions.\n",
+                    "category": "CWE-393",
+                    "severity": "low",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-1254",
+            "CWE-193",
+            "CWE-1077",
+            "CWE-221",
+            "CWE-431",
+            "CWE-393",
+            "CWE-1038",
+            "CWE-188",
+            "CWE-911",
+            "CWE-1339",
+            "CWE-495",
+            "CWE-369",
+            "CWE-118",
+            "CWE-1229",
+            "CWE-397",
+            "CWE-404",
+            "CWE-191",
+            "CWE-841",
+            "CWE-673",
+            "CWE-704",
+            "CWE-913",
+            "CWE-670",
+            "CWE-1335",
+            "CWE-834",
+            "CWE-669",
+            "CWE-228",
+            "CWE-436",
+            "CWE-410",
+            "CWE-580",
+            "CWE-501",
+            "CWE-665",
+            "CWE-185",
+            "CWE-190",
+            "CWE-362",
+            "CWE-662",
+            "CWE-755",
+            "CWE-439",
+            "CWE-496",
+            "CWE-666",
+            "CWE-1023",
+            "CWE-1265",
+            "CWE-706",
+            "CWE-1024",
+            "CWE-922",
+            "CWE-1329",
+            "CWE-668",
+            "CWE-1025",
+            "CWE-768",
+            "CWE-754",
+            "CWE-400",
+            "CWE-128",
+            "CWE-487",
+            "CWE-183",
+            "CWE-610",
+            "CWE-705",
+            "CWE-135",
+            "CWE-372",
+            "CWE-430",
+            "CWE-799"
+        ]
+    ]
+}

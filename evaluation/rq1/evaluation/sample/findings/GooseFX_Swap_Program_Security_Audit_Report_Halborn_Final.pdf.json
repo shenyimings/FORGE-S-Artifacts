@@ -1,0 +1,98 @@
+{
+    "path": "reports/GooseFX_Swap_Program_Security_Audit_Report_Halborn_Final.pdf",
+    "project_info": {
+        "url": "https://github.com/GooseFX1/gfx-swap",
+        "commit_id": [],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2021-11-03",
+        "project_path": "contracts/GooseFX_Swap_Program_Security_Audit_Report_Halborn_Final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "TOKENS IN FEE VAULTS LOCKED INDEFINITELY",
+            "description": "Users pay operational fees to fee_vault accounts when withdrawing liquidity or swapping tokens. Upon pool initialization, the fee_vault token account authority is set to the pool's PDA, which is derived from the program ID and pool-specific seeds. However, the gfx_swap program does not include any functionality to transfer tokens out of these fee vaults, meaning that all accumulated fees are permanently locked in these accounts. This lack of a withdrawal mechanism results in irreversible fund lockup within the vaults. The root cause is the absence of a governance or administrative function to allow authorized transfers from the fee vaults. An attacker cannot directly exploit this to steal funds, but it leads to permanent loss of fees that could otherwise be collected by the protocol team. The impact is financial inefficiency and loss of operational control over fee revenue.\n",
+            "severity": "high",
+            "files": [
+                "programs/gfx-swap/src/states/pool.rs"
+            ],
+            "location": [
+                "Initialize.pool#22"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-431"
+                ]
+            },
+            "title": "POOLS CANNOT BE SUSPENDED",
+            "description": "The Pool struct includes a 'suspended' field intended to block all operations (swapping, depositing, withdrawing) when set to true. However, this field is initialized to false and there are no program instructions that allow updating it or any other pool parameters. As a result, the suspension mechanism is entirely non-functional, leaving pools unable to be paused in case of emergencies or maintenance. The root cause is the missing instruction handler for modifying pool state. While this does not allow direct fund theft, it reduces the protocol's operational security and response capability. An attacker could potentially exploit other vulnerabilities without fear of the pool being suspended, increasing the window for attack. The impact is a reduced ability to respond to threats, leading to potential extended exposure to risks.\n",
+            "severity": "medium",
+            "files": [
+                "programs/gfx-swap/src/states/pool.rs"
+            ],
+            "location": [
+                "Pool.suspended#27"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "OFFSET CURVE TOKEN MISMATCH",
+            "description": "The gfx_swap program supports an offset curve for pricing, where an offset is applied to one of the two tokens during pool initialization. However, the code sorts the token mints by address before assigning them, but fails to preserve the user's original selection for which token should receive the offset. Since the calculator does not track token ordering, the offset may be incorrectly applied to the other token, resulting in unintended pricing behavior. The root cause is the lack of logic to map the user's intended offset target to the sorted token order. This can lead to the pool being configured in a way that is opposite to the creator's intent, causing immediate economic loss. An attacker could exploit this by creating pools with misleading configurations or benefit from mispriced swaps. The impact includes financial loss for pool creators and potential manipulation of swap prices.\n",
+            "severity": "medium",
+            "files": [
+                "programs/gfx-swap/src/curve/swap_curve.rs"
+            ],
+            "location": [
+                "Pool.curve#27",
+                "initialize.rs#92-107",
+                "swap_curve.rs#46"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "CONSTRAINT FUNCTION ATTRIBUTES ARE NOT PRESERVED",
+            "description": "The 'suspended' function in src/constraints.rs is annotated with #[throws], which is intended to make it return a specific error when conditions are not met. This function is used within the access_control macro applied to several instructions, such as deposit2. However, the macro implementation does not preserve function attributes like #[throws], meaning the error-handling behavior is lost and the function will not throw the expected error. The root cause is a limitation in the macro code generation that strips away attributes during expansion. This undermines the safety guarantees expected from the constraint system. While the likelihood of direct exploitation is low, it can lead to bypassing intended access controls if the error path is not properly enforced. The impact is a weakening of the program's security model, potentially allowing unauthorized actions to proceed without proper checks.\n",
+            "severity": "informational",
+            "files": [
+                "programs/gfx-swap/src/lib.rs",
+                "programs/gfx-swap/src/constraints.rs"
+            ],
+            "location": [
+                "lib.rs#51",
+                "lib.rs#71"
+            ]
+        }
+    ]
+}

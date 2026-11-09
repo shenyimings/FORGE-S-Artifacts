@@ -1,0 +1,171 @@
+{
+    "path": "reports/DojoSwap - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": "https://github.com/dojo-trading/dojoswap-contracts-public",
+        "commit_id": "4bef3041338a689bf8c510e752f10e102a52cbfa",
+        "address": [],
+        "chain": "cosmwasm",
+        "compiler_version": "n/a",
+        "audit_date": "2024-09-27",
+        "project_path": "contracts/DojoSwap - Zellic Audit Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Deposit amount is not validated against message funds",
+            "description": "The launchpad contract's deposit function does not validate the 'amount' field in the ExecuteMsg::Deposit message against the actual funds sent in the message. This lack of validation allows a malicious user to specify an arbitrarily large deposit amount while sending minimal or no funds. An attacker could exploit this by inflating their deposit amount, thereby receiving a disproportionately large share of the offering token during the sale. This leads to a critical impact where legitimate funds raised are diluted, and the sale's integrity is compromised, potentially resulting in total loss of value for honest participants.\n",
+            "severity": "critical",
+            "files": [
+                "contracts/launchpad/src/contract.rs"
+            ],
+            "location": [
+                "launchpad/src/contract.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "The FEE_COLLECTOR address can drain dojoswap_pair contracts",
+            "description": "The admin_configure function in the dojoswap_pair contract allows the FEE_COLLECTOR address to arbitrarily modify the asset_infos and asset_decimals fields. By changing one side of the asset pair to a maliciously minted worthless token, an attacker who controls the FEE_COLLECTOR keys can swap the fake token to extract all value from the legitimate side of the liquidity pool. This process can be repeated for the other side, fully draining the pair contract. The root cause is excessive privileges granted to the FEE_COLLECTOR without safeguards. The impact is severe: if the FEE_COLLECTOR private keys are compromised or misused, all user funds in the pair contract can be stolen.\n",
+            "severity": "high",
+            "files": [
+                "contracts/dojoswap_staking/src/contract.rs"
+            ],
+            "location": [
+                "dojoswap_staking/src/contract.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Final withdraw sends tokens to itself",
+            "description": "In the final_withdraw function of the launchpad contract, the offering tokens are incorrectly sent to the contract's own address instead of the admin. This is due to a bug in the recipient field of the token transfer message, where env.contract.address is used instead of info.sender. An attacker cannot directly exploit this, but it results in a loss of access to the raised offering tokens if not manually recovered. The impact is a failure in fund distribution, leaving tokens locked in the contract, which undermines the core functionality of the launchpad.\n",
+            "severity": "low",
+            "files": [
+                "contracts/launchpad/src/contract.rs"
+            ],
+            "location": [
+                "launchpad/contract.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Address-string comparison",
+            "description": "The contract compares addresses using string representations (to_string()) without canonicalization. In CosmWasm, addresses can be represented in uppercase or lowercase, leading to potential mismatches even when the actual address is correct. This flaw can cause legitimate admin transactions to fail, resulting in denial of service for authorized operations. The root cause is improper handling of address equality. The impact is low but can disrupt critical admin functions if the sender's address case does not match the stored string.\n",
+            "severity": "low",
+            "files": [
+                "contracts/launchpad/src/contract.rs"
+            ],
+            "location": [
+                "launchpad/src/contract.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Fewer tokens sent than required in migrate_staking",
+            "description": "The migrate_staking function calculates the amount of rewards to send to a new staking contract by subtracting distributed rewards from the total. However, it assumes all distribution schedules have had some bond and thus some reward distributed. If a schedule had zero bond, no rewards were distributed, but the function still subtracts from the total, leading to an overestimation of distributed rewards. As a result, fewer tokens are sent to the new contract than required, leaving a residual balance in the old contract. This can cause operational issues during migration and potential loss of access to leftover funds. The root cause is incorrect logic in reward accounting.\n",
+            "severity": "low",
+            "files": [
+                "contracts/dojoswap_staking/src/contract.rs"
+            ],
+            "location": [
+                "dojoswap_staking/src/contract.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Possible overflow in calculations",
+            "description": "The calculation of pending rewards in the staking contract is vulnerable to integer overflow. The current code computes (bond_amount * global_reward_index) - (bond_amount * reward_index), which multiplies large values before subtraction, increasing overflow risk. A malicious staker could potentially manipulate this to cause arithmetic errors, leading to incorrect reward calculations or denial of rewards. The safer approach is to compute bond_amount * (global_reward_index - reward_index), reducing the risk of overflow. While the impact is currently informational, it could become critical under specific conditions involving large staking amounts.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/dojoswap_staking/src/contract.rs"
+            ],
+            "location": [
+                "dojoswap_staking/contract.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Commission-amount attribute is incorrect",
+            "description": "The swap function in the dojoswap_pair contract logs the full commission_amount as an attribute, even though half of it is sent as fees to the FEE_COLLECTOR. This results in a discrepancy between the logged commission and the actual amount retained by the pool. The root cause is failure to deduct fees before logging. While this does not directly affect fund security, it leads to inaccurate transaction logs, which can mislead monitoring tools or analytics platforms. The impact is informational, as the issue does not affect fund integrity but reduces data reliability.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/dojoswap_pair/src/contract.rs"
+            ],
+            "location": [
+                "dojoswap_pair/contract.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Launchpad's migrate sets the contract to the current version and not the target version",
+            "description": "The migrate_version function in the launchpad contract misuses the target_contract_version parameter by treating it as the current version instead of the expected previous version. This misnaming can lead to confusion during contract upgrades, causing failed migrations if the version check fails due to incorrect parameter interpretation. The root cause is poor naming and logic flow in the migration function. The impact is low, primarily causing operational friction and wasted gas on failed transactions, but it does not compromise security.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/launchpad/src/contract.rs"
+            ],
+            "location": [
+                "launchpad/src/contract.rs"
+            ]
+        }
+    ]
+}

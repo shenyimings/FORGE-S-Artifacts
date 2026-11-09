@@ -1,0 +1,378 @@
+{
+    "path": "reports/2025-01-pump-science.md",
+    "project_info": {
+        "url": "https://github.com/code-423n4/2025-01-pump-science",
+        "commit_id": "768ef58478724bf6b464c9f0952e3e5a3b2a2613",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-01-23",
+        "project_path": "contracts/2025-01-pump-science.md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "[H-01] The lock_pool operation can be DoS",
+            "description": "The lock_pool operation can be subjected to a Denial of Service (DoS) attack because it requires the creation of a lockEscrow account using program-derived address (PDA) seeds based on the pool and owner. The vulnerability arises because the lock_escrow account creation does not require the owner's signature, allowing any malicious actor to preemptively create the account using the same seeds. This causes the subsequent create_lock_escrow instruction in the lock_pool flow to fail due to the account already existing. The root cause is the lack of a check for pre-existing lock_escrow accounts and the absence of owner authorization during creation. An attacker can exploit this by computing the PDA and creating the account before the legitimate user initiates the lock_pool transaction. The impact is that legitimate users are permanently unable to execute the lock_pool operation, disrupting protocol functionality and potentially freezing migration processes.\n",
+            "severity": "high",
+            "files": [
+                "programs/pump-science/src/instructions/migration/lock_pool.rs"
+            ],
+            "location": [
+                "lock_pool#149",
+                "CreateLockEscrow#L119-L132"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "[H-02] Missing Update of migration_token_allocation on Global Struct",
+            "description": "The migration_token_allocation field in the Global state struct is not updated during the Global::update_settings function, despite being part of the GlobalSettingsInput parameter. This causes the value to remain at its default or uninitialized state, even when new values are passed via the set_params instruction. The root cause is the omission of assignment logic for migration_token_allocation in the update_settings method. As a result, any intended changes to this parameter are silently ignored, leading to incorrect behavior during pool creation and migration processes that depend on this value. An attacker could exploit this by triggering migration logic that relies on an updated allocation, causing miscalculations or fund misallocations. The impact includes incorrect token distribution during migration and potential loss of user funds or protocol invariants being violated.\n",
+            "severity": "high",
+            "files": [
+                "programs/pump-science/src/state/global.rs"
+            ],
+            "location": [
+                "Global::update_settings#L119-L132",
+                "Global::update_settings#L66"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "[M-01] Last buy might charge the wrong fee",
+            "description": "During the last buy operation in the bonding curve, the fee is calculated before the apply_buy function is called, based on the initial exact_in_amount. However, during the last buy, the actual amount of SOL required is recomputed to fit the curve's invariant, which changes the effective input amount. Since the fee is not recalculated after this adjustment, the protocol may collect an incorrect fee\u2014either too high or too low. The root cause is the premature fee calculation without accounting for price adjustments in the final buy. An attacker could exploit this by triggering the last buy with a large input, causing a discrepancy between expected and actual fees, potentially leading to overpayment or underpayment. The impact includes incorrect fee collection, loss of user funds, and potential violation of economic model assumptions.\n",
+            "severity": "medium",
+            "files": [
+                "programs/pump-science/src/state/bonding_curve/curve.rs"
+            ],
+            "location": [
+                "bonding_curve::curve::apply_buy#L103"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "[M-02] Bonding Curve Invariant Check Incorrectly Validates SOL Balance Due to Rent Inclusion",
+            "description": "The bonding curve invariant check compares the full lamports balance of the SOL escrow account (which includes rent-exempt reserve) against real_sol_reserves, which only reflects the actual protocol-controlled SOL. This leads to a false validation of the invariant when the actual available SOL is less than real_sol_reserves but the rent portion makes up the difference. The root cause is the failure to subtract the rent-exempt balance before comparison. An attacker could drain the escrow slightly below the required reserve, and the check would still pass due to the rent inclusion, allowing the system to operate with insufficient funds. The impact is a weakened invariant check that could mask fund discrepancies, leading to incorrect state assumptions and potential loss during withdrawals or migrations.\n",
+            "severity": "medium",
+            "files": [
+                "programs/pump-science/src/state/bonding_curve/curve.rs"
+            ],
+            "location": [
+                "bonding_curve::curve#L306"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "[M-03] Abrupt fee transition from 8.76% to 1% at slot 250 due to incorrect linear decrease formula",
+            "description": "The fee calculation function uses a linear decrease formula in Phase 2 (slots 150\u2013250) that fails to smoothly transition to the fixed 1% fee in Phase 3. At slot 250, the calculated fee is 8.76%, but at slot 251, it abruptly drops to 1%, creating a 7.76% discontinuity. The root cause is incorrect calibration of the linear formula coefficients (-8,300,000 and 2,162,600,000), which do not ensure the fee reaches exactly 1% at slot 250. An attacker could time transactions around slot 250 to exploit the sudden fee drop, paying significantly less in fees than intended. The impact is an economic inconsistency that distorts user incentives and undermines the protocol's fee model, potentially leading to revenue loss and user distrust.\n",
+            "severity": "medium",
+            "files": [
+                "programs/pump-science/src/state/bonding_curve/curve.rs"
+            ],
+            "location": [
+                "bonding_curve::curve::calculate_fee#L31-L41"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "[01] Incorrect Fund Distribution During Migration Due to Unvalidated Escrow Balance Transfer",
+            "description": "During the migration process, the lock_pool function transfers all remaining lamports from the bonding_curve_sol_escrow to the fee receiver without validating that the amount matches the expected migrate_fee_amount. Since the escrow is a PDA that can receive funds externally between migration steps, any additional SOL sent to it will be incorrectly forwarded to the fee receiver. The root cause is the lack of input validation on the remaining balance before transfer. An attacker could exploit this by sending extra SOL to the escrow before lock_pool is called, causing an inflated transfer to the fee receiver. The impact is incorrect fund distribution, where excess funds are misdirected instead of being returned to the protocol or burned, leading to financial loss and accounting errors.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/instructions/migration/lock_pool.rs"
+            ],
+            "location": [
+                "lock_pool"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "[02] Fee Calculation in Phase 2 May Lead to Rounding Errors Due to Integer Division",
+            "description": "The fee calculation in Phase 2 uses integer arithmetic where division by 100,000 occurs before final multiplication, leading to precision loss from truncation. For example, at slot 200, the intended fee is 49.63%, but integer division results in 49%, causing a small but consistent undercharge. The root cause is the order of operations in the fee_bps calculation, where intermediate division discards fractional basis points. This could be exploited by high-frequency traders to accumulate small savings over many transactions. The impact is minor financial leakage due to systematic fee undercollection, though the effect per transaction is small.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/state/bonding_curve/curve.rs"
+            ],
+            "location": [
+                "calculate_fee#L31-L41"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack of Maximum Input Amount Validation in Swap Function Could Lead to Unnecessary Transaction Failures",
+            "description": "The swap function in the Pump Science protocol validates the minimum input amount but does not enforce an upper limit on the input amount. This omission allows users to submit swap transactions with amounts that exceed available liquidity or their token balance. The `validate()` function only checks that `exact_in_amount > 0` but does not validate maximum bounds based on either the user's token balance (for token sales) or the bonding curve\u2019s `real_sol_reserves` (for token purchases). An attacker or misinformed user could submit a swap transaction with an amount exceeding available reserves or their own balance. The transaction will proceed until it fails during execution (e.g., during token transfer or within `apply_buy()`), after which the gas has already been consumed. Users experience unnecessary transaction failures and waste gas fees due to late-stage reverts, leading to a poor user experience and increased cost of interaction with the protocol.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/instructions/curve/swap.rs"
+            ],
+            "location": [
+                "Swap.validate",
+                "Swap.apply_buy"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-228"
+                ]
+            },
+            "title": "Bonding Curve Creation Lacks URI Validation in Metadata Leading to Potential Malformed Token Information",
+            "description": "The `initialize_meta` function used during bonding curve creation does not validate the format or content of the metadata URI, which is stored on-chain and used by explorers and wallets. The URI is directly cloned from user input without checks for valid URL structure, allowed protocols (http/https/ipfs), length, or character encoding. A malicious or careless creator can set a malformed, excessively long, or non-standard URI (e.g., using unsupported schemes or non-ASCII characters), which may break metadata rendering in clients. Token metadata may be unreadable or incorrectly displayed in wallets and explorers, leading to a degraded user experience and potential trust issues due to perceived unprofessionalism or malicious intent.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/instructions/curve/create_bonding_curve.rs"
+            ],
+            "location": [
+                "CreateBondingCurve.initialize_meta",
+                "CreateBondingCurve.validate"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Hardcoded Gas Fee in Pool Migration Could Lead to Failed Transactions in Network Congestion",
+            "description": "The `initialize_pool_with_config` function hardcodes a gas fee deduction of 0.04 SOL (40,000,000 lamports) during pool migration, which does not adapt to current network conditions. The gas amount is a fixed constant rather than a configurable or dynamically estimated value, making it inflexible under varying network congestion levels. During periods of high network congestion, actual transaction fees may exceed 0.04 SOL, causing migration transactions to fail due to insufficient funds. Conversely, during low activity, users unnecessarily reserve excess funds. Pool migrations may fail unexpectedly during congestion or result in inefficient use of funds during low-fee periods, harming protocol reliability and user trust.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/instructions/migration/create_pool.rs"
+            ],
+            "location": [
+                "PoolMigration.initialize_pool_with_config#-"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-392"
+                ]
+            },
+            "title": "Basis Points Multiplication Function Lacks Input Validation Leading to Silent Failures",
+            "description": "The `bps_mul` and `bps_mul_raw` utility functions used for fee calculations do not validate inputs such as a zero divisor or basis points exceeding the divisor, leading to silent failures. The functions rely solely on `Option` returns without validating `divisor != 0` or `bps <= divisor`, and errors are not explicitly handled or reported. A call with invalid parameters (e.g., `bps_mul(20_000, 1000, 10_000)`) returns `None` without a clear error, potentially causing transaction aborts without meaningful diagnostics. Critical fee calculations may fail silently, resulting in transaction failures without actionable error messages, complicating debugging and reducing system robustness.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/util.rs"
+            ],
+            "location": [
+                "util.bps_mul",
+                "util.bps_mul_raw",
+                "bonding_curve.calculate_fee"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-360"
+                ]
+            },
+            "title": "Trade Event Emission Uses Redundant Clock Calls and Lacks Block Time Validation",
+            "description": "The swap handler emits `TradeEvent` and `CompleteEvent` using separate `Clock::get()` calls, leading to redundant syscalls and potential timestamp inconsistency within the same transaction. The timestamp is fetched multiple times instead of being cached, and no validation is performed to ensure the block time is reasonable or unmanipulated. A validator could manipulate clock values slightly between calls, or natural timing differences could result in inconsistent timestamps across events from the same transaction. Indexing systems may record inconsistent or inaccurate event timelines, and redundant syscalls increase computational overhead, affecting efficiency and data reliability.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/instructions/curve/swap.rs"
+            ],
+            "location": [
+                "Swap.handler"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Bonding Curve Token Metadata Fields Lack Length Restrictions Leading to Excessive Storage Costs",
+            "description": "The `CreateBondingCurveParams` struct accepts unbounded string lengths for `name`, `symbol`, and `uri`, allowing potentially excessive metadata sizes. No validation is performed on the length of metadata fields during creation, enabling arbitrarily long inputs. A malicious actor could create a bonding curve with extremely long metadata strings (e.g., 1000+ characters), consuming more on-chain storage than necessary. Increased storage costs for the protocol, potential for spam, and degraded user experience in wallets and explorers due to unwieldy display of metadata.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/state/bonding_curve/mod.rs"
+            ],
+            "location": [
+                "CreateBondingCurveParams.name",
+                "CreateBondingCurveParams.symbol",
+                "CreateBondingCurveParams.uri",
+                "CreateBondingCurve.validate"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-778"
+                ]
+            },
+            "title": "Bonding Curve Token Account Lock/Unlock Operations Lack Event Emission for Critical State Changes",
+            "description": "The `lock_ata` and `unlock_ata` functions only emit log messages but do not emit structured events, making it difficult for off-chain systems to track state changes. The functions use `msg!()` for logging but do not call `emit_cpi!()` or similar to emit deserializable events. Indexers cannot reliably detect or reconstruct the history of lock/unlock operations, and monitoring tools may miss critical security-relevant state transitions. Reduced transparency, auditability, and monitoring capability for token account freezing behavior, which is critical for security and compliance.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/state/bonding_curve/locker.rs"
+            ],
+            "location": [
+                "BondingCurveLockerCtx.lock_ata",
+                "BondingCurveLockerCtx.unlock_ata"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Empty remove_wl Function Implementation Creates Misleading Security Expectation",
+            "description": "The `remove_wl` function is publicly exposed but has an empty implementation that performs no actual action, creating a false impression of functionality. The function returns `Ok(())` without modifying any state or validating inputs, likely due to incomplete implementation or oversight. Users or administrators may believe they are removing a wallet from a whitelist, but the operation has no effect, leaving the address still authorized. False sense of security, potential for unauthorized actions by assumed-removed addresses, and wasted transaction fees for no-op operations.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/instructions/admin/remove_wl.rs"
+            ],
+            "location": [
+                "remove_wl"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "Hardcoded Program IDs in Constants Create Deployment Inflexibility and Testing Challenges",
+            "description": "The protocol hardcodes dependent program IDs (e.g., Meteora, quote mint) in constants, preventing flexible deployment across environments. String constants are used instead of configurable or PDA-derived addresses, requiring code changes for different deployments. Developers cannot easily deploy or test the protocol on devnet or testnet with mock programs, and upgrades to dependencies require code modifications. Hinders testing, local development, and adaptability to future changes, increasing maintenance burden and reducing security audit efficiency.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/constants.rs"
+            ],
+            "location": [
+                "constants.METEORA_PROGRAM_KEY",
+                "constants.QUOTE_MINT"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Lock Pool Instruction Lacks Escrow Account Address Validation Leading to Potential Fund Lock",
+            "description": "The `lock_pool` instruction uses unchecked accounts for escrow and vault, without validating that they are the correct PDAs or owned by expected programs. The `lock_escrow` and `escrow_vault` are marked as `UncheckedAccount` with no PDA derivation checks or ownership validation. An attacker could provide a fake escrow account, causing LP tokens to be locked in an inaccessible or attacker-controlled account, resulting in permanent fund loss. Risk of misrouting or loss of LP tokens due to lack of address validation, undermining the security of the locking mechanism.\n",
+            "severity": "low",
+            "files": [
+                "programs/pump-science/src/instructions/migration/lock_pool.rs"
+            ],
+            "location": [
+                "lock_pool.LockPool",
+                "lock_pool.lock_pool"
+            ]
+        }
+    ]
+}

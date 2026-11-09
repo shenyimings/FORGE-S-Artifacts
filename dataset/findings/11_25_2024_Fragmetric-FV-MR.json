@@ -1,0 +1,176 @@
+{
+    "path": "reports-without-source/11_25_2024_Fragmetric-FV-MR.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/fragmetric-labs/fragmetric-contracts"
+        ],
+        "commit_id": [
+            "0b3eeff",
+            "51b9c90"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-10-07",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Withdrawals not working for deposited tokens",
+            "description": "Users can deposit SOL and supported Liquid Staking Tokens (LSTs), but withdrawals are only possible in SOL. The protocol lacks functionality to convert or unstake LSTs into SOL, which means that deposited LSTs cannot be withdrawn, effectively locking user funds.\nThe root cause is the absence of a mechanism to handle LST withdrawals or convert them to SOL through restaking protocols.\nAn attacker or malicious user cannot directly exploit this for gain, but all users who deposit LSTs are permanently locked out of their funds until withdrawal functionality is implemented.\nThe impact is critical: users lose access to their deposited assets, leading to loss of funds and complete lack of trust in the protocol.\n",
+            "severity": "critical",
+            "location": [
+                "user_fund_context.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "fragSOL token cannot be transferred",
+            "description": "Upon deposit, users receive fragSOL, a Liquid Restaking Token (LRT), but transfers of this token are currently disabled via the token transfer hook, rendering the token non-transferable and illiquid.\nThe cause is a deliberate design choice to disable transfers, likely to prevent de-pegging risks during early launch, but this severely limits the token's utility and economic model.\nWhile not directly exploitable for financial gain, this restriction prevents integration with DeFi protocols such as DEXs and lending platforms, limiting the token's use cases.\nThe impact is high in terms of functionality and ecosystem integration, classified as a high-severity limitation due to the fundamental restriction on token utility.\n",
+            "severity": "high",
+            "location": [
+                "user_receipt_token_transfer_context.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "Closed reward pool blocks withdrawals and deposits",
+            "description": "When a reward pool is closed by the fund manager, the system still attempts to update rewards for that pool during user deposits or withdrawals. This triggers a RewardPoolClosedError in the RewardPool.update function, causing the entire transaction to fail.\nThe root cause is incorrect error handling and logic that does not account for closed pools during reward updates.\nAn attacker could potentially exploit this by closing a pool (if permissions allow) or waiting for a pool to be closed, then triggering deposit/withdrawal attempts to cause a denial of service.\nThe impact is medium: it blocks legitimate user actions (deposits and withdrawals), but the issue has already been fixed in commit d71f29e.\n",
+            "severity": "medium",
+            "location": [
+                "modules/reward/update.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-431"
+                ]
+            },
+            "title": "Claiming of rewards for users not implemented",
+            "description": "While fragSOL holders accumulate reward points based on their holdings, there is no implemented function for users to claim these rewards. The claim_rewards function is missing from the codebase.\nThe cause is incomplete implementation of the reward distribution system, likely due to dependencies on external restaking protocols not being finalized.\nUsers cannot access earned rewards, which undermines incentive mechanisms and reduces user engagement.\nThe impact is low as it affects functionality rather than security, but it remains a critical missing feature; however, it is classified as low severity due to low immediate risk.\n",
+            "severity": "low",
+            "location": [
+                "user_reward_context.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Possible to DOS deposits with repeated deposits/withdrawals",
+            "description": "The deposit limit (capacity_amount) is based on the total accumulated deposit amount, which does not decrease when users withdraw. This allows an attacker to repeatedly deposit and withdraw the same amount until the capacity is exhausted, preventing further deposits.\nThe cause is flawed accounting logic that fails to adjust the capacity cap based on net deposits.\nAn attacker can perform a denial-of-service attack on the deposit functionality by cycling deposits and withdrawals, though this incurs withdrawal fees and offers no direct benefit.\nThe impact is low due to the cost of exploitation and ease of mitigation (e.g., increasing capacity), but it still represents a potential service disruption.\n",
+            "severity": "low",
+            "location": [
+                "user_fund_context"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Not possible to create new base reward pool after old one is closed",
+            "description": "The protocol allows only one non-holder-specific reward pool per custom_contribution_accrual_rate_enabled flag. Once such a pool is closed, a new one cannot be created because the system still counts closed pools in the uniqueness check.\nThe root cause is flawed logic in pool creation validation that does not exclude closed pools from duplicate checks.\nThis limits the fund manager's ability to refresh or replace reward programs, reducing protocol flexibility.\nThe impact is low as it affects administrative functionality rather than core security, and the issue has been fixed in commit d71f29e.\n",
+            "severity": "low",
+            "location": [
+                "fund_manager_reward_context.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ]
+            },
+            "title": "Incorrect function name is_contribution_accrual_rate_valid{}",
+            "description": "The function is_contribution_accrual_rate_valid() in modules/reward/update.rs returns false when the rate is valid and true when invalid, which is the opposite of what the name suggests.\nThe cause is a logical inversion in return values that contradicts the function's name, leading to potential confusion and bugs in maintenance.\nWhile not directly exploitable, this can mislead developers during code reviews or future development, increasing the risk of logic errors.\nThe impact is purely on code clarity and maintainability, hence classified as informational.\n",
+            "severity": "informational",
+            "location": [
+                "modules/reward/update.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1078"
+                ]
+            },
+            "title": "Incorrect function naming mock_transfer_hook_from_xx functions",
+            "description": "Functions such as mock_transfer_hook_from_fund_to_user, mock_transfer_hook_from_user_to_null, and mock_transfer_hook_from_null_to_user do not accurately reflect their actual behavior. For example, a deposit (minting from null to user) uses mock_transfer_hook_from_fund_to_user, which is misleading.\nThe cause is inconsistent and inaccurate naming that does not match the direction of fund flow.\nThis can lead to confusion during audits or development, increasing the chance of incorrect assumptions about control flow.\nThe impact is limited to code readability and maintainability, with no direct security risk, thus classified as informational.\n",
+            "severity": "informational",
+            "location": [
+                "instructions/user_fund_contest.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Using spot prices for price sources",
+            "description": "The protocol determines LST prices using spot prices derived from current stakes and total supply, which are susceptible to manipulation if an attacker can influence these values.\nThe root cause is reliance on on-chain spot prices without protective mechanisms like time-weighted averages or external oracles.\nAlthough no immediate manipulation vector was found for Solana staking programs or Marinade, the design opens potential attack vectors in the future.\nThe impact is potential price manipulation affecting deposit/withdrawal valuations; however, due to current safeguards, it is classified as informational with a recommendation to use oracles.\n",
+            "severity": "informational",
+            "location": [],
+            "files": []
+        }
+    ]
+}

@@ -1,0 +1,547 @@
+{
+    "path": "reports/12_04_2024_Manifest-FV-MR.pdf",
+    "project_info": {
+        "url": "https://github.com/CKS-Systems/manifest",
+        "commit_id": "be0c627fd149e6dc696db3f2679b89b86a21c868",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-11-21",
+        "project_path": "contracts/12_04_2024_Manifest-FV-MR.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Withdraw transfers funds from user to vault instead of vault to user for Token-2022",
+            "description": "The withdraw instruction for spl token 2022 incorrectly transfers funds from the user's wallet to the vault instead of from the vault to the user, which is the intended behavior. This is caused by a misuse of the transfer_checked instruction where the source and destination accounts are swapped. An attacker could exploit this by depositing funds and then triggering a withdrawal, causing the system to pull additional funds from the user. The impact is critical loss of user funds, as the user not only fails to withdraw but also loses additional tokens transferred in the wrong direction.\n",
+            "severity": "high",
+            "location": [
+                "withdraw.rs"
+            ],
+            "files": [
+                "programs/manifest/src/program/processor/withdraw.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "hinted_cancel_index isn\u2019t checked to match block size during batch update",
+            "description": "During a batch update, the function is supposed to validate that the hinted_cancel_index aligns with the memory block size (MARKET_BLOCK_SIZE) to prevent memory corruption. However, the code mistakenly checks trader_index instead of hinted_cancel_index. This allows an attacker to provide an invalid index that passes the incorrect check, leading to unintended memory modifications and potential unauthorized cancellation of orders. The impact includes memory safety issues and potential financial gain for the attacker by canceling non-existent or others' orders.\n",
+            "severity": "high",
+            "location": [
+                "batch_update.rs"
+            ],
+            "files": [
+                "programs/manifest/src/program/processor/batch_update.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-252"
+                ]
+            },
+            "title": "Swap function might swap for less amount out under low liquidity",
+            "description": "The swap function calls place_order() without verifying that the full requested amount was traded. When liquidity is low, the function may partially fulfill the trade and return early, resulting in the user receiving less output than expected. This is caused by the absence of a post-trade validation check on the amount actually traded. An attacker can front-run the swap by removing favorable orders, forcing a partial fill. The impact is financial loss for the user due to receiving less output than intended, especially when is_exact_in is false.\n",
+            "severity": "medium",
+            "location": [
+                "swap.rs"
+            ],
+            "files": [
+                "programs/manifest/src/program/processor/swap.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "expand_global() expands the account\u2019s memory by the wrong size",
+            "description": "The expand_global() function incorrectly calls expand_global_fixed(), which expands the account by 80 bytes (market block size) instead of the correct 64 bytes (global account block size). This leads to inefficient memory usage, increased transaction costs, and reduced capacity for traders in the global account. The root cause is a hardcoded size mismatch. While the impact per expansion is small, it accumulates and wastes resources. The issue is exploitable by any user initiating a global expansion, leading to higher fees and earlier exhaustion of account space.\n",
+            "severity": "medium",
+            "location": [
+                "shared.rs"
+            ],
+            "files": [
+                "programs/manifest/src/program/processor/shared.rs",
+                "programs/manifest/src/state/global.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ]
+            },
+            "title": "Swap function might return less than amount out or revert due to unbacked global orders",
+            "description": "The impact_base_atoms() function estimates trade amounts without verifying that global orders have sufficient backing funds. This leads to overestimation (for bids) or underestimation (for asks), causing two issues: (1) users may receive less output than expected when swapping base for quote, and (2) swaps may revert unnecessarily when quote is being swapped for base due to unmet balance requirements. The cause is missing validation of global order solvency. An attacker can withdraw funds from a global order after posting it, triggering these conditions. The impact includes loss of user funds and denial of service for valid swaps.\n",
+            "severity": "medium",
+            "location": [
+                "swap.rs"
+            ],
+            "files": [
+                "programs/manifest/src/program/processor/swap.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Refund for order cancellation is rounded down rather than up (PR #108)",
+            "description": "When a bid order is canceled, the refund calculation rounds down the amount returned to the user, while the initial reservation rounded up. This discrepancy causes a small loss of \"dust\" funds for the user. The cause is inconsistent rounding logic in the order lifecycle. An attacker cannot directly exploit this, but all users are subject to minor losses over time. The impact is a small but persistent loss of user funds, especially after partial fills and cancellations.\n",
+            "severity": "low",
+            "location": [
+                "market.rs"
+            ],
+            "files": [
+                "programs/manifest/src/state/market.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Attacker can remove global order by partially fulfilling on another market",
+            "description": "Global orders are removed if the backing funds are insufficient for a trade. An attacker can partially fulfill a global order on a different market, reducing the available balance, and then trigger a full match attempt that fails due to insufficient funds, causing the order to be removed. The cause is the global order system not isolating balance checks per market. The impact is order manipulation and reduced competition, allowing attackers to eliminate better-priced orders without direct cost, though economic disincentives exist.\n",
+            "severity": "low",
+            "location": [
+                "market.rs"
+            ],
+            "files": [
+                "programs/manifest/src/state/market.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Attacker can front run an order with posting multiple small orders, gaining profit from rounding",
+            "description": "Since trades round up in favor of the maker, an attacker can front-run a large trade by placing many small orders at the same price. Each small order benefits from rounding, causing the taker to pay significantly more than expected\u2014up to double in extreme cases. The cause is the rounding mechanism favoring makers without limits on order size. The impact is significant financial loss for takers due to rounding exploitation, though this was fixed in PR #108.\n",
+            "severity": "low",
+            "location": [
+                "market.rs"
+            ],
+            "files": [
+                "programs/manifest/src/state/market.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Attacker can front run global or post only order with a small order to cause it to revert",
+            "description": "Global and post-only orders revert if any match occurs. An attacker can front-run such an order with a very small opposing order at a slightly better price, causing the victim's transaction to revert. This denies the victim from placing their order. The cause is the strict post-only behavior combined with front-running opportunities. The impact is denial of service for order placement, which can be used strategically to maintain price advantage.\n",
+            "severity": "low",
+            "location": [
+                "market.rs"
+            ],
+            "files": [
+                "programs/manifest/src/state/market.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Sell orders can leave rounding errors in the contract forever",
+            "description": "When a bid order is partially filled, the remaining balance is recalculated by rounding down, but the initial reservation was rounded up. This creates a small unaccounted difference that remains in the contract. The cause is inconsistent rounding during partial fulfillment. The impact is permanent loss of dust amounts for traders, which accumulates over multiple partial fills and cancellations.\n",
+            "severity": "low",
+            "location": [
+                "market.rs"
+            ],
+            "files": [
+                "programs/manifest/src/state/market.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Use of floating point numbers f64 can cause unintended consequences",
+            "description": "The early version of the code used f64 floating-point numbers for price calculations, which are problematic on Solana's SBF VM due to lack of native support, precision errors (e.g., 0.1 + 0.2 \u2260 0.3), and unpredictable rounding. This could lead to incorrect price computations and failed formal verification. The cause is inappropriate use of floating-point arithmetic in a financial system. The impact includes incorrect trades, loss of funds, and verification failures. This was fixed by switching to fixed-point decimals.\n",
+            "severity": "low",
+            "location": [
+                "quantities.rs"
+            ],
+            "files": [
+                "programs/manifest/src/quantities.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Red Black tree marks wrong color during removal, leading to an unbalanced/inefficient tree",
+            "description": "During node removal in the Red-Black tree, the remove_fix() function incorrectly repaints a sibling's child as red instead of using the parent's color in certain cases. This violates Red-Black tree properties, leading to an unbalanced tree. The cause is a logic error in the color-fixing routine. The impact is degraded performance over time, as tree operations require more compute units due to increased depth, potentially leading to transaction failures under load.\n",
+            "severity": "low",
+            "location": [
+                "red_black_tree.rs"
+            ],
+            "files": [
+                "lib/src/red_black_tree.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "During cancellation, order_sequence_number isn\u2019t checked, possibly emitting wrong sequence number",
+            "description": "In batch_update(), if an order_index_hint is provided, the order_sequence_number is not validated before being emitted in an event. This can result in incorrect sequence numbers being logged, leading to off-chain systems misinterpreting order states. The cause is missing validation of input fields. The impact is data inconsistency in event logs, which can affect indexing services and frontends, though it does not directly affect on-chain state.\n",
+            "severity": "informational",
+            "location": [
+                "batch_update.rs"
+            ],
+            "files": [
+                "programs/manifest/src/program/processor/batch_update.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1023"
+                ]
+            },
+            "title": "RestingOrder trees lookup function is broken for nodes with same price",
+            "description": "The PartialEq implementation for RestingOrder compares only prices, not order sequence numbers. If two orders have the same price, the lookup function may return the wrong one. However, this has no current impact because the lookup function is not used for RestingOrder trees. The cause is an incomplete equality check. The impact is potential logic errors if the lookup function were to be used in the future, but currently it is benign.\n",
+            "severity": "informational",
+            "location": [
+                "market.rs"
+            ],
+            "files": [
+                "programs/manifest/src/state/market.rs"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "unnecessary update of x as child of p in rotate left/right",
+            "description": "In the rotate_left and rotate_right functions of the Red-Black tree, the code redundantly sets x as a child of p, even though x is already in that position. This is a code inefficiency that adds unnecessary operations. The cause is redundant assignment in rotation logic. The impact is minimal performance overhead and reduced code clarity, but no functional issues.\n",
+            "severity": "informational",
+            "location": [
+                "red_black_tree.rs"
+            ],
+            "files": [
+                "lib/src/red_black_tree.rs"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Orders of zero price can be added to tree",
+            "description": "The place_order function does not prevent orders with a zero price from being added to the order book. According to the whitepaper, a minimum order size should be enforced. The cause is missing input validation. The impact is potential abuse or unintended behavior in the matching engine, though no direct exploit is known.\n",
+            "severity": "informational",
+            "location": [
+                "market.rs"
+            ],
+            "files": [
+                "programs/manifest/src/state/market.rs"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "swap_nodes() doesn\u2019t support swapping with node root as the second node",
+            "description": "The swap_nodes() function does not handle the case where the second node is the root. While this does not affect current functionality (as it's only used internally during removal), it could lead to undefined behavior if used in other contexts. The cause is incomplete edge-case handling. The impact is low, but it suggests poor API design or lack of documentation.\n",
+            "severity": "informational",
+            "location": [
+                "red_black_tree.rs"
+            ],
+            "files": [
+                "lib/src/red_black_tree.rs"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ]
+            },
+            "title": "Canceling an order might run out of compute units when no index hint is provided",
+            "description": "When canceling an order without an index hint, the system searches both trees by iterating, which can consume excessive compute units if the trees are large. The cause is O(n) search complexity without optimization. The impact is transaction failure due to compute limit exhaustion, especially for users who do not provide hints. The project considers this intentional to encourage efficient usage.\n",
+            "severity": "informational",
+            "location": [
+                "market.rs"
+            ],
+            "files": [
+                "programs/manifest/src/state/market.rs"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "Dead code in get_next_higher_index()",
+            "description": "The second part of get_next_higher_index(), which handles successors above the current node, is unreachable because the function is only called in contexts where the successor is below. The cause is unused logic in a specialized function. The impact is code bloat and confusion, but no runtime issues. The dead code was removed.\n",
+            "severity": "informational",
+            "location": [
+                "red_black_tree.rs"
+            ],
+            "files": [
+                "lib/src/red_black_tree.rs"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Duplicate variable declaration in insert_fix()",
+            "description": "The insert_fix() function declares the parent_color variable twice, with the second declaration being redundant. The cause is code duplication. The impact is minimal performance and readability degradation. This was fixed by removing the redundant line.\n",
+            "severity": "informational",
+            "location": [
+                "red_black_tree.rs"
+            ],
+            "files": [
+                "lib/src/red_black_tree.rs"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ]
+            },
+            "title": "if blocks can be refactored into if-else",
+            "description": "The insert_fix() function uses multiple if blocks for mutually exclusive conditions that could be refactored into if-else chains. This improves performance by preventing unnecessary condition checks. The cause is suboptimal control flow structure. The impact is minor efficiency loss, but the code remains correct. This was fixed in a PR.\n",
+            "severity": "informational",
+            "location": [
+                "red_black_tree.rs"
+            ],
+            "files": [
+                "lib/src/red_black_tree.rs"
+            ]
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Check that in_atoms is backed up by actual funds",
+            "description": "The swap instruction accepts an in_atoms parameter without verifying it is bounded by the user's actual token balance. While currently safe due to checked arithmetic, this could become a vulnerability if unchecked arithmetic is used in the future. The cause is missing input validation. The impact is potential future bugs or exploits if optimizations are made. The recommendation was to validate against the trader's account balance.\n",
+            "severity": "informational",
+            "location": [
+                "swap.rs"
+            ],
+            "files": [
+                "programs/manifest/src/program/processor/swap.rs"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-657"
+                ],
+                "3": [
+                    "CWE-637"
+                ]
+            },
+            "title": "Avoid complications of Effective Price by rounding in favor of large orders",
+            "description": "The effective price mechanism was introduced to prevent profit from rounding by small orders, but it complicates the code. A simpler solution is to round in favor of the taker on full matches and the maker on partial matches. This eliminates the need for effective price and reduces rounding losses to at most one atom per order. The cause is over-engineering of the rounding logic. The impact is unnecessary complexity and potential bugs. This was adopted in PR #108.\n",
+            "severity": "informational",
+            "location": [
+                "swap.rs"
+            ],
+            "files": [
+                "programs/manifest/src/program/processor/swap.rs"
+            ]
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ],
+                "4": [
+                    "CWE-638"
+                ]
+            },
+            "title": "Check that cancel_order_by_index allows a trader to cancel only their own order",
+            "description": "The cancel_order_by_index function does not verify that the order belongs to the trader, relying on callers to enforce this. While currently safe, future changes could introduce bugs. The cause is missing access control in a low-level function. The impact is potential unauthorized order cancellation if caller checks are bypassed or removed. The project considers this working as intended.\n",
+            "severity": "informational",
+            "location": [
+                "market.rs"
+            ],
+            "files": [
+                "programs/manifest/src/state/market.rs"
+            ]
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ],
+                "3": [
+                    "CWE-674"
+                ]
+            },
+            "title": "Remove recursion in Red-Black Tree implementation",
+            "description": "Functions like remove_fix and insert_fix used tail recursion, which is risky on Solana's SBF VM due to stack limitations and unpredictability. Recursion also complicates formal verification. The cause is use of recursive patterns in a constrained environment. The impact is potential runtime failures and verification challenges. The recommendation was to use loops, which was implemented.\n",
+            "severity": "informational",
+            "location": [
+                "red_black_tree.rs"
+            ],
+            "files": [
+                "lib/src/red_black_tree.rs"
+            ]
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "swap_nodes() doesn\u2019t support swapping nodes that are parent and child",
+            "description": "The swap_nodes() function fails to handle cases where one node is the parent of the other (except right-child case). This can result in inconsistent pointer updates. The cause is incomplete logic for node swapping. The impact is low, as the function is only used in controlled contexts, but it could cause bugs if reused. The fix was to clarify the function's intended use.\n",
+            "severity": "informational",
+            "location": [
+                "red_black_tree.rs"
+            ],
+            "files": [
+                "lib/src/red_black_tree.rs"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,141 @@
+{
+    "path": "reports/Hacken_Dexalot.md",
+    "project_info": {
+        "url": "https://github.com/Dexalot/contracts",
+        "commit_id": "09afb2bbb15fe9d36a180152149d8aa056d99db8",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-03-27",
+        "project_path": "contracts/Hacken_Dexalot.md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-349"
+                ]
+            },
+            "title": "F-2025-10738 Arbitrary Funds Destination due to Lack of Accounts Validation in LzReceive",
+            "description": "The LzReceive instruction allows a third party, such as the Executor or any other actor, to invoke cross-chain message processing without validating that the provided 'to' account matches the intended recipient in the LayerZero message. The root cause is the absence of account validation logic in the LzReceive handler, where the 'to' account is marked with a CHECK comment and accepted without verification against the authenticated cross-chain message data. An attacker could exploit this by front-running the legitimate executor and providing an arbitrary account as the recipient, thereby redirecting funds to a malicious address. The impact includes unauthorized withdrawal of user funds to attacker-controlled accounts, leading to direct financial loss.\n",
+            "severity": "high",
+            "files": [
+                "contracts/PortfolioBridgeMain.sol"
+            ],
+            "location": [
+                "LzReceive#"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "F-2025-10107 Pause Functionality Implemented Partially",
+            "description": "The program implements a global pause mechanism via the global_config.program_paused flag, but it does not consistently apply the pause to all critical functions. While operations like Deposit, Swap, and LzReceive are correctly gated by the pause check, other functions such as AddToken, FundSpl, ClaimSplBalance, and UpdateSwapExpiry remain accessible even when the program is paused. This inconsistency stems from selective enforcement of the pause flag across instruction handlers, indicating incomplete or unfinalized security logic. An attacker or malicious actor could exploit this by continuing to manipulate the system state during a supposed emergency pause, for example, by draining balances via ClaimSplBalance or altering swap configurations. The impact is a weakened emergency response capability, potentially allowing continued exploitation during critical incidents.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/ExchangeMain.sol",
+                "contracts/Portfolio.sol"
+            ],
+            "location": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ],
+                "4": [
+                    "CWE-940"
+                ]
+            },
+            "title": "F-2025-10102 Arbitrary LayerZero Endpoint Program",
+            "description": "The Initialize, CrossSwap, Deposit, and DepositNative instructions make CPI calls to a LayerZero endpoint program without validating that the provided endpoint_program account is the legitimate LayerZero endpoint. The vulnerability arises because the program accepts any AccountInfo as the endpoint_program without comparing it to a trusted, hardcoded address. This allows an attacker to substitute a malicious program as the endpoint, which would be invoked with user accounts as signers. During exploitation, a user could be tricked into signing a transaction that routes a CPI to a fake endpoint, which then gains signer privileges and can transfer the user's funds. Although the core protocol state remains intact, the impact includes potential theft of user assets due to unauthorized access granted through CPI forwarding.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/PortfolioBridgeMain.sol"
+            ],
+            "location": [
+                "CrossSwap#",
+                "send_cross_chain_trade#"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-909"
+                ]
+            },
+            "title": "F-2025-10100 Supported Tokens List Functionality Implemented Partially",
+            "description": "The TokenList PDA structure is designed to support pagination for a scalable list of tokens, but the implementation limits the total number of supported tokens to 20 (MAX_TOKENS) due to incomplete pagination logic. The LzReceive instruction only checks the first page of the token list, failing if a token is on a subsequent page. Additionally, the AddToken instruction fails to create a new page when the current one is full because it only advances to the next page if next_page is already set, which never occurs in practice. This design flaw stems from missing logic to initialize the next_page pointer when a page fills up. As a result, the system cannot scale beyond 20 tokens, and attempts to add more will fail with TokenListFull. The impact is a lack of scalability and long-term maintainability, forcing a redesign to support future growth.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/PortfolioBridgeMain.sol",
+                "contracts/ExchangeMain.sol"
+            ],
+            "location": [
+                "LzReceive#",
+                "AddToken#",
+                "add_token#"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "F-2025-10108 Redundant Bumps Recalculation",
+            "description": "The Portfolio PDA includes a stored bump value in its data structure, which can be used to avoid recalculating the PDA's bump seed during account validation, thus saving compute units. However, this optimization is only applied in the LzReceive instruction, while other instructions like Deposit, DepositNative, CrossSwap, and Swap recompute the bump unnecessarily. The cause is inconsistent use of the cached bump field across instruction contexts. Although this does not lead to security vulnerabilities, it results in higher computational costs and inefficient use of resources. An attacker cannot directly exploit this, but users may experience higher transaction fees due to increased compute usage. The impact is reduced efficiency and suboptimal gas usage across multiple critical functions.\n",
+            "severity": "low",
+            "files": [
+                "contracts/PortfolioBridgeMain.sol",
+                "contracts/ExchangeMain.sol"
+            ],
+            "location": [
+                "LzReceive#",
+                "Deposit#",
+                "DepositNative#",
+                "GetGlobalConfig#",
+                "WriteConfig#",
+                "SetRemote#",
+                "RemoveToken#",
+                "CrossSwap#",
+                "Swap#"
+            ]
+        }
+    ]
+}

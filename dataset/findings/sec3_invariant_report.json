@@ -1,0 +1,321 @@
+{
+    "path": "reports/sec3_invariant_report.pdf",
+    "project_info": {
+        "url": "https://github.com/invariant-labs/protocol",
+        "commit_id": "e64141fefef3d3e27e4ed8b9f00585eb47fa744a",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-05-06",
+        "project_path": "contracts/sec3_invariant_report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Steal funds/rewards using different lower/upper ticks",
+            "description": "This vulnerability allows an attacker to steal funds or rewards by providing different lower and upper tick values during position removal, fee claiming, or reward updates than those used when the position was created. The root cause is the lack of validation that the provided tick range matches the original position's tick range. In functions like remove_position, claim_fee, and update_seconds_per_liquidity, the contract accepts arbitrary tick indices from the caller without verifying they correspond to the stored position. An attacker can exploit this by creating a position with a narrow tick range and later removing it with a much wider range, thereby extracting significantly more liquidity or rewards than entitled. The impact is critical as it directly enables theft of user funds and protocol rewards, undermining the integrity of the entire system.\n",
+            "severity": "critical",
+            "files": [
+                "programs/invariant/src/instructions/remove_position.rs",
+                "programs/invariant/src/instructions/claim_fee.rs",
+                "programs/invariant/src/instructions/update_seconds_per_liquidity.rs"
+            ],
+            "location": [
+                "RemovePosition.handler#119",
+                "ClaimFee.handler#98",
+                "UpdateSecondsPerLiquidity.handler#48"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Incorrect pool key after pool ownership transfer",
+            "description": "This issue arises from a copy-paste error in the transfer_position_ownership instruction where the new position's pool field is incorrectly set to the recipient's key instead of the original pool key. The cause is a simple programming mistake at line 67, where *self.recipient.key is assigned instead of removed_position.pool. This leads to corruption of the pool reference in the transferred position, making it point to an invalid or non-existent pool. An attacker could potentially exploit positions with incorrect pool keys to disrupt accounting or cause failed transactions. The impact is medium as it corrupts state integrity and may lead to loss of access or incorrect behavior, though it does not directly enable fund theft.\n",
+            "severity": "medium",
+            "files": [
+                "programs/invariant/src/instructions/transfer_position_ownership.rs"
+            ],
+            "location": [
+                "TransferPositionOwnership.handler#65-68"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Malicious initial pool tick may prevent users from trading here",
+            "description": "The vulnerability allows a malicious actor to create a pool with an extremely skewed initial tick, resulting in an unfair initial price for the token pair. Since the pool's PDA is derived from the token pair and fee tier, only one such pool can exist, effectively blocking legitimate pools from being created. The root cause is the lack of validation or economic safeguards on the init_tick parameter in the create_pool instruction. An attacker can exploit this by front-running legitimate pool creation with an absurdly high or low initial tick, deterring users from trading due to unfavorable prices. The impact is medium because while it does not directly steal funds, it can severely disrupt market efficiency and user trust in the protocol.\n",
+            "severity": "medium",
+            "files": [
+                "programs/invariant/src/instructions/create_pool.rs"
+            ],
+            "location": [
+                "CreatePool.handler#57"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Arithmetic overflows",
+            "description": "Multiple variables across the codebase are susceptible to arithmetic overflow due to insufficient type safety and lack of runtime overflow checks. The root causes include using narrow integer types (e.g., u32 for head counters, u128 for position_iterator) and performing unchecked arithmetic operations on values like timestamps, tick indices, and fee accumulators. For example, decrementing owner_list.head without underflow protection or incrementing position_iterator without bounds checking could lead to wraparound. An attacker could exploit these overflows to manipulate state, bypass logic, or cause unexpected behavior. The impact is low because the protocol uses runtime checks in some places and the likelihood of hitting exact overflow conditions may be low, but the potential for state corruption exists.\n",
+            "severity": "low",
+            "files": [
+                "programs/invariant/src/instructions/transfer_position_ownership.rs",
+                "programs/invariant/src/structs/position.rs",
+                "programs/invariant/src/lib.rs",
+                "programs/invariant/src/math.rs",
+                "programs/invariant/src/instructions/swap.rs"
+            ],
+            "location": [
+                "TransferPositionOwnership.handler#60-61",
+                "Position.initialized_id#113-114",
+                "Tickmap.get_search_limit#39",
+                "Tickmap.tick_to_position#85",
+                "Pool.add_fee#48,52",
+                "Pool.update_seconds_per_liquidity_global#72",
+                "Swap.handler#222"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-909"
+                ],
+                "4": [
+                    "CWE-456"
+                ]
+            },
+            "title": "Not resetting the last position after moving",
+            "description": "In the transfer_position_ownership instruction, when moving the last position into the slot of the removed one, the original last position is not reset to a default or empty state. The cause is the omission of a reset step (e.g., *last_position = Default::default()) after transferring its data. This leaves stale data in the last position account, which could be misinterpreted as a valid position in future operations. An attacker might exploit this by triggering edge cases where the stale position is accessed, potentially leading to incorrect state transitions or double usage. The impact is low as it affects internal state consistency but does not directly enable fund loss.\n",
+            "severity": "low",
+            "files": [
+                "programs/invariant/src/instructions/transfer_position_ownership.rs"
+            ],
+            "location": [
+                "TransferPositionOwnership.handler#82-101"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Inconsistent tick checks",
+            "description": "There is inconsistency in how tick bounds are validated across the codebase. Some functions allow tick == MAX_TICK while others enforce strict inequality (tick < MAX_TICK). The root cause is a lack of unified validation logic and unclear specification on whether MAX_TICK is a valid state. This can lead to unpredictable behavior when positions are created or modified at boundary ticks. An attacker could potentially exploit the discrepancy to create edge-case positions that behave differently than expected during swaps or fee calculations. The impact is low as it primarily affects edge-case correctness rather than core functionality.\n",
+            "severity": "low",
+            "files": [
+                "programs/invariant/src/math.rs",
+                "programs/invariant/src/util.rs"
+            ],
+            "location": [
+                "Math.assert_tick_bounds#22",
+                "Util.require_tick_index#35-36"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing checks on tick_spacing",
+            "description": "The create_fee_tier instruction does not validate that tick_spacing is non-zero, despite tick_spacing being used in arithmetic operations like division and bit shifting. The root cause is the absence of a basic input validation check. A zero tick_spacing would lead to division-by-zero errors or infinite loops in tick-related calculations. An attacker could create a fee tier with tick_spacing = 0, causing subsequent operations (e.g., pool creation, swaps) to fail or panic. The impact is low as it leads to denial of service for specific pools rather than global fund loss.\n",
+            "severity": "low",
+            "files": [
+                "programs/invariant/src/instructions/create_fee_tier.rs"
+            ],
+            "location": [
+                "CreateFeeTier.handler#26"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Inconsistent access control in change_protocol_fee",
+            "description": "The change_protocol_fee instruction uses an access control check that depends on the current fee_receiver being the admin. However, if the fee_receiver has been changed to a non-admin account via change_fee_receiver, the access control will permanently fail. The root cause is a flawed dependency between two independent state-changing functions. This creates a situation where the protocol fee cannot be updated after a fee receiver change, effectively locking the fee at its current value. The impact is low as it results in a loss of protocol governance flexibility but does not compromise fund security.\n",
+            "severity": "low",
+            "files": [
+                "programs/invariant/src/lib.rs"
+            ],
+            "location": [
+                "Lib.change_protocol_fee#124-130"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Inconsistent amount_out and amount_in in swap",
+            "description": "In the swap logic, when the output amount exceeds the specified limit, amount_out is clamped to the limit, but amount_in is not adjusted accordingly. The root cause is incomplete logic in the swap amount capping mechanism. This leads to inconsistency between input and output amounts, potentially causing incorrect slippage calculations or user confusion. While the protocol may still function safely, the discrepancy could affect accounting accuracy or frontend interpretations. The impact is informational as it does not break core functionality or lead to fund loss.\n",
+            "severity": "informational",
+            "files": [
+                "programs/invariant/src/math.rs"
+            ],
+            "location": [
+                "Math.clamp_amount_out#158-160"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundancies in PDA seeds and account checks",
+            "description": "The code contains redundant checks and seed constructions. For example, in the swap instruction, checking reserve_x.owner and reserve_x.mint is redundant if reserve_x is already verified via PDA derivation. Similarly, including the program_id in PDA seeds is unnecessary since it is already part of the address derivation. The root cause is over-cautious or copy-pasted validation logic. While safe, these redundancies increase code complexity and gas costs slightly. The impact is informational as they do not introduce vulnerabilities but represent suboptimal design.\n",
+            "severity": "informational",
+            "files": [
+                "programs/invariant/src/instructions/swap.rs",
+                "programs/invariant/src/instructions/create_fee_tier.rs"
+            ],
+            "location": [
+                "Swap.accounts#43-47",
+                "CreateFeeTier.accounts#11-12"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ]
+            },
+            "title": "Swap exceeds computation limit",
+            "description": "The swap instruction contains a loop that iterates through ticks until remaining_amount is zero, which can exceed Solana's compute limit under certain conditions. The root cause is the unbounded loop and lack of early termination when liquidity reaches zero. As shown in the PoC, the loop continues even when liquidity is zero, leading to unnecessary iterations and potential out-of-memory errors. An attacker could craft a scenario with many ticks and zero liquidity to force transaction failure, causing denial of service. The impact is informational as it affects reliability but not security per se.\n",
+            "severity": "informational",
+            "files": [
+                "programs/invariant/src/instructions/swap.rs"
+            ],
+            "location": [
+                "Swap.handler#137-237"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Oracle can be set but is not used",
+            "description": "The initialize_oracle instruction allows setting an oracle address, but the oracle is not used anywhere in the current code. The root cause is an incomplete or placeholder feature. This raises questions about future plans and potential attack surfaces if the oracle is later activated without proper safeguards. The impact is informational as it does not affect current functionality but may indicate technical debt or undocumented design choices.\n",
+            "severity": "informational",
+            "files": [
+                "programs/invariant/src/instructions/initialize_oracle.rs",
+                "programs/invariant/src/lib.rs"
+            ],
+            "location": [
+                "InitializeOracle.handler#29-41",
+                "Pool.set_oracle#78-81"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Redundant account and access control",
+            "description": "The change_fee_receiver instruction includes a program_authority account that is not used in the handler logic, making it redundant. Additionally, the #[access_control] macro duplicates a constraint already enforced by the account validation. The root cause is inconsistent code design and overuse of access control patterns. While not insecure, it increases complexity and gas usage. The impact is informational as it reflects poor code hygiene but no direct risk.\n",
+            "severity": "informational",
+            "files": [
+                "programs/invariant/src/instructions/change_fee_receiver.rs",
+                "programs/invariant/src/lib.rs"
+            ],
+            "location": [
+                "ChangeFeeReceiver.accounts#22-23",
+                "Lib.change_fee_receiver#132-135"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-657"
+                ]
+            },
+            "title": "Design Choice, best practice, and questions",
+            "description": "This finding highlights several design decisions that may deviate from best practices, such as closing zero-liquidity ticks (which anyone can reopen), allowing different owners to receive rent from tick accounts, and setting a high default protocol fee (0.2). The root cause is intentional design trade-offs, possibly for gas optimization or flexibility. While not vulnerabilities, these choices may affect user expectations, economic fairness, or long-term maintainability. The impact is informational as they represent subjective design considerations rather than objective security flaws.\n",
+            "severity": "informational",
+            "files": [
+                "programs/invariant/src/instructions/remove_position.rs",
+                "programs/invariant/src/instructions/create_pool.rs"
+            ],
+            "location": [
+                "RemovePosition.handler",
+                "CreatePool.handler#83"
+            ]
+        }
+    ]
+}

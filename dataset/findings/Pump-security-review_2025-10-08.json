@@ -1,0 +1,68 @@
+{
+    "path": "reports-without-source/Pump-security-review_2025-10-08.md",
+    "project_info": {
+        "url": [
+            "https://github.com/pump-fun/pump-contracts-solana",
+            "https://github.com/pump-fun/pump-amm-2"
+        ],
+        "commit_id": [
+            "3c16c4c7b1a67b4c70818baf220ff0e8fc30c470",
+            "8325db469809c58f489f4ba94f69872483a90754"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-10-08",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "get_token_account_rent miscalculates Token-2022 rent by ignoring extensions",
+            "description": "The function `get_token_account_rent` in `utils/rent.rs` assumes a fixed account size for both standard SPL Token and Token-2022 accounts, using `spl_token_2022::state::Account::LEN` (165 bytes) regardless of extensions. However, Token-2022 accounts can include variable-length extensions such as transfer fees or confidential transfers, which increase the total account size. The root cause is the static size assumption without accounting for dynamic extensions. An attacker could exploit this by creating a Token-2022 account with extensions, leading to under-allocated rent, which may result in the account not being rent-exempt. This could cause unexpected lamport drains or transaction failures during account initialization or transfers, impacting reliability and user experience.\n",
+            "severity": "low",
+            "location": [
+                "utils/rent.rs::get_token_account_rent#50"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Fees are overcharged because they are calculated before adjusting net_sol",
+            "description": "The protocol calculates fees based on the initial `net_sol` value before adjusting it by subtracting excess amounts. The root cause is the incorrect ordering of operations: fee calculation precedes the adjustment of `net_sol`. An attacker could potentially manipulate or observe discrepancies in fee amounts, but more realistically, all users are systematically overcharged when excess SOL is deducted post-fee-calculation. This leads to users paying higher fees than justified by the final net SOL amount transferred. The impact includes loss of user funds due to overpayment, inaccurate accounting, and reduced trust in fee transparency.\n",
+            "severity": "low",
+            "location": [
+                "buy.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Rent calculation uses total exemption over missing balance",
+            "description": "The `Buy::calculate_rent` function adds the full rent exemption amount for accounts without considering their current lamport balance. The root cause is the failure to compute the difference between the required rent exemption and the existing balance. This leads to overestimating the required lamports, causing unnecessary SOL to be transferred or reserved during account initialization or buy operations. An attacker could exploit this by forcing repeated operations that trigger rent miscalculations, leading to inefficient fund usage and increased costs for users. The impact is economic inefficiency and potential denial-of-service-like effects due to excessive fund requirements.\n",
+            "severity": "low",
+            "location": [
+                "Buy::calculate_rent#1311-1338"
+            ],
+            "files": []
+        }
+    ]
+}

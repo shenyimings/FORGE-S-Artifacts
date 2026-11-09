@@ -1,0 +1,385 @@
+{
+    "path": "reports/sec3_monaco_0.5.0.pdf",
+    "project_info": {
+        "url": "https://github.com/MonacoProtocol/protocol",
+        "commit_id": "4b5121b6d15e6909f36350879e2c27d136062aa6",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-11-21",
+        "project_path": "contracts/sec3_monaco_0.5.0.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Insufficiently validated market_outcome",
+            "description": "The market_outcome provided by the user was not sufficiently validated against the data.market_outcome_index, allowing a mismatch between the index and the actual outcome. The root cause was the lack of a PDA-based validation that binds the market_outcome to the correct outcome index via its title. An attacker could potentially manipulate internal market outcome and matching pool statistics by providing an inconsistent outcome. However, since accounting is based on the market outcome index, the financial impact is limited, though data integrity and internal state consistency are affected.\n",
+            "severity": "medium",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "CreateBet.market_outcome#61"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Unvalidated market_matching_pool in CancelBet",
+            "description": "The market_matching_pool account in the CancelBet instruction was not validated to ensure it belonged to the correct market and bet order context. The cause was the absence of a PDA check that would tie the market_matching_pool to the market, outcome, price, and backing direction. This allowed an attacker to pass in an unrelated matching pool and manipulate its liquidity_amount by subtracting a voided stake, even if the bet order was not in that pool. The impact includes potential manipulation of liquidity metrics and incorrect state updates in unrelated pools.\n",
+            "severity": "medium",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "CancelBet.market_matching_pool#94",
+                "update_on_cancel.matching_pool#106-116"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Insufficiently validated bet orders, the outcome and matching pools",
+            "description": "The bet_order_back.market_outcome_index was not validated against the actual market_outcome account, allowing a mismatch between the index and the outcome. This could lead to inconsistent matching pools being used during bet matching. The root cause was the lack of PDA validation on the market_outcome account to ensure it corresponds to the provided index. An attacker could exploit this by providing a valid but incorrect market_outcome, leading to incorrect matching logic and potential loss of funds or incorrect payouts.\n",
+            "severity": "medium",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "MatchBets.market_outcome#227"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Double bet order removal",
+            "description": "The remove_item function on a queue-like structure incorrectly handled double removal of the same bet order, especially when removing the first or last item twice. The cause was flawed logic in the removal algorithm that did not properly handle edge cases, leading to unintended removal of other items. An attacker could exploit this to corrupt the bet order queue, potentially removing valid orders and disrupting the matching process. The impact includes state corruption and denial of service in the matching system.\n",
+            "severity": "medium",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "matching_pool.remove_item"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Integer overflows",
+            "description": "Several arithmetic operations in the code were susceptible to integer overflows or underflows. For example, the subtraction (lock_time - now) could underflow if lock_time is less than now, and additions like liquidity_amount += stake lacked overflow checks. The root cause was the use of unchecked arithmetic operations in critical financial calculations. An attacker could exploit this by providing extreme values to trigger overflows, potentially leading to incorrect state updates, loss of funds, or denial of service. The impact is significant due to the potential for financial loss.\n",
+            "severity": "medium",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "update_market#18",
+                "back#139",
+                "update_matching_queue_with_new_bet#60",
+                "match_bet_order_internal#34-35"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Inconsistent behaviors when creating and closing matching pools",
+            "description": "The behavior for creating and closing matching pools was inconsistent. The create_bet instruction could create a single matching pool via init_if_needed, but initialize_market_matching_pool expected to create both back and lay pools atomically. This could lead to a situation where one pool exists but its pair does not, making it impossible to initialize the pair later. Additionally, the close instruction required both pools to exist, which might not be the case. The impact includes operational inflexibility and potential inability to clean up or initialize pool pairs correctly.\n",
+            "severity": "low",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "CreateBet.market_matching_pool#59",
+                "InitializeMarketMatchingPool#349-362",
+                "CloseMarketMatchingPool#392-405"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Inconsistent comments and implementations",
+            "description": "The code comments stated that the odds of a newer bet order would be used, but the implementation actually selected the odds of the older bet order based on creation timestamp. The root cause was a logical inversion in the timestamp comparison. This inconsistency could mislead developers and auditors, potentially leading to incorrect assumptions about the matching logic. While the impact is primarily on code clarity and maintainability, it could indirectly affect security if future changes are based on incorrect assumptions.\n",
+            "severity": "low",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "match_bets.selected_odds#37-40",
+                "update_on_match.latest_matched_odds#27-30"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1285"
+                ],
+                "4": [
+                    "CWE-129"
+                ]
+            },
+            "title": "The outcome index provided by users is not checked",
+            "description": "The market_outcome_index provided by users during bet creation was not validated against the actual number of outcomes in the market. The root cause was the absence of a bounds check like data.market_outcome_index < market.market_outcomes.len(). This could allow an attacker to provide an out-of-bounds index, potentially leading to undefined behavior or incorrect state updates. The impact includes potential state corruption and incorrect payout calculations.\n",
+            "severity": "low",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "create_bet_order#40"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-115"
+                ]
+            },
+            "title": "Operator type string validation",
+            "description": "The operator_type string was converted to uppercase before validation, allowing variants like \"CRanK\" to pass, but the PDA seed used the original string. This inconsistency could lead to a situation where a valid operator type passes validation but fails PDA derivation, causing unexpected errors. The root cause was the mismatch between validation logic and PDA seed construction. The impact includes potential denial of service or access control issues due to PDA mismatches.\n",
+            "severity": "low",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "AuthoriseOperator.operator_type#131",
+                "validate_operator_type#46-47"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "Market parameters and unused fields",
+            "description": "Several market parameters were not validated during creation, such as duplicate market_outcomes, and multiple fields in the Market struct (e.g., authority, event_account, published, market_type, title) were assigned but never used. The root cause was incomplete validation logic and unused state design. This could lead to inconsistent or misleading data on-chain and potential confusion for integrators. The impact is primarily on code quality and maintainability, with low direct security risk.\n",
+            "severity": "low",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "create_market#260",
+                "Market#authority,event_account,published,market_type,title"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Odds truncation",
+            "description": "The odds used in matching pool creation were truncated to three decimal places via format!(\"{:.3}\"), but the odds_ladder in MarketOutcome used raw f64 values without truncation. This could allow different odds values to be grouped into the same matching pool if they round to the same three decimals, potentially leading to unfair matching. The root cause was inconsistent precision handling between validation and PDA derivation. The impact includes potential economic inefficiency and user disputes over matching fairness.\n",
+            "severity": "low",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "CreateBet.market_matching_pool#52",
+                "create_bet_order#34"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ]
+            },
+            "title": "Removing all admin operators is allowed",
+            "description": "The system allowed removing all admin operators, after which anyone could reinitialize the operator list, including adding new admins. The root cause was the lack of a safeguard preventing the removal of the last admin. This could lead to a complete loss of access control, allowing an attacker to take over administrative functions. The impact is high for governance, though the issue was later fixed.\n",
+            "severity": "informational",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "remove_authorised_operator"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Unrestricted market and account closures",
+            "description": "Market and account closures could be performed without sufficient checks. The close_market instruction allowed any operator to close a market regardless of its status, and close_account could close any contract-created account without status validation. The root cause was overly permissive access control and lack of preconditions. This posed a risk of accidental or malicious closure of active markets or critical accounts, leading to denial of service or fund inaccessibility.\n",
+            "severity": "informational",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "close_market",
+                "close_account"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "The \u201cmatches\u201d field in \u201cBetOrder\u201d is not used",
+            "description": "The matches field in the BetOrder struct was defined but never used in the codebase. The root cause was likely incomplete implementation or abandoned feature. While this does not pose a direct security risk, it increases storage costs and can confuse developers. The impact is minimal but reflects poor code hygiene.\n",
+            "severity": "informational",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "BetOrder.matches#37"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Market title is included in market PDA seeds and can be modified",
+            "description": "The market title is part of the PDA seed and can be modified after creation via update_market. This creates a risk that changing the title would invalidate the PDA, potentially locking access to the account. The root cause was the mutable use of a PDA seed component. The impact includes potential account inaccessibility and confusion about PDA derivation, raising questions about design intent.\n",
+            "severity": "informational",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "CreateMarket#294",
+                "update_market#27"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Redundant market status check",
+            "description": "The validate_market_for_bet_order function performed redundant checks on market status, including checking for Open status and separately ensuring status is not Locked. Since Open and Locked are mutually exclusive, the second check is unnecessary. The root cause was overly defensive coding. The impact is minimal, limited to slight gas inefficiency and code clarity issues.\n",
+            "severity": "informational",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": [
+                "validate_market_for_bet_order#62,74"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ],
+                "3": [
+                    "CWE-1110"
+                ]
+            },
+            "title": "Design questions",
+            "description": "The report raises two design questions: (1) whether it is intended for a different operator to close a market than the one who created it, and (2) why a matched bet order must be the first in the match pool. These are not vulnerabilities per se but highlight potential ambiguities in the design that could affect security or usability. The impact is informational, intended to prompt clarification from the development team.\n",
+            "severity": "informational",
+            "files": [
+                "programs/monaco_protocol/src/lib.rs"
+            ],
+            "location": []
+        }
+    ]
+}

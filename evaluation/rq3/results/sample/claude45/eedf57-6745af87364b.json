@@ -1,0 +1,159 @@
+{
+    "project": "sherlock-presale-audit-nov-2025-50862dad540c07ca5f41ffca25e0d5bd7cab8246.pdf.json",
+    "files": [
+        "dataset/contracts/sherlock-presale-audit-nov-2025-50862dad540c07ca5f41ffca25e0d5bd7cab8246.pdf.json/programs/presale/src/presale_mode_handler/fixed_price_presale.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2222222222222222,
+        "recall": 0.4,
+        "f1": 0.2857142857142857
+    },
+    "cwe_ground_truth": [
+        "CWE-1339",
+        "CWE-707",
+        "CWE-682",
+        "CWE-1284",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-1339",
+        "CWE-664",
+        "CWE-697",
+        "CWE-190",
+        "CWE-682",
+        "CWE-691",
+        "CWE-284",
+        "CWE-703",
+        "CWE-369"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "registry can consume other registry supply",
+            "description": "The `get_remaining_deposit_quota` function in the fixed-price presale handler calculates deposit limits based on global and personal quotas but fails to enforce that a registry's total claimed tokens do not exceed its allocated `presale_supply`. The root cause is the missing validation check against `registry.presale_supply` when processing deposits. This allows one registry to consume tokens beyond its supply limit by exhausting the global pool, effectively depriving other registries of their rightful allocation. For example, one registry could end up with 200 tokens claimed against a 100-token supply, while another receives nothing. The impact is unfair distribution of presale tokens and potential denial of access for legitimate participants in other registries.\n"
+        },
+        {
+            "title": "fixed price presale may unable to complete",
+            "description": "In fixed-price presales, the `suggest_deposit_amount` function truncates deposits to ensure they align with token price, which can prevent the total deposit from ever reaching the `presale_maximum_cap`. The root cause is the truncation logic that removes excess amounts during deposit, leading to a final total that falls short of the cap by a small margin (e.g., 99 out of 100). When `presale_minimum_cap` equals `presale_maximum_cap`, this prevents the presale from transitioning to the `Completed` state via `end_presale_if_max_cap_reached`, forcing the presale to run until the `presale_end_time` even if the cap is effectively reached. The impact is that the presale cannot end early, leading to user frustration and reduced efficiency, especially in cases with long end times.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Rust source code for a Solana smart contract implementing a fixed-price presale mechanism, I have identified several security issues stemming from the candidate CWE root causes:\n\n1. **CWE-682 (Incorrect Calculation)**: The `calculate_min_quote_amount_for_base_lamport` function uses `div_ceil` which can lead to incorrect minimum quote amounts. Specifically, when `q_price < SCALE_MULTIPLIER`, the function returns a value greater than 1, but the test case shows this can result in purchasing 9 base tokens instead of 1 (as intended). This incorrect calculation affects access control in permissioned whitelists and can lead to unexpected token purchases.\n\n2. **CWE-682 (Incorrect Calculation)**: The `calculate_quote_token_without_surplus` function has a logical flaw. It calculates `base_token_amount` using `calculate_token_bought`, then multiplies back by `q_price` and divides by `SCALE_MULTIPLIER` using `div_ceil`. This round-trip calculation can introduce rounding errors, especially for prices that don't divide evenly. The assertion `quote_token_needed <= amount` may fail in edge cases due to precision loss.\n\n3. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: Multiple functions use `safe_cast()` to convert u128 to u64 without proper validation of the conversion's validity in the business logic context. While `safe_cast()` may prevent overflow, it doesn't validate whether the resulting value makes sense for the presale's constraints (e.g., whether it exceeds presale_supply).\n\n4. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The `get_total_base_token_sold` function iterates through all registries and accumulates sold tokens, but there's no validation that the accumulated total doesn't exceed the presale's `presale_supply`. This could lead to overselling tokens if the presale state becomes inconsistent.\n\n5. **CWE-697 (Incorrect Comparison)**: In `ensure_enough_presale_supply`, the comparison `max_presale_supply_bought <= u128::from(presale_supply)` uses `<=` but should potentially use `<` to ensure strict capacity limits. The use of `<=` means the presale can exactly match the supply, which might not account for rounding errors in token calculations.\n\n6. **CWE-691 (Insufficient Control Flow Management)**: The `initialize_presale` function modifies `remaining_accounts` by reassigning the slice, but there's no validation that the remaining accounts after extraction are in the expected state. If the caller provides insufficient accounts, the function may succeed but leave the system in an inconsistent state.\n\n7. **CWE-284 (Improper Access Control)**: The `can_withdraw` function only checks `disable_withdraw` flag but doesn't validate the presale's current state (e.g., whether it's still active, whether the escrow has sufficient balance). This could allow withdrawals in inappropriate states.\n",
+            "findings": [
+                {
+                    "title": "Incorrect Minimum Quote Amount Calculation Leading to Unexpected Token Purchases",
+                    "description": "The `calculate_min_quote_amount_for_base_lamport` function uses `div_ceil` to calculate the minimum quote amount needed to purchase 1 base token. However, when `q_price < SCALE_MULTIPLIER` (prices less than 1 quote token per base token), the function returns a value that can purchase significantly more than 1 base token. The test case demonstrates that for a price of 0.1, the minimum quote amount purchases 9 base tokens instead of 1. This affects the permissioned whitelist validation in `initialize_presale` where `buyer_minimum_deposit_cap` is set to this incorrect minimum, potentially allowing users to purchase more tokens than intended with the 'minimum' deposit.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Rounding Error in Quote Token Surplus Calculation",
+                    "description": "The `calculate_quote_token_without_surplus` function performs a round-trip calculation: it first calculates how many base tokens can be bought with the given quote amount, then calculates back how much quote token is needed for those base tokens using `div_ceil`. This approach introduces rounding errors, especially for prices that don't divide evenly. The function includes an assertion `quote_token_needed <= amount` with a comment 'This should never happen', but due to the `div_ceil` operation, this assertion could fail in edge cases where the recalculated amount exceeds the original due to cumulative rounding up. This could cause transaction failures or incorrect deposit/withdrawal suggestions.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Insufficient Validation of Type Conversions in Token Calculations",
+                    "description": "Multiple functions use `safe_cast()` to convert u128 calculations to u64 (e.g., in `get_total_base_token_sold`, `get_escrow_cumulative_claimable_token`). While `safe_cast()` prevents overflow, it doesn't validate whether the resulting value is semantically valid for the presale's business logic. For example, `get_total_base_token_sold` accumulates sold tokens across all registries and casts to u64, but doesn't verify that this total doesn't exceed `presale.presale_supply`. If the accumulated value is valid as u64 but exceeds the presale supply, this represents an inconsistent state that isn't caught.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Missing Validation of Total Sold Tokens Against Presale Supply",
+                    "description": "The `get_total_base_token_sold` function calculates the total tokens sold across all registries but doesn't validate that this total doesn't exceed `presale.presale_supply`. While `ensure_enough_presale_supply` validates this during initialization, there's no runtime check to ensure the presale state remains consistent. If the presale state becomes corrupted or if there are rounding errors in individual deposits, the total sold could exceed the supply without detection, leading to overselling of tokens.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.82
+                },
+                {
+                    "title": "Potentially Incorrect Boundary Condition in Supply Validation",
+                    "description": "In `ensure_enough_presale_supply`, the validation uses `max_presale_supply_bought <= u128::from(presale_supply)`. The use of `<=` (less than or equal) means the presale can exactly match the supply. However, due to rounding in `calculate_token_bought` (which uses integer division), there could be scenarios where the calculated tokens slightly exceed the supply due to accumulated rounding errors across multiple deposits. A stricter comparison or additional buffer validation might be needed to account for these rounding effects.",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Insufficient State Validation in Withdrawal Authorization",
+                    "description": "The `can_withdraw` function only checks the `disable_withdraw` flag to determine if withdrawals are allowed. It doesn't validate other critical state conditions such as whether the presale is still active, whether it has ended, or whether the escrow has sufficient balance. This could potentially allow withdrawals in inappropriate presale states. While the actual withdrawal logic in `process_withdraw` may perform additional checks, the authorization decision in `can_withdraw` is incomplete and could lead to unexpected behavior if relied upon independently.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Incomplete Validation of Remaining Accounts After Extraction",
+                    "description": "In `initialize_presale`, the function extracts the first account from `remaining_accounts` and reassigns the slice to exclude it. However, there's no validation that the remaining accounts after this extraction are in the expected state or that sufficient accounts remain for subsequent operations. If the caller provides an insufficient number of accounts, the function may succeed in extracting the presale extra params but leave the system in an inconsistent state for later operations that expect additional accounts. This represents insufficient control flow management where the state of resources isn't properly validated after modification.",
+                    "category": "CWE-691",
+                    "severity": "low",
+                    "confidence": 0.72
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the code for the specified CWE candidates, I've identified several potential security issues:\n\n1. **CWE-190 (Integer Overflow)**: The `safe_shl` operation in `calculate_token_bought` could potentially overflow if `amount` is large enough. While the code uses safe math operations, the shift operation `safe_shl(SCALE_OFFSET)` multiplies the value by 2^SCALE_OFFSET, which could overflow u128 if amount is close to u64::MAX and SCALE_OFFSET is large.\n\n2. **CWE-369 (Divide By Zero)**: In `calculate_token_bought`, there's a division by `q_price` using `safe_div`. If `q_price` is 0, this would cause a division by zero error. While the code has validation elsewhere, the function itself doesn't validate that q_price is non-zero before performing the division.\n\n3. **CWE-1339 (Insufficient Precision)**: The use of `div_ceil` and division operations with `SCALE_MULTIPLIER` can lead to precision loss. In `calculate_quote_token_without_surplus`, the calculation involves multiple divisions and multiplications that could accumulate rounding errors, especially for small prices or amounts.\n\n4. **CWE-190 (Integer Overflow in multiplication)**: In `calculate_quote_token_without_surplus`, the operation `base_token_amount.safe_mul(q_price)?` could overflow if both values are large, even though safe_mul is used. The result is a u128, but if base_token_amount is close to u64::MAX and q_price is large, this could exceed u128::MAX.\n\n5. **CWE-128 (Wrap-around Error)**: In `get_total_base_token_sold`, the accumulation `total_sold_token.safe_add(...)` iterates over multiple registries. If there are many registries with large deposits, the cumulative sum could potentially wrap around u128, though safe_add should catch this.\n",
+            "findings": [
+                {
+                    "title": "Potential Division by Zero in calculate_token_bought",
+                    "description": "The function `calculate_token_bought` performs division by `q_price` without validating that it is non-zero. If q_price is 0, this will cause a division by zero error. While validation may exist at higher levels, the function itself is unsafe when called with q_price=0.",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Integer Overflow Risk in Left Shift Operation",
+                    "description": "In `calculate_token_bought`, the operation `u128::from(amount).safe_shl(SCALE_OFFSET)` could overflow if amount is large (close to u64::MAX) and SCALE_OFFSET is significant. This effectively multiplies the value by 2^SCALE_OFFSET, which could exceed u128::MAX capacity.",
+                    "category": "CWE-190",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Precision Loss in Price Calculations",
+                    "description": "The function `calculate_quote_token_without_surplus` performs multiple division and multiplication operations with `SCALE_MULTIPLIER` and `div_ceil`. These operations can accumulate rounding errors, especially for small prices or amounts, leading to incorrect token calculations. The use of integer division inherently loses precision for fractional results.",
+                    "category": "CWE-1339",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Potential Integer Overflow in Multiplication",
+                    "description": "In `calculate_quote_token_without_surplus`, the operation `base_token_amount.safe_mul(q_price)?` could overflow u128 if base_token_amount is large (derived from a large deposit amount) and q_price is also large. While safe_mul is used, the mathematical result could exceed u128::MAX (2^128 - 1).",
+                    "category": "CWE-190",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Cumulative Overflow Risk in Total Token Calculation",
+                    "description": "In `get_total_base_token_sold`, the function accumulates token amounts across multiple registries using `total_sold_token.safe_add(...)`. If there are many registries with large deposits, the cumulative sum could potentially overflow u128, though this is mitigated by the use of safe_add which should return an error.",
+                    "category": "CWE-190",
+                    "severity": "low",
+                    "confidence": 0.65
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-135",
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-191",
+            "CWE-1339"
+        ]
+    ]
+}

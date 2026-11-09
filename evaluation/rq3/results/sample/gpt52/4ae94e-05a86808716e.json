@@ -1,0 +1,230 @@
+{
+    "project": "blocksec_burrow_margin_trade_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrow_margin_trade_v1.0-signed.pdf.json/contracts/contract/src/fungible_token.rs",
+        "dataset/contracts/blocksec_burrow_margin_trade_v1.0-signed.pdf.json/contracts/contract/src/margin_trading.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3333333333333333,
+        "recall": 0.6,
+        "f1": 0.42857142857142855
+    },
+    "cwe_ground_truth": [
+        "CWE-697",
+        "CWE-755",
+        "CWE-284",
+        "CWE-248",
+        "CWE-346",
+        "CWE-703"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-697",
+        "CWE-393",
+        "CWE-682",
+        "CWE-228",
+        "CWE-435",
+        "CWE-287",
+        "CWE-1023",
+        "CWE-284",
+        "CWE-346",
+        "CWE-703",
+        "CWE-940",
+        "CWE-749",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Lack of sender account check when handling SwapReference message",
+            "description": "The function `ft_on_transfer()` does not validate whether the sender of the `SwapReference` message is a legitimate Ref V1 or Ref V2 contract. This lack of authentication allows any arbitrary account to impersonate a trusted exchange contract. An attacker can craft a malicious `SwapReference` message and send it to the contract, tricking it into reducing a user's debt and increasing their assets without any actual token swap occurring. This leads to an inconsistent state where the system records a debt reduction without corresponding economic backing, resulting in financial loss for the protocol due to unauthorized asset minting.\n"
+        },
+        {
+            "title": "Potential panic during handling message SwapReference",
+            "description": "When processing the `SwapReference` message, the function `internal_set_margin_account()` is called to persist account state changes. This function performs storage deposit checks that can cause a panic if the account lacks sufficient balance to cover storage costs. Since the `SwapReference` message is part of a critical path following a token swap, a panic at this stage would leave the system in an inconsistent state: the user may have already received tokens from the exchange, but the debt adjustment fails. This results in a loss of funds for the user and a locked margin position, undermining trust and reliability in the protocol.\n"
+        },
+        {
+            "title": "Unreasonable check of reserves",
+            "description": "In the `on_decrease_trade_return()` function, when covering remaining debt during a force close, the contract checks if reserves are strictly greater than the debt amount. This prevents the closure of positions when reserves are exactly equal to the debt, even though full coverage is possible. As a result, margin positions that should be force-closable are left open, increasing systemic risk. This overly strict comparison reduces the efficiency of liquidation mechanisms and may allow undercollateralized positions to persist, threatening the solvency of the protocol.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code is a NEAR FT receiver + margin-trading integration that accepts arbitrary JSON messages in `ft_on_transfer` and uses them to mutate internal accounting and margin positions. Several security-sensitive invariants rely on (a) the caller being a specific trusted contract (token or DEX), (b) the message content being authentic and well-formed, and (c) arithmetic staying within bounds. In the provided code, those assumptions are not sufficiently enforced:\n- `ft_on_transfer` does not authenticate/authorize complex message variants (notably `SwapReference`) against a trusted DEX/callback flow, enabling forged messages to drive margin state transitions for arbitrary accounts/positions.\n- Message parsing and swap-message helpers use `unwrap()`/`expect()` on attacker-controlled fields, enabling panics (DoS) and making exceptional-condition handling brittle.\n- Multiple arithmetic operations (scaling by decimals, share/amount updates, debt and reserve updates) are performed with unchecked `u128` arithmetic and can overflow/underflow, leading to unintended state changes in release/WASM builds.\n- `internal_ft_transfer` truncates amounts when converting to external token decimals, which can lead to underpayment and “dust” discrepancies between internal and external accounting.\n",
+            "findings": [
+                {
+                    "title": "Forged SwapReference messages can mutate arbitrary users' margin positions",
+                    "description": "In `ft_on_transfer`, the `TokenReceiverMsg::SwapReference { swap_ref }` branch:\n- Uses `swap_ref.account_id` (from the message) to load and mutate a `MarginAccount`.\n- Calls `on_open_trade_return` / `on_decrease_trade_return` based solely on `swap_ref.op` and `amount`.\n- Does not verify that the predecessor (`token_id = env::predecessor_account_id()`) is an expected DEX/settlement contract, nor that `sender_id` is a trusted party, nor that `swap_ref` was created by this contract for that position.\nAs a result, any whitelisted/enabled FT contract (or any actor able to initiate `ft_transfer_call` on such a token) can craft a `SwapReference` targeting any `account_id`/`pos_id` and induce debt/share transitions (including unlocking positions via `mt.is_locking = false`), potentially corrupting margin accounting, causing forced closes, or enabling value extraction depending on surrounding invariants.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Untrusted cross-contract integration: swap-return flow lacks binding between DEX call and callback",
+                    "description": "The swap-return logic assumes a correctly-behaving DEX will \"echo back\" `SwapReference` when transferring token_out back to the protocol. However, `ft_on_transfer` accepts `SwapReference` from any predecessor token contract without:\n- binding the callback to a previously issued swap (nonce/order id),\n- verifying that the predecessor is the expected DEX/token_out for that swap,\n- verifying that the transferred `amount` matches the DEX-reported execution.\nThis is an interaction flaw between otherwise-correct components: the protocol expects a DEX-mediated flow, but the protocol entrypoint is open to direct invocation via `ft_transfer_call`, allowing adversaries to bypass the intended integration sequencing.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Unchecked u128 underflow/overflow in margin settlement paths (state corruption risk)",
+                    "description": "Multiple balance/share updates use unchecked `u128` arithmetic that can underflow/overflow in WASM release builds, producing wraparound values and state corruption:\n- `on_open_trade_return`: `asset_debt.margin_pending_debt -= sr.amount_in.0` can underflow if pending debt is less than `amount_in`.\n- `on_open_trade_return`: `mt.token_c_shares.0 -= open_fee_shares` can underflow if fee shares exceed collateral shares.\n- `on_decrease_trade_return`: `mt.token_d_shares.0 -= repay_shares.0`, `mt.debt_cap - repay_cap`, and other subtractions can underflow if intermediate calculations are inconsistent.\n- `on_decrease_trade_return`: reserve usage `asset_debt.reserved -= remain_debt_balance` is only guarded by a strict `>` (see separate finding) and still assumes no underflow elsewhere.\nThese values directly control debt, collateral, and reserve accounting; wraparound can make debt appear repaid, create huge phantom balances, or brick positions.\n",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Overflow in deposit amount scaling by extra_decimals",
+                    "description": "In `ft_on_transfer`:\n`let amount = amount.0 * 10u128.pow(asset.config.extra_decimals as u32);`\nThis multiplication can overflow `u128` for sufficiently large `amount` or `extra_decimals`, wrapping in release/WASM and crediting an incorrect internal amount. Since this affects deposits/reserves/margin deposits, it can be exploited to mis-credit balances or to trigger downstream underflows/overflows during withdrawals and settlement.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Truncation when converting internal amount to FT amount can underpay withdrawals",
+                    "description": "In `internal_ft_transfer`:\n`let ft_amount = amount / 10u128.pow(asset.config.extra_decimals as u32);`\nThis integer division truncates any remainder (\"dust\"). If internal accounting decrements `amount` in smallest units but the external transfer only sends `ft_amount`, the user may receive less than debited or the contract may accumulate untracked dust. This is security-relevant in financial protocols because it can systematically leak value (user-loss) or break solvency invariants depending on how internal balances are updated elsewhere.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "DoS via panics on attacker-controlled message fields (unwrap/expect on untrusted input)",
+                    "description": "Several paths panic on malformed user-provided JSON or message structure:\n- `serde_json::from_str(&msg).expect(\"Can't parse TokenReceiverMsg\")` in `ft_on_transfer`\n- In swap message helpers: `.first().unwrap()`, `.last().unwrap()`, `sa.amount_in.unwrap()` in `RefV1TokenReceiverMessage`\n- Multiple `.unwrap()` on margin position lookups: `account.margin_positions.get(&sr.pos_id).unwrap()`\nAn attacker can repeatedly call `ft_transfer_call` with malformed/partial messages to force panics and waste gas / disrupt UX. While NEAR will revert state for the failing call, this still constitutes improper exceptional-condition handling and can be used for griefing and to block legitimate flows depending on front-end/relayer patterns.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "RefV2 swap verification function effectively disables token_in/amount_in validation",
+                    "description": "`SwapDetail::verify_token_in` returns `true` for `MsgToDex::RefV2(_)`, meaning token_in and amount_in are not validated against the encoded swap instruction for Ref v2 flows. If the surrounding code relies on `verify_token_in` to ensure the transferred token/amount matches the intended swap, this allows mismatched inputs and can lead to incorrect accounting, stuck swaps, or exploitable discrepancies.\n",
+                    "category": "CWE-707",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Incorrect reserve comparison prevents full repayment at exact equality",
+                    "description": "In `on_decrease_trade_return` under `forceclose`:\n`if asset_debt.reserved > remain_debt_balance { ... }`\nUsing `>` instead of `>=` prevents using reserves when they exactly equal the remaining debt, leaving residual debt shares and potentially preventing position closure or causing unnecessary liquidation fallout. This is a security-relevant correctness issue in forced-close logic.\n",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Missing enforcement of allowed action set per token (explicit TODO indicates protection gap)",
+                    "description": "`ft_on_transfer` allows `Execute { actions }` / `ExecuteWithPyth { actions }` to be provided by the message and then directly calls `internal_execute*` after deposit. A comment notes:\n\"We need to be careful that only whitelisted tokens can call this method with a given set of actions. Or verify which actions are possible to do.\"\nIf `internal_execute*` does not fully constrain action effects based on the calling token and/or sender context, this becomes a protection mechanism failure enabling unexpected action execution paths via any deposit-enabled asset.\n",
+                    "category": "CWE-693",
+                    "severity": "high",
+                    "confidence": 0.6
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains several security-relevant issues around message-driven execution and cross-contract callbacks.\nThe most severe problems are in `ft_on_transfer` handling of `TokenReceiverMsg::SwapReference`: the contract\naccepts a user-supplied `SwapReference` (including `account_id`, `pos_id`, `op`, and `liquidator_id`) and then\nmutates the referenced margin account/position without authenticating that this callback actually corresponds\nto a swap previously initiated/authorized by that account, nor that it originates from the intended DEX endpoint.\nAdditionally, `ft_on_transfer` returns `U128(0)` (keep all tokens) even when the message/op is invalid or ignored,\nwhich is a wrong status code under NEP-141 semantics and can trap funds.\nSeparately, parts of the DEX message verification are incomplete (notably RefV2 token-in verification always\nreturns true), and multiple `unwrap()`/`expect()` paths allow malformed messages to panic, enabling denial-of-service\non token transfers.\n",
+            "findings": [
+                {
+                    "title": "Unauthenticated SwapReference can mutate arbitrary users’ margin positions and redirect liquidation benefits",
+                    "description": "In `ft_on_transfer`, the `TokenReceiverMsg::SwapReference { swap_ref }` branch uses `swap_ref.account_id`\n(not `sender_id`) to load and mutate a margin account:\n  - `let mut account = self.internal_unwrap_margin_account(&swap_ref.account_id);`\n  - then calls `on_open_trade_return` / `on_decrease_trade_return` which update position state and may\n    distribute benefits to `swap_ref.liquidator_id` for `op == \"liquidate\" | \"forceclose\"`.\nThere is no authentication/authorization that:\n  (a) the message corresponds to an in-flight swap previously initiated by that account/position, or\n  (b) the caller is allowed to act on behalf of `swap_ref.account_id`, or\n  (c) `liquidator_id` is legitimately assigned.\nAs a result, any caller who can reach this code path (i.e., any whitelisted/accepted token contract calling\n`ft_transfer_call` with crafted JSON) can attempt to manipulate/settle/liquidate other users’ positions and\npotentially redirect liquidation/settlement “benefit” shares to an attacker-chosen `liquidator_id`.\n",
+                    "category": "CWE-287",
+                    "severity": "critical",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Origin validation missing for swap callbacks (no binding to intended DEX endpoint / expected sender)",
+                    "description": "The SwapReference callback path does not validate the source of the call beyond `token_id = predecessor`.\nIn particular, it does not verify that:\n  - `sender_id` (the ft_transfer_call sender) is a registered/expected DEX contract for this swap, and/or\n  - `env::predecessor_account_id()` is the correct token contract for the expected token_out of the swap, and/or\n  - the (DEX, token_id, position, op) tuple matches an authenticated pending swap record stored on-chain.\nThis is an origin validation error: the contract trusts unauthenticated, externally-provided routing data\n(`SwapReference`) to decide which account/position to mutate.\nFix: store a pending-swap record keyed by (pos_id, op, expected token_id, expected dex_id, expected amount range),\nand in `ft_on_transfer` require the predecessor/sender to match that record before applying state changes.\n",
+                    "category": "CWE-346",
+                    "severity": "high",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "ft_on_transfer returns wrong status code (keeps tokens) on invalid/ignored SwapReference operations",
+                    "description": "`ft_on_transfer` always returns `PromiseOrValue::Value(U128(0))`, including when `SwapReference.op` is not one of:\n\"open\", \"decrease\", \"close\", \"liquidate\", \"forceclose\". In that case, the function performs no action but still\nreturns 0, signaling to the NEP-141 token contract that all tokens were accepted and none should be refunded.\nThis can cause funds to become trapped in the contract for malformed/unsupported messages and makes it harder\nfor upstream integrations to safely recover from errors.\nUnder NEP-141, if the receiver cannot/will-not process the transfer, it should return the unused amount to refund.\n",
+                    "category": "CWE-393",
+                    "severity": "high",
+                    "confidence": 0.86
+                },
+                {
+                    "title": "RefV2 swap verification is incomplete (token_in/amount_in not checked)",
+                    "description": "In `SwapDetail::verify_token_in`, the RefV2 branch returns `true` unconditionally:\n  - `MsgToDex::RefV2(_refv2_msg) => true`\nThis is an incomplete comparison: it fails to verify that the actual `token_in` and `amount_in` match the\nswap instruction. If this method is used as a safety check before/after performing swaps, an attacker can craft\nRefV2 swap messages that bypass token/amount binding and potentially cause incorrect accounting or unexpected swaps.\nFix: implement RefV2 parsing/extraction of token_in and amount_in and compare them to the expected values.\n",
+                    "category": "CWE-1023",
+                    "severity": "medium",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Malformed messages can panic via unwrap/expect, enabling DoS of token transfer flows",
+                    "description": "Multiple parsing and structural assumptions are enforced via `expect()`/`unwrap()` rather than graceful rejection:\n  - `serde_json::from_str(&msg).expect(\"Can't parse TokenReceiverMsg\");`\n  - `actions.first().unwrap()`, `actions.last().unwrap()`\n  - `sa.amount_in.unwrap()`\nA syntactically invalid `msg` or structurally valid JSON with missing/empty fields can trigger panics.\nWhile NEP-141 tokens typically refund on receiver failure, repeated panics can be used to DoS integrations,\nspam logs, and generally make the protocol brittle.\nFix: validate message shape explicitly and return the full `amount` for refund on invalid messages instead of panicking.\n",
+                    "category": "CWE-228",
+                    "severity": "medium",
+                    "confidence": 0.84
+                },
+                {
+                    "title": "Exposed dangerous action execution via ft_on_transfer without strong policy restrictions",
+                    "description": "`ft_on_transfer` supports `Execute` / `ExecuteWithPyth` / `MarginExecute*` which trigger internal action execution\n“on behalf of the sender” based solely on a user-provided message. The code includes a TODO noting that only\nwhitelisted tokens should be allowed to call with a given action set (or actions should be verified).\nWithout strict allowlisting and per-action authorization checks, this pattern can expose powerful internal APIs\nto arbitrary token contracts/users through a single entrypoint, increasing the attack surface for privilege misuse.\nFix: enforce a strict policy mapping (token_id -> allowed message variants/actions), and validate each action against\nthe caller’s privileges before executing.\n",
+                    "category": "CWE-749",
+                    "severity": "medium",
+                    "confidence": 0.66
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code is a NEAR smart contract implementing `ft_on_transfer` (fungible token transfer-call receiver) and internal callbacks. The candidate CWEs are about missing/incorrect validation of the *source/origin* of an incoming communication. While there are no WebSockets in this code (so CWE-1385 does not apply), there are multiple cases where the contract accepts a “channel message” (`msg` / `SwapReference`) and performs sensitive state transitions without sufficiently verifying that the call/message originated from the expected counterparty (e.g., the expected DEX contract, the expected token contract for a given swap flow, or that the `sender_id`/message parameters are authentic and bound to a previously initiated protocol action). This is an instance of CWE-940 in a smart-contract context: the contract trusts externally supplied message fields and the immediate call context to represent an expected communication channel, but does not properly authenticate/authorize them.\n",
+            "findings": [
+                {
+                    "title": "Unauthenticated SwapReference processing allows arbitrary position mutation and potential collateral theft",
+                    "description": "In `ft_on_transfer`, the `TokenReceiverMsg::SwapReference { swap_ref }` branch uses **`swap_ref.account_id`** (not the `sender_id` provided by the token contract) to load and mutate a margin account:\n\n- It calls `on_open_trade_return` / `on_decrease_trade_return` solely based on `swap_ref.op`.\n- It does **not** verify that:\n  1) the caller (`env::predecessor_account_id()` == `token_id`) is the expected token contract for the swap return (e.g., the actual `token_out` / `token_d_id` involved),\n  2) the `sender_id` is an expected DEX contract (or otherwise authorized) for this swap return,\n  3) `swap_ref` corresponds to a swap previously initiated by the protocol (no nonce / stored pending-swap record / signature / replay protection).\n\nConsequences:\n- Any user can craft an `ft_transfer_call` with a `SwapReference` targeting a victim `account_id` and `pos_id` and choose `op` such as `\"liquidate\"`/`\"forceclose\"`. In `on_decrease_trade_return`, when `sr.op` is `\"liquidate\"` or `\"forceclose\"`, any computed benefits are credited to `sr.liquidator_id` (potentially the attacker), not the victim. Because there is no validation that liquidation is legitimate or that the caller is the authorized DEX return path, an attacker may be able to force a “liquidation-like settlement” path and redirect remaining collateral/benefits.\n- The code also fails to ensure the **token used for this callback matches the position’s expected asset**. `amount` is derived from the transferred token (`token_id`), but debt/position accounting is performed against `mt.token_d_id` / `mt.token_p_id`. If an attacker can pass this branch using a different whitelisted token, the contract may mis-account repayment/settlement using the wrong asset units, breaking economic assumptions.\n\nThis is a communication-channel source/origin verification failure: the contract treats `SwapReference` as if it came from an expected DEX-driven swap return channel, but does not authenticate that channel.\n",
+                    "category": "CWE-940",
+                    "severity": "critical",
+                    "confidence": 0.83
+                },
+                {
+                    "title": "ft_on_transfer trusts sender_id/msg without authenticating the true origin, enabling spoofed 'on behalf of' actions",
+                    "description": "`ft_on_transfer(sender_id, amount, msg)` performs deposits and may execute actions “on behalf of `sender_id`” (e.g., `Execute`, `DepositToMargin`, `MarginExecute*`) based on `msg`.\n\nThe only origin-related check is that `token_id = env::predecessor_account_id()` is an asset known to the contract (`internal_unwrap_asset`) and `asset.config.can_deposit` is true. There is no explicit verification that:\n- the calling FT contract is an expected/approved token contract for performing the specific action set (the code itself includes a TODO warning about this),\n- `sender_id` is bound to a trustworthy channel (in NEAR, `sender_id` is supplied by the token contract; a malicious/buggy token contract could provide an arbitrary `sender_id`).\n\nImpact:\n- If a malicious token is ever listed/enabled (or if a listed token is compromised), it could call `ft_on_transfer` and supply an arbitrary `sender_id`, causing the protocol to credit deposits and/or execute actions as if initiated by the victim account. Even if the attacker must provide tokens, this enables unauthorized state transitions, griefing, or triggering of sensitive flows in the victim’s account context.\n\nThis is improper verification of the source of the communication channel: the contract accepts an inbound “transfer-call message channel” and trusts its embedded identity (`sender_id`/`msg`) without strong authentication/authorization of the channel counterparty.\n",
+                    "category": "CWE-940",
+                    "severity": "high",
+                    "confidence": 0.78
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-286",
+            "CWE-1077",
+            "CWE-1280",
+            "CWE-393",
+            "CWE-287",
+            "CWE-755",
+            "CWE-346",
+            "CWE-1283",
+            "CWE-282",
+            "CWE-749",
+            "CWE-1025",
+            "CWE-228",
+            "CWE-923",
+            "CWE-1270",
+            "CWE-1023",
+            "CWE-269",
+            "CWE-754",
+            "CWE-397",
+            "CWE-285",
+            "CWE-1267",
+            "CWE-183",
+            "CWE-185",
+            "CWE-1024",
+            "CWE-1254"
+        ],
+        [
+            "CWE-1385",
+            "CWE-940"
+        ]
+    ]
+}

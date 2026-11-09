@@ -1,0 +1,195 @@
+{
+    "project": "07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json",
+    "files": [
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/fund_account.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.07142857142857142,
+        "recall": 0.14285714285714285,
+        "f1": 0.09523809523809523
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-1288",
+        "CWE-664",
+        "CWE-1329",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-664",
+        "CWE-697",
+        "CWE-682",
+        "CWE-691",
+        "CWE-435",
+        "CWE-118",
+        "CWE-666",
+        "CWE-284",
+        "CWE-668",
+        "CWE-703",
+        "CWE-662",
+        "CWE-400",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Missing validation allows same token swap strategy registration leading to DoS",
+            "description": "The add_token_swap_strategy function in fund_account.rs does not validate that from_token_mint and to_token_mint are different. The root cause is the absence of a require_keys_neq! check or equivalent. An attacker could register a swap strategy with identical source and destination tokens. When the system attempts to execute this swap, it will fail at the system program level, causing the entire transaction to revert. This creates a denial-of-service vector where a malicious fund manager or compromised account could disrupt fund operations by registering invalid strategies. The impact is operational disruption and potential blocking of automated fund management workflows.\n"
+        },
+        {
+            "title": "Token swap strategies cannot be updated or removed",
+            "description": "The fund_manager_add_token_swap_strategy function allows adding strategies but provides no mechanism to update or remove them. The root cause is incomplete administrative functionality. This creates operational inflexibility: incorrect or outdated strategies cannot be corrected, and deprecated DEX pools cannot be removed. The impact is reduced protocol adaptability and potential long-term inefficiencies or risks from obsolete configurations. Although the maximum of 30 strategies limits exposure, the lack of lifecycle management remains a limitation.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After thorough analysis of the FundAccount smart contract, I've identified several security issues:\n\n1. **Improper Access Control (CWE-284)**: Multiple state-changing functions like `set_deposit_enabled`, `set_withdrawal_enabled`, `set_transfer_enabled`, `add_supported_token`, `remove_supported_token`, etc. lack access control checks. Any caller can modify critical fund parameters without authorization verification. The code doesn't verify if the caller is an authorized admin/owner before allowing these operations.\n\n2. **Insufficient Control Flow Management (CWE-691)**: The `migrate` function performs version migrations without proper state validation between versions. If migration is interrupted or called multiple times, it could lead to inconsistent state. The function modifies critical fields like bumps and addresses without atomic guarantees.\n\n3. **Improper Control of Resource Through Lifetime (CWE-664)**: The `remove_supported_token` function has incomplete validation. While it checks for pending unstaking and token holdings, it doesn't verify if there are any pending operations or if the token is referenced in withdrawal batches. The rotation logic (`rotate_left`) could leave the array in an inconsistent state if an error occurs during removal.\n\n4. **Incorrect Calculation (CWE-682)**: In `get_total_unstaking_obligated_amount_as_sol`, the calculation uses `saturating_sub` which silently handles underflow. If `pending_unstaking_amount_as_sol` sum exceeds the negated net operation reserved amount, the result could be zero when it should error, leading to incorrect obligation calculations.\n\n5. **Improper Check of Exceptional Conditions (CWE-703)**: The `reload_receipt_token_supply` function calls `receipt_token_mint.reload()?` but doesn't validate if the reloaded supply matches expectations or if it changed unexpectedly. A malicious or buggy token mint could return inconsistent values.\n\n6. **Protection Mechanism Failure (CWE-693)**: The deposit/withdrawal enable flags (`deposit_enabled`, `withdrawal_enabled`) are simple u8 flags that can be toggled without any timelock or multi-sig protection. An attacker gaining access could instantly disable critical functions.\n\n7. **Improper Interaction Between Entities (CWE-435)**: The `update_pricing_source_addresses` function iterates through multiple pricing sources and updates a shared array. If pricing sources are malicious or return unexpected data, the function could populate the array with invalid addresses, affecting all subsequent pricing operations.\n",
+            "findings": [
+                {
+                    "title": "Missing Access Control on Critical State-Changing Functions",
+                    "description": "Functions like set_deposit_enabled, set_withdrawal_enabled, set_transfer_enabled, add_supported_token, remove_supported_token, set_withdrawal_fee_rate_bps, and others lack access control checks. Any caller can modify critical fund parameters including enabling/disabling deposits/withdrawals, adding/removing tokens, and changing fee rates without authorization verification.",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unsafe Migration Logic Without Atomic State Transitions",
+                    "description": "The migrate function performs multi-step version migrations modifying critical fields (bumps, addresses) without atomic guarantees. If migration is interrupted or called multiple times with inconsistent state, it could corrupt the fund account. The function lacks proper state locking or transaction boundaries.",
+                    "category": "CWE-691",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Incomplete Validation in Token Removal",
+                    "description": "The remove_supported_token function doesn't verify if the token is referenced in active withdrawal batches or pending operations before removal. The array rotation logic using rotate_left could leave the supported_tokens array in an inconsistent state if an error occurs during the removal process.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Silent Underflow in Unstaking Obligation Calculation",
+                    "description": "In get_total_unstaking_obligated_amount_as_sol, the use of saturating_sub silently handles underflow. If the sum of pending_unstaking_amount_as_sol exceeds the negated net operation reserved amount, the result becomes zero instead of erroring, leading to incorrect obligation calculations that could allow over-withdrawal.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Insufficient Validation of External Token Mint State",
+                    "description": "The reload_receipt_token_supply function reloads token mint data without validating if the supply changed unexpectedly or matches expected bounds. A malicious or buggy token mint program could return inconsistent values, corrupting the fund's internal accounting.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Lack of Protection for Critical Operation Flags",
+                    "description": "The deposit_enabled, withdrawal_enabled, and transfer_enabled flags are simple u8 values that can be toggled instantly without timelock or multi-sig protection. If an unauthorized party gains access, they could immediately disable critical fund operations, potentially locking user funds.",
+                    "category": "CWE-693",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unsafe Pricing Source Address Population",
+                    "description": "The update_pricing_source_addresses function populates a shared array by iterating through multiple pricing sources without validating the integrity of returned addresses. Malicious pricing sources could inject invalid addresses affecting all subsequent pricing operations across the fund.",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Withdrawal Fee Rate Limit Bypass Risk",
+                    "description": "The set_withdrawal_fee_rate_bps function checks against FUND_WITHDRAWAL_FEE_RATE_BPS_LIMIT (500 bps = 5%) but this check can be bypassed if the function is called without proper access control. Combined with the missing authorization, an attacker could set fees to the maximum allowed value.",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "After carefully analyzing the Rust source code for a Solana smart contract (fund_account.rs), I examined it from the perspective of each CWE in the candidate list. Here are my findings:\n\n1. **CWE-118 (Range Error)**: The code uses array indexing extensively with bounds checking through `num_supported_tokens`, `num_restaking_vaults`, `num_pricing_source_addresses`, and `num_token_swap_strategies`. However, there are potential issues:\n   - In `remove_supported_token()`, after zeroing an element and rotating left, if `num_supported_tokens` becomes 0, subsequent operations could underflow.\n   - Array access patterns like `self.supported_tokens[..self.num_supported_tokens as usize]` rely on the counter being accurate, but there's no validation that the counter doesn't exceed array bounds during deserialization or migration.\n\n2. **CWE-665 (Improper Initialization)**: The `migrate()` function has a complex version migration path (v15→v16→v18→v19). If deserialization occurs with corrupted data where `data_version` is set to an intermediate value but fields aren't properly initialized, the contract could operate with partially initialized state. For example, if `data_version` is somehow set to 16 but earlier migrations didn't run, `reserve_account` and `treasury_account` would be uninitialized (default Pubkey values).\n\n3. **CWE-662 (Improper Synchronization)**: The contract uses `receipt_token_supply_amount` as a cached value that must be synchronized with the actual mint supply via `reload_receipt_token_supply()`. However, there's no enforcement that this synchronization happens before operations that depend on accurate supply values. Multiple operations could read stale supply data, leading to incorrect calculations.\n\n4. **CWE-666 (Operation on Resource in Wrong Phase)**: The `remove_supported_token()` function checks various conditions but doesn't verify the token's lifecycle phase comprehensively. A token could be in a transitional state (e.g., pending operations not yet reflected in `operation_receivable_amount`) that isn't captured by the current checks.\n\n5. **CWE-704 (Incorrect Type Conversion)**: In `get_total_unstaking_obligated_amount_as_sol()`, there's a conversion from `i128` to `u64` via `u64::try_from(sol_net_operation_reserved_amount.min(0).neg())?`. If `sol_net_operation_reserved_amount` is a large negative number, the negation could overflow i128 bounds before conversion, though the `.min(0)` mitigates this somewhat.\n\n6. **CWE-668 (Exposure of Resource to Wrong Sphere)**: The `pricing_source_addresses` array exposes internal pricing source addresses that are collected from various tokens and vaults. These addresses are stored in the account state and could be read by anyone, potentially exposing information about the fund's pricing strategy and dependencies that should be kept private.\n\n7. **CWE-400 (Uncontrolled Resource Consumption)**: The contract has fixed limits (MAX_SUPPORTED_TOKENS=16, MAX_RESTAKING_VAULTS=16, etc.) but doesn't prevent an attacker from filling these arrays with entries, potentially blocking legitimate additions. Once limits are reached, no new tokens/vaults can be added even if existing ones are inactive.\n",
+            "findings": [
+                {
+                    "title": "Potential Array Index Out of Bounds in Token Management",
+                    "description": "The contract uses counters (num_supported_tokens, num_restaking_vaults, etc.) to track array usage, but there's insufficient validation during deserialization that these counters don't exceed array bounds. If corrupted data sets a counter above the maximum, array access operations could read/write out of bounds memory.",
+                    "category": "CWE-118",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Incomplete State Initialization in Migration Path",
+                    "description": "The migrate() function has a multi-step version upgrade path (v15→v16→v18→v19). If the data_version field is corrupted or set to an intermediate value without proper prior initialization, critical fields like reserve_account and treasury_account could remain uninitialized (default Pubkey values), leading to incorrect program behavior.",
+                    "category": "CWE-665",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Unsynchronized Receipt Token Supply Cache",
+                    "description": "The contract caches receipt_token_supply_amount but relies on manual synchronization via reload_receipt_token_supply(). Operations that depend on accurate supply values could use stale data if synchronization doesn't occur, leading to incorrect calculations in deposit/withdrawal operations.",
+                    "category": "CWE-662",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Insufficient Lifecycle Phase Validation in Token Removal",
+                    "description": "The remove_supported_token() function checks for pending unstaking and reserved amounts but doesn't comprehensively verify all transitional states. A token in an intermediate operational phase (e.g., with pending but not yet recorded operations) could be removed, leading to resource leaks or inconsistent state.",
+                    "category": "CWE-666",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Exposure of Internal Pricing Source Addresses",
+                    "description": "The pricing_source_addresses array stores internal addresses for pricing sources and is accessible in the account state. This exposes the fund's pricing strategy and dependencies to external observers, potentially revealing sensitive operational information that could be exploited.",
+                    "category": "CWE-668",
+                    "severity": "low",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Resource Exhaustion Through Array Limit Filling",
+                    "description": "The contract enforces fixed limits on supported tokens (16), restaking vaults (16), and other arrays. An attacker could fill these arrays with entries (even if minimally used), preventing legitimate additions and effectively causing a denial of service for fund expansion operations.",
+                    "category": "CWE-400",
+                    "severity": "medium",
+                    "confidence": 0.75
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-118",
+            "CWE-580",
+            "CWE-404",
+            "CWE-673",
+            "CWE-706",
+            "CWE-911",
+            "CWE-669",
+            "CWE-372",
+            "CWE-1229",
+            "CWE-400",
+            "CWE-1329",
+            "CWE-913",
+            "CWE-666",
+            "CWE-668",
+            "CWE-662",
+            "CWE-487",
+            "CWE-501",
+            "CWE-704",
+            "CWE-496",
+            "CWE-665",
+            "CWE-221",
+            "CWE-922",
+            "CWE-610",
+            "CWE-410",
+            "CWE-495"
+        ]
+    ]
+}

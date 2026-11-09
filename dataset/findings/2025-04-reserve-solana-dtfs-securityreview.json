@@ -1,0 +1,293 @@
+{
+    "path": "reports/2025-04-reserve-solana-dtfs-securityreview.pdf",
+    "project_info": {
+        "url": "https://github.com/reserve-protocol/dtfs-solana",
+        "commit_id": "f4273c898cbb752f21108438d04d27f56f73075c",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-04-15",
+        "project_path": "contracts/2025-04-reserve-solana-dtfs-securityreview.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ],
+                "3": [
+                    "CWE-1112"
+                ]
+            },
+            "title": "Incomplete building and testing instructions",
+            "description": "The README.md file lacks complete instructions for building and testing the codebase, requiring developers to infer missing steps. The root cause includes missing guidance on installing amman, incorrect command syntax (e.g., ./start-amman instead of ./start-amman.sh), absence of .env file creation instructions, and incorrect default values in .env.example. An attacker or malicious actor could exploit this by setting up a compromised local environment that mimics correct behavior but introduces vulnerabilities during development. The impact includes incorrect local builds that diverge from production behavior, potentially leading to financial loss when interacting with the real protocol.\n",
+            "severity": "informational",
+            "files": [
+                "README.md",
+                "utils/keys/keys-local.json",
+                "start-amman.sh",
+                ".env.example"
+            ],
+            "location": [
+                "README.md",
+                ".ammanrc.js#3",
+                "README.md#78",
+                ".env.example#1",
+                "utils/keys/keys-local.json#35-66"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ],
+                "3": [
+                    "CWE-1053"
+                ]
+            },
+            "title": "No Solana-specific documentation",
+            "description": "The codebase lacks Solana-specific documentation explaining the rationale behind the dual-program architecture (folio and dtfs), which was chosen to meet security requirements like upgradeability and avoiding single points of failure. The cause is the absence of high-level design documentation and function-level comments, with only 3 out of 252 public functions having comments. This increases the risk of new developers misunderstanding the threat model and introducing vulnerabilities during modifications. The impact is potential introduction of critical bugs due to misinterpretation of the system's architecture and security assumptions.\n",
+            "severity": "informational",
+            "files": [],
+            "location": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Testing deficiencies",
+            "description": "The testing setup has multiple issues: Anchor tests are commented out in CI, only a subset of tests are run due to script configuration, certain test files hang unless specific lines are commented out, and critical loops in the code are not exercised by any tests. The root cause is incomplete test configuration and lack of test coverage validation. An attacker could exploit this by introducing malicious code that bypasses untested paths, which would go undetected in CI. The impact is undetected bugs in production code due to insufficient test coverage and unreliable test execution.\n",
+            "severity": "informational",
+            "files": [
+                "tests-ts/tests-dtfs.ts",
+                "programs/folio/src/instructions/crank/crank_fee_distribution.rs",
+                "programs/folio/src/instructions/stake/accrue_rewards.rs",
+                "programs/folio/src/instructions/stake/claim_rewards.rs"
+            ],
+            "location": [
+                ".github/workflows/ci.yml#85-88",
+                "Anchor.toml#25-26",
+                "tests-ts/tests-dtfs.ts#155",
+                "programs/folio/src/instructions/crank/crank_fee_distribution.rs#135",
+                "programs/folio/src/instructions/stake/accrue_rewards.rs#142",
+                "programs/folio/src/instructions/stake/claim_rewards.rs#129"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ]
+            },
+            "title": "Accounts structs store fields in differing orders, making them difficult to compare",
+            "description": "The dtfs and folio programs have similar instruction accounts, but their fields are defined in different orders, making code review and comparison error-prone. The cause is inconsistent struct field ordering across corresponding accounts in the two programs. An attacker could exploit this by introducing a check in the wrong program (dtfs instead of folio), which may go unnoticed during review due to visual misalignment. The impact is potential logic bugs or missing security checks that evade detection during code review.\n",
+            "severity": "informational",
+            "files": [
+                "programs/dtfs/src/instructions/trade/open_trade.rs",
+                "programs/folio/src/instructions/trade/open_trade.rs"
+            ],
+            "location": [
+                "programs/dtfs/src/instructions/trade/open_trade.rs#10-59",
+                "programs/folio/src/instructions/trade/open_trade.rs#13-48"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-708"
+                ]
+            },
+            "title": "DTF owner key compromise allows manipulation of DAOFeeConfig",
+            "description": "The DAOFeeConfig account is owned by the mutable dtfs program instead of the immutable folio program, allowing a compromised dtfs owner key to manipulate fee configuration. The root cause is incorrect account ownership assignment. An attacker who gains access to the dtfs program owner key can alter the DAOFeeConfig to skew fee calculations in the folio program. The impact is incorrect fee accounting and potential financial loss due to miscalculated shares during token minting.\n",
+            "severity": "medium",
+            "files": [
+                "programs/folio/src/instructions/user/mint_folio/mint_folio_token.rs"
+            ],
+            "location": [
+                "programs/folio/src/instructions/user/mint_folio/mint_folio_token.rs#151-159"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Trade instructions do not require a dtf_program_signer account",
+            "description": "Trade-related instructions in the folio program do not require the dtf_program_signer PDA, which is meant to authenticate CPI calls from the dtfs program. The cause is missing account validation in the instruction accounts struct. An attacker can directly invoke trade instructions (e.g., kill_trade) without going through the dtfs program, bypassing intended access controls. The impact is unauthorized manipulation of trades, leading to potential financial loss or disruption of protocol operations.\n",
+            "severity": "high",
+            "files": [
+                "programs/dtfs/src/state.rs",
+                "programs/dtfs/src/instructions/trade/approve_trade.rs",
+                "programs/dtfs/src/instructions/trade/bid.rs",
+                "programs/dtfs/src/instructions/trade/kill_trade.rs",
+                "programs/dtfs/src/instructions/trade/mod.rs",
+                "programs/dtfs/src/instructions/trade/open_trade_permissionless.rs",
+                "programs/dtfs/src/instructions/trade/open_trade.rs"
+            ],
+            "location": [
+                "programs/folio/src/instructions/trade/*",
+                "programs/dtfs/src/state.rs#3-8"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "Comparison against wrong constant in accrue_rewards",
+            "description": "The accrue_rewards instruction compares the remaining_account_divider variable to the constant 4, but the variable can only be 5 or 7 based on defined constants. The root cause is a hardcoded incorrect value instead of using the proper constant. This causes the conditional block (intended for when user != caller) to never execute. An attacker or malicious caller can exploit this by calling the instruction with a different user, causing the user's rewards to be skipped while the caller still accrues rewards. The impact is incorrect reward distribution and potential loss of expected yield for users.\n",
+            "severity": "high",
+            "files": [
+                "programs/folio/src/instructions/stake/accrue_rewards.rs"
+            ],
+            "location": [
+                "programs/folio/src/instructions/stake/accrue_rewards.rs#14-227"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "remove_from_registrar succeeds if passed program IDs are not in accepted_programs",
+            "description": "The remove_from_registrar function does not validate whether the provided program IDs exist in the accepted_programs array before attempting removal. The cause is lack of input validation and error reporting. If a caller passes a non-existent program ID (e.g., due to a typo), the function silently succeeds without making changes. This can lead to operational errors where outdated programs remain active, and the operator is unaware of the failure. The impact is potential security risks from unremoved deprecated program instances and reduced reliability of administrative operations.\n",
+            "severity": "informational",
+            "files": [
+                "programs/folio/src/utils/accounts/program_registrar.rs"
+            ],
+            "location": [
+                "programs/folio/src/utils/accounts/program_registrar.rs#30-42"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "update_folio has error-prone interface that can lock out the owner",
+            "description": "The update_folio instruction allows independent updating of program_version and program_deployment_slot, but failing to update both simultaneously can cause validation failures in subsequent calls. The root cause is state validation logic that enforces consistency between deployment slot and on-chain data. If the owner updates one field and then tries to correct the other, the validation will fail because the stored deployment slot no longer matches the current on-chain value. The impact is the owner being permanently locked out of further updates, leading to loss of administrative control over the program.\n",
+            "severity": "low",
+            "files": [
+                "programs/folio/src/instructions/owner/update_folio.rs",
+                "programs/folio/src/utils/accounts/folio.rs"
+            ],
+            "location": [
+                "programs/folio/src/instructions/owner/update_folio.rs#85-95",
+                "programs/folio/src/instructions/owner/update_folio.rs#68-81",
+                "programs/folio/src/utils/accounts/folio.rs#87-96"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "add_tokens_to_basket does not check whether any of the values in mints is Pubkey::default()",
+            "description": "The add_tokens_to_basket function does not validate input mints against Pubkey::default(), which is used as a sentinel value for empty slots. The cause is missing input sanitization. If a caller passes Pubkey::default() in the mints vector, the function may incorrectly attempt to insert it or fail with a misleading error when the array is full. This can lead to confusion during integration and potential logic errors in basket management. The impact is unreliable behavior and possible denial of service for legitimate operations due to unhandled edge cases.\n",
+            "severity": "informational",
+            "files": [
+                "programs/folio/src/utils/accounts/folio_basket.rs"
+            ],
+            "location": [
+                "programs/folio/src/utils/accounts/folio_basket.rs#49-69"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Incorrect TTL check in approve_trade",
+            "description": "The approve_trade instruction performs an incorrect TTL (time-to-live) check by verifying that the provided TTL is greater than or equal to MAX_TTL, instead of ensuring it is less than or equal to MAX_TTL. This logic error causes the system to require trades to live longer than intended, which contradicts the expected behavior. The root cause is a comparison operator misuse in the validation condition. An attacker could exploit this by proposing a trade with an unreasonably large TTL and then launching it later via social engineering to obtain the TradeLauncher role. This could lead to stale or unintended trades being executed, potentially allowing the attacker to drain associated baskets using a Sybil address, resulting in loss of user funds.\n",
+            "severity": "low",
+            "files": [
+                "programs/dtfs/src/lib.rs"
+            ],
+            "location": [
+                "approve_trade#112"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Folio owner can rug pull DTF shareholders",
+            "description": "The Folio owner, holding Role::Owner, has the ability to remove arbitrary tokens from a basket without requiring a code change, which directly reduces the value of all shares associated with that basket. This violates the expected threat model as described by ABC Labs, where such a powerful action should not be permissible without governance or safeguards. The root cause lies in the remove_from_basket instruction, which only validates the actor's role as Owner but does not impose additional checks or limits on token removal. An attacker (or malicious owner) could deploy the folio and DTFs programs, attract users, and then remove all tokens from baskets, transferring them to their own control. This results in a complete loss of value for shareholders, effectively enabling a rug pull.\n",
+            "severity": "high",
+            "files": [
+                "programs/folio/src/lib.rs"
+            ],
+            "location": [
+                "RemoveFromBasket.validate#57-67",
+                "handler#73-88"
+            ]
+        }
+    ]
+}

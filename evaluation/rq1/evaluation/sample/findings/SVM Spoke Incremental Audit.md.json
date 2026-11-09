@@ -1,0 +1,59 @@
+{
+    "path": "reports/SVM Spoke Incremental Audit.md",
+    "project_info": {
+        "url": "https://github.com/across-protocol/contracts",
+        "commit_id": "71e990b3f908ecf994be8723e041b584c7d49318",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-03-31",
+        "project_path": "contracts/SVM Spoke Incremental Audit.md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Deposit Tokens Transferred from Depositor Token Account Instead of Signer",
+            "description": "1. **Description:** The deposit function in the SpokePool program incorrectly uses the depositor's token account as the source for token transfers when the signer (caller) is not the depositor. This undermines the intended functionality of allowing third-party deposits and introduces a potential fund theft vector.\n2. **Cause:** The root cause is the use of the depositor's token account as the source in the `transfer_from` call without validating that the signer owns or controls that account. The state PDA is used as the signer in the transfer, which can be exploited if a token account has delegated funds to it.\n3. **Exploitation:** An attacker could exploit this by convincing a user to delegate their token account to the state PDA (or intercepting a transaction where this happens), then calling the deposit function with the victim's token account as the source and the attacker's address as the recipient, thereby stealing funds.\n4. **Impact:** The impact includes loss of user funds due to unauthorized transfers and the disabling of legitimate third-party deposit functionality, reducing the usability and security of the protocol.\n",
+            "severity": "Medium",
+            "location": [
+                "svm-spoke.deposit#105",
+                "svm-spoke.transfer_checked#19-28"
+            ],
+            "files": [
+                "programs/svm-spoke/src/instructions/deposit.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Unclear Vault Initialization Process",
+            "description": "1. **Description:** After removing the deposit route enabling logic, vault token accounts (ATAs) are no longer automatically created. If a vault ATA does not exist, the deposit transaction fails without a clear error message, leading to a poor user experience and potential abandonment of deposits.\n2. **Cause:** The removal of route-enabling logic eliminated the automatic creation of vault ATAs. The deposit function does not use the `init_if_needed` flag, and users are expected to manually initialize the vault using an external script, which is not user-friendly.\n3. **Exploitation:** While not directly exploitable for fund theft, this issue can be leveraged in a denial-of-service or user confusion attack, where users repeatedly fail deposits and lose trust in the system.\n4. **Impact:** The main impact is degraded user experience, increased support burden, and potential loss of users to competing protocols due to unclear error conditions and complex recovery steps.\n",
+            "severity": "Low",
+            "location": [
+                "svm-spoke.deposit",
+                "scripts/svm/createVault.ts"
+            ],
+            "files": [
+                "scripts/svm/createVault.ts"
+            ]
+        }
+    ]
+}

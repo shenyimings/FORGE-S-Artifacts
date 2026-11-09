@@ -1,0 +1,165 @@
+{
+    "project": "MetaPool_Liquid_Staking_NEAR_Smart_Contract_Security_Audit_Report_Halborn_Final.pdf.json",
+    "files": [
+        "dataset/contracts/MetaPool_Liquid_Staking_NEAR_Smart_Contract_Security_Audit_Report_Halborn_Final.pdf.json/metapool/src/fungible_token_standard.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2,
+        "recall": 0.4,
+        "f1": 0.26666666666666666
+    },
+    "cwe_ground_truth": [
+        "CWE-400",
+        "CWE-770",
+        "CWE-1325",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-664",
+        "CWE-404",
+        "CWE-682",
+        "CWE-666",
+        "CWE-284",
+        "CWE-710",
+        "CWE-668",
+        "CWE-703",
+        "CWE-372"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "DENIAL OF SERVICE CONDITION DUE TO STORAGE BLOATING",
+            "description": "The MetaPool contract does not require users to make a storage deposit to cover the costs of storing their stNEAR balance. This allows a malicious user to initiate multiple small token transfers to non-existent accounts, which forces the contract to allocate storage for each new account. The contract uses its own balance to pay for this storage, and if the free balance is insufficient, further storage operations will fail, leading to a Denial of Service condition. This would prevent new users from staking, directly impacting the core functionality of the contract. Although the DoS can be reversed by sending more NEAR to the contract, the lack of a proactive storage fee mechanism creates a significant risk.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code (which is actually a NEAR Protocol contract in Rust), I've identified several security issues stemming from the candidate CWE root causes:\n\n1. **CWE-284 (Improper Access Control)**: The `ft_metadata_set` function only checks `self.assert_owner_calling()` but doesn't verify if the caller has the necessary permissions. More critically, the function is marked as `&self` (immutable reference) but attempts to mutate state by calling `metadata.set(&data)`, which is a logical error that could lead to runtime panics or undefined behavior.\n\n2. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: In `ft_transfer_call`, there's a TODO comment indicating awareness of a resource lifetime issue: \"TODO add a busy lock to avoid the sender-acc to be deleted while this txn is executing\". This represents an unmitigated vulnerability where the sender account could be deleted during the asynchronous execution, leading to inconsistent state.\n\n3. **CWE-682 (Incorrect Calculation)**: The gas calculation in `ft_transfer_call` uses subtraction without proper overflow checks: `env::prepaid_gas() - GAS_FOR_FT_TRANSFER_CALL - GAS_FOR_RESOLVE_TRANSFER - ONE_TGAS`. If prepaid gas is insufficient, this could underflow (though Rust's default behavior would panic, it's still a calculation error in logic).\n\n4. **CWE-691 (Insufficient Control Flow Management)**: The `ft_resolve_transfer` function is marked as `#[private]` but the control flow between `ft_transfer_call` and `ft_resolve_transfer` doesn't adequately handle the case where the receiver contract might maliciously consume all gas or fail in unexpected ways, potentially leaving the transaction in an inconsistent state.\n\n5. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: In `ft_metadata`, the code uses `metadata.get().unwrap_or(ft_metadata_default())` which handles the None case, but the `ft_metadata_init_lazy_container()` is called every time without checking if it's already initialized, potentially leading to inefficient storage access patterns. More critically, there's no validation of the metadata data in `ft_metadata_set`.\n\n6. **CWE-710 (Improper Adherence to Coding Standards)**: The `ft_metadata_set` function has `&self` instead of `&mut self`, violating Rust's mutability conventions. This is a critical coding standard violation that would prevent compilation or cause runtime issues.\n",
+            "findings": [
+                {
+                    "title": "Immutable Reference Used for Mutable Operation in ft_metadata_set",
+                    "description": "The function `ft_metadata_set` is declared with an immutable reference `&self` but attempts to mutate state by calling `metadata.set(&data)`. This violates Rust's borrowing rules and coding standards, potentially causing compilation errors or runtime panics. The function should be declared with `&mut self` to properly handle state mutation.",
+                    "category": "CWE-710",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unmitigated Account Deletion During Asynchronous Transfer",
+                    "description": "In `ft_transfer_call`, there's an acknowledged but unimplemented protection against sender account deletion during asynchronous execution (see TODO comment). If the sender account is deleted while `ft_on_transfer` is executing, the `ft_resolve_transfer` callback may fail to properly refund tokens, leading to loss of funds or inconsistent state.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Potential Gas Calculation Underflow",
+                    "description": "The gas calculation in `ft_transfer_call` performs arithmetic subtraction without explicit overflow/underflow checks: `env::prepaid_gas() - GAS_FOR_FT_TRANSFER_CALL - GAS_FOR_RESOLVE_TRANSFER - ONE_TGAS`. While there's an assertion checking if prepaid gas is sufficient, the assertion condition doesn't match the actual calculation (missing ONE_TGAS in the assertion), potentially allowing underflow scenarios.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Insufficient Validation in ft_metadata_set",
+                    "description": "The `ft_metadata_set` function accepts arbitrary `FungibleTokenMetadata` without validating the input data. Malicious or malformed metadata (e.g., excessively long strings, invalid URLs, incorrect decimals) could be set by the owner, potentially causing issues for clients consuming this metadata or violating NEP-141 standards.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Inefficient Metadata Container Initialization",
+                    "description": "The function `ft_metadata_init_lazy_container()` creates a new `LazyOption` instance every time it's called in both `ft_metadata()` and `ft_metadata_set()`. This violates proper resource management patterns and could lead to inconsistent state if different instances point to the same storage key but aren't properly synchronized.",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Missing Access Control Verification in ft_metadata_set",
+                    "description": "While `ft_metadata_set` calls `self.assert_owner_calling()`, the implementation of this assertion is not visible in the provided code. If this function is not properly implemented or can be bypassed, unauthorized users could modify critical token metadata, violating access control requirements.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "After carefully analyzing the provided Solana smart contract code (which is actually a NEAR Protocol contract in Rust), I've examined it from the perspective of each CWE in the candidate list. Here are my findings:\n\n1. **CWE-665 (Improper Initialization)**: The `ft_metadata_init_lazy_container()` function creates a new `LazyOption` with `None` as the initial value every time it's called. This is problematic because:\n   - In `ft_metadata()`, it creates a new container and tries to get data from it, but since it's freshly created with `None`, it will always return the default metadata instead of any previously stored metadata.\n   - In `ft_metadata_set()`, it creates a new container and sets data, but this data won't persist properly because the container isn't stored in the contract's state.\n   - The metadata should be a field in the `Contract` struct (which it is), but the code doesn't use `self.metadata` - instead it creates new instances each time.\n\n2. **CWE-404 (Improper Resource Shutdown or Release)**: The `ft_transfer_call` function has a TODO comment indicating awareness of a resource management issue: \"TODO add a busy lock to avoid the sender-acc to be deleted while this txn is executing\". This suggests the sender account could be deleted/released while the cross-contract call is in flight, potentially causing issues when `ft_resolve_transfer` tries to refund tokens.\n\n3. **CWE-372 (Incomplete Internal State Distinction)**: The contract mixes two different state representations:\n   - The `Contract` struct has `accounts`, `total_supply`, and `metadata` fields\n   - But the implementation is on `MetaPool` (not `Contract`), and references fields like `total_stake_shares` and uses methods like `internal_get_account()` that aren't visible in this code\n   - The `ft_total_supply()` returns `self.total_stake_shares` but the struct defines `total_supply`\n   - This inconsistency suggests the contract doesn't properly distinguish between its internal states\n\n4. **CWE-668 (Exposure of Resource to Wrong Sphere)**: The `ft_metadata_set()` function allows the owner to modify metadata, but it uses a freshly created `LazyOption` container that isn't connected to the contract's actual state. This means the metadata resource is being manipulated in the wrong sphere (a temporary local variable instead of persistent contract state).\n\n5. **CWE-666 (Operation on Resource in Wrong Phase of Lifetime)**: Related to the metadata issue, the code operates on `LazyOption<FungibleTokenMetadata>` containers at the wrong phase - it creates new instances when it should be using the existing `self.metadata` field from the contract state.\n",
+            "findings": [
+                {
+                    "title": "Improper Initialization of Metadata Container",
+                    "description": "The `ft_metadata_init_lazy_container()` function creates a new `LazyOption` with `None` value each time it's called. In `ft_metadata()` and `ft_metadata_set()`, this function is called to create a fresh container instead of using the `self.metadata` field from the contract state. This means `ft_metadata()` will always return default metadata (never reading stored values), and `ft_metadata_set()` will write to a temporary container that isn't persisted to the contract's state. The metadata should be accessed via `self.metadata` directly.",
+                    "category": "CWE-665",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Missing Resource Lock During Cross-Contract Call",
+                    "description": "The `ft_transfer_call` function contains a TODO comment acknowledging that a busy lock is needed to prevent the sender account from being deleted while the cross-contract call is executing. Without this lock, if the sender account is deleted during the `ft_on_transfer` callback execution, the `ft_resolve_transfer` function may fail to properly refund unused tokens, leading to potential token loss or inconsistent state.",
+                    "category": "CWE-404",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Inconsistent State Representation Between Struct and Implementation",
+                    "description": "The code defines a `Contract` struct with fields `accounts`, `total_supply`, and `metadata`, but the implementation is on `MetaPool` type which references different fields like `total_stake_shares` and methods like `internal_get_account()` that aren't visible. The `ft_total_supply()` returns `self.total_stake_shares` instead of `self.total_supply`. This mismatch between the declared struct and the actual implementation suggests incomplete internal state distinction, which could lead to incorrect state management and potential security issues.",
+                    "category": "CWE-372",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Metadata Resource Manipulated in Wrong Sphere",
+                    "description": "The `ft_metadata_set()` function creates a new temporary `LazyOption` container via `ft_metadata_init_lazy_container()` and sets metadata on it, but this container is not connected to the contract's persistent state (the `self.metadata` field). This means the metadata is being written to a temporary local resource instead of the contract's actual storage, causing the data to be lost immediately after the function returns. The function should operate on `self.metadata` directly.",
+                    "category": "CWE-668",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Operation on Metadata Resource at Wrong Lifecycle Phase",
+                    "description": "Both `ft_metadata()` and `ft_metadata_set()` create new `LazyOption` instances through `ft_metadata_init_lazy_container()` when they should be operating on the existing `self.metadata` field that's part of the contract's persistent state. This represents operating on a resource (metadata storage) at the wrong phase of its lifetime - creating new instances instead of using the initialized contract state field. This causes metadata reads to always return defaults and metadata writes to be lost.",
+                    "category": "CWE-666",
+                    "severity": "high",
+                    "confidence": 0.92
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-410",
+            "CWE-487",
+            "CWE-118",
+            "CWE-501",
+            "CWE-911",
+            "CWE-610",
+            "CWE-704",
+            "CWE-400",
+            "CWE-673",
+            "CWE-668",
+            "CWE-404",
+            "CWE-666",
+            "CWE-913",
+            "CWE-1329",
+            "CWE-580",
+            "CWE-662",
+            "CWE-496",
+            "CWE-669",
+            "CWE-372",
+            "CWE-922",
+            "CWE-1229",
+            "CWE-495",
+            "CWE-706",
+            "CWE-665",
+            "CWE-221"
+        ]
+    ]
+}

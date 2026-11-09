@@ -1,0 +1,389 @@
+{
+    "path": "reports-without-source/2026-02-19-cyfrin-securitize-svm-on-off-ramp-v2.0.md",
+    "project_info": {
+        "url": [
+            "https://github.com/securitize-io/bc-solana-on-off-ramp-sc"
+        ],
+        "commit_id": [
+            "07f8e446b5e79acdc0b50f31e355b38259692971",
+            "bbcdfe045b6a2983b7d54a220a1fe31032a3e3e8"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-04-01",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Investors can mint DsTokens out of thin air",
+            "description": "This vulnerability allows investors to mint an arbitrary or infinite number of DsTokens by exploiting an unvalidated program account in a CPI call. The root cause is the failure to validate the `rwa_rbac_program` account passed via remaining accounts, allowing an attacker to substitute their own malicious program. The attacker can implement a fake `issue_tokens` instruction that either drains vaults or forwards the CPI to the real `rwa_rbac` program with an inflated amount, causing it to mint excessive tokens. This exploit leverages the fact that the calling program signs the CPI with its PDA, granting the attacker's program authority to mint tokens. The impact is severe, as it undermines the entire token supply model, allowing attackers to mint DsTokens far beyond their entitled amount, leading to economic collapse of the token system.\n",
+            "severity": "critical",
+            "location": [
+                "swap-ds-token",
+                "subscribe-ds-token",
+                "swap-process",
+                "rwa_rbac::issue_tokens"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Unvalidated Payer in DS Token Issue CPI Allows Protocol or Registrar to Pay Creation Fees",
+            "description": "The `MintingAssetProvider::supply_to` function uses an unvalidated `payer` account from `additional_accounts[1]` when calling `rwa_rbac::issue_tokens`. This lack of validation allows an attacker to set the `payer` to either the `on_ramp_authority` PDA or the `registrar_authority`, both of which are signers in their respective flows. If the PDA holds lamports, an attacker can drain them by forcing fee payments during token account creation. In the `subscribe_ds_token` flow, users can force the registrar to pay for their token account creation, violating the intended economic model where investors bear their own costs. The impact includes potential loss of protocol funds (if PDA holds lamports) and economic abuse where the protocol is forced to pay for user operations, leading to increased operational costs and potential denial of service through fee exhaustion.\n",
+            "severity": "medium",
+            "location": [
+                "MintingAssetProvider::supply_to",
+                "swap_ds_token",
+                "subscribe_ds_token",
+                "rwa_rbac::issue_tokens"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "DS Token Subscription Can Proceed Without Wallet Identity Verification When Registration Accounts Are Omitted",
+            "description": "The `subscribe_ds_token` instruction allows a code path where all optional registration accounts are `None`, bypassing wallet identity verification. Unlike `swap_ds_token`, which enforces `wallet_identity` via a PDA constraint, this path does not validate the investor's identity. If the asset provider or token hooks do not independently enforce identity checks, unregistered wallets can receive DS tokens. This violates compliance and regulatory requirements, as tokens could be issued to unauthorized or unverified users. The impact is a breach of compliance protocols, potentially leading to regulatory penalties or unauthorized access to restricted assets.\n",
+            "severity": "low",
+            "location": [
+                "subscribe_ds_token",
+                "wallet_identity"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Operator Swap Signatures Are Replayable and Not Bound to a Specific On‑Ramp or Mints",
+            "description": "The operator swap signature payload (`SwapSplTokenMessage`) does not include a nonce or identifiers for `on_ramp_state`, `asset_mint`, or `liquidity_mint`, making signatures replayable within their deadline and across different on-ramp instances. Although operators are trusted, this design increases the risk if a signed payload is leaked or reused. An attacker could replay a valid signature to execute unintended swaps, especially if the operator key is compromised. The impact is limited due to the trust model, but it expands the attack surface and could lead to unauthorized transactions if operator keys are not perfectly secured.\n",
+            "severity": "low",
+            "location": [
+                "validate_investor_signature",
+                "SwapSplTokenMessage"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "Initialization Allows Omitted `asset_vault` Although Swaps Require It",
+            "description": "The `initialize` instruction defines `asset_vault` as optional with `init_if_needed`, allowing on-ramp instances to be created without this account. However, swap instructions (`swap_spl_token`, `swap_ds_token`, `subscribe_ds_token`) require a non-optional `asset_vault` and will fail if it does not exist. This inconsistency can result in deployed on-ramps that are unusable for swaps, especially in two-step transfer scenarios. The impact is a denial of service for swap functionality, requiring manual intervention to fix the configuration, which could delay operations and reduce user trust.\n",
+            "severity": "low",
+            "location": [
+                "initialize",
+                "swap_spl_token",
+                "swap_ds_token",
+                "subscribe_ds_token"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing Executable Check for NAV Provider in `update_nav_provider`",
+            "description": "The `update_nav_provider` instruction accepts the new NAV provider via instruction data without validating that the provided program ID corresponds to an executable account. In contrast, the off-ramp program enforces this via `#[account(executable)]`. This inconsistency allows the on-ramp to store a non-executable or invalid pubkey as the NAV provider, which can cause CPI failures or unexpected behavior when the program attempts to invoke it. The impact includes potential runtime errors, failed swaps, and possible misuse if other components trust the stored program ID without revalidation.\n",
+            "severity": "low",
+            "location": [
+                "update_nav_provider",
+                "NavProvider"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Inadequate validations on `collector-token-account`",
+            "description": "The `collector_token_account` is not validated during the `update_fee_manager` instruction. While the fee numerator is checked, the account itself is only validated at swap time. If an admin sets an invalid `collector_token_account` (e.g., wrong mint, frozen, or non-existent), all subsequent swaps will fail until corrected. This creates a denial of service risk, as the protocol becomes unusable until the admin intervenes. The impact is operational disruption and potential loss of user confidence due to failed transactions.\n",
+            "severity": "low",
+            "location": [
+                "update_fee_manager",
+                "mpbs_fee_manager.rs",
+                "swap_ds_token.rs",
+                "swap_spl_token.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Investors can grief Operators",
+            "description": "In the `swap_spl_token` flow, the investor's token balance is checked only at the end of `swap_process()`, after several expensive operations including Ed25519 signature verification and AMM CPI calls. A malicious investor can exploit this by initiating swaps with insufficient balance, causing the transaction to fail after the operator has already paid for high-computation operations. Since the operator is the signer, they bear the transaction fee cost, which increases with compute units. This allows attackers to grief operators by forcing them to pay high fees for failed transactions. The impact is economic abuse of operators, leading to increased operational costs and potential disincentive for operator participation.\n",
+            "severity": "low",
+            "location": [
+                "swap_spl_token",
+                "swap_process",
+                "validate_investor_signature"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-732"
+                ],
+                "4": [
+                    "CWE-276"
+                ]
+            },
+            "title": "Countries restriction defaults to empty on initialize, allowing all jurisdictions to use the protocol",
+            "description": "The `initialize` instruction sets `countries_restriction` to `CountriesRestriction::default()`, which is an all-zero bitmap, meaning no country is restricted by default. This remains until an admin explicitly updates it. If the protocol is required to restrict certain jurisdictions from launch (e.g., due to sanctions), this default behavior creates a compliance gap. The impact is regulatory and compliance risk, as users from restricted countries can redeem tokens until the admin updates the restriction, potentially leading to legal consequences.\n",
+            "severity": "low",
+            "location": [
+                "initialize",
+                "countries_restriction",
+                "OffRampState"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Allowance Liquidity Provider Uses `delegated_amount` Without Capping by Actual Balance",
+            "description": "The `AllowanceLiquidityProvider` returns `delegated_amount` as available liquidity without considering the actual token balance. In SPL Token, `delegated_amount` is not reduced when tokens are transferred out via self-transfer, so the reported liquidity can exceed the real balance. This leads to inflated liquidity visibility and failed redemptions when transfers fail due to insufficient funds. The impact includes poor user experience, failed transactions, and potential denial of service for redemption attempts, undermining trust in the protocol's liquidity reporting.\n",
+            "severity": "low",
+            "location": [
+                "AllowanceLiquidityProvider",
+                "available_liquidity",
+                "calculate_effective_liquidity_amount"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ],
+                "4": [
+                    "CWE-940"
+                ]
+            },
+            "title": "Incomplete Rate CPI Context and Understated Minimum NAV Provider Accounts",
+            "description": "The on-ramp and off-ramp programs call the NAV provider's `rate` instruction via CPI without signing with the `on_ramp_authority` or `off_ramp_authority` PDA. This unsigned CPI pattern prevents future NAV providers from authenticating the caller, limiting extensibility. If a future provider needs to enforce access control, rate limits, or caller-specific pricing, it cannot do so without a protocol upgrade. The impact is reduced flexibility and potential need for disruptive upgrades to support advanced NAV provider features, despite current safety within the trust boundary.\n",
+            "severity": "low",
+            "location": [
+                "get_rate",
+                "execute_buy_base",
+                "execute_sell_base",
+                "quote_buy_base",
+                "quote_sell_base"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "On-Ramp `initialize` Should Reject Zero Genesis Hash",
+            "description": "The `initialize` instruction uses `[0; 32]` as a sentinel for uninitialized genesis hash but does not reject it as a valid input. This allows the first initializer to set the genesis hash to zero, which is then used as a domain separator for signatures. This blurs the meaning of the sentinel value and could lead to confusion or misuse. The impact is a potential weakening of domain separation guarantees and ambiguity in configuration state, reducing the robustness of the signature verification system.\n",
+            "severity": "informational",
+            "location": [
+                "initialize",
+                "genesis_hash"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Redundant `#[instruction(asset_provider)]` Attribute in On-Ramp `UpdateAssetProvider`",
+            "description": "The `UpdateAssetProvider` accounts struct declares an `#[instruction(asset_provider)]` attribute, but no account constraint uses this value. It is only used in the handler, making the attribute redundant. While it does not introduce a security risk, it reduces code clarity and maintainability. The impact is purely code quality, as the attribute can be safely removed without affecting functionality.\n",
+            "severity": "informational",
+            "location": [
+                "UpdateAssetProvider"
+            ],
+            "files": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Incompatible NavProviders can be set, which could fail swaps temporarily",
+            "description": "The `update_nav_provider_handler` does not validate that the new `NavProvider` is compatible with the on-ramp's `asset_token_type`. For example, `DsToken` requires `StandardNavProvider`, while `SplToken` requires `AmmNavProvider`. If an incompatible provider is set, swaps will fail until corrected. Similarly, `update_asset_provider_handler` lacks such validation. The impact is temporary swap failures and operational disruption, requiring manual correction by the admin.\n",
+            "severity": "low",
+            "location": [
+                "update_nav_provider_handler",
+                "update_asset_provider_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Off-Ramp `update_fee_manager` Does Not Validate `liquidity_mint`",
+            "description": "The off-ramp program's `update_fee_manager` instruction does not validate that the provided `off_ramp_state` is associated with the correct `liquidity_mint` account, despite the `OffRampState` struct containing a `liquidity_mint` field. This contrasts with the on-ramp program, which enforces this constraint via a `has_one = liquidity_mint` account validation. The root cause is an inconsistency in security assumptions between the two programs. An attacker or developer error could result in targeting the wrong off-ramp state by providing a mismatched `liquidity_mint`, potentially leading to misconfiguration or future vulnerabilities if not caught. Although no direct fund loss is implied, the lack of validation weakens the system's integrity and increases the risk of operational errors.\n",
+            "severity": "low",
+            "location": [
+                "off_ramp_state::update_fee_manager"
+            ],
+            "files": []
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Insufficient checks on liquidity amount wastes compute unnecessary",
+            "description": "In both `redeem_ds_token_handler` and `redeem_spl_token_handler`, the program calculates the required `liquidity_amount` but does not verify that the liquidity provider's `source_token_account` holds sufficient funds or allowance before proceeding with the redemption logic. The cause is the absence of an early validation check, which results in the program proceeding into a CPI call that will eventually fail due to insufficient balance. This leads to the transaction failing deep within the call stack after atomic operations have been initiated. While Solana's atomicity prevents fund loss, the impact includes wasted compute units, unclear error messages (e.g., SPL token transfer failure instead of a clear `InsufficientLiquidity` error), and a poor user experience. For operator-mediated flows, repeated failures can lead to signature expiration, forcing users to restart the signing process.\n",
+            "severity": "low",
+            "location": [
+                "redeem_ds_token_handler",
+                "redeem_spl_token_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Investor’s dsTokens May Become Locked After His Country Is Banned",
+            "description": "The off-ramp program enforces country-based restrictions during DS token redemption using a `countries_restriction` bitmap, but the on-ramp program lacks any such restriction mechanism, particularly in the `swap_ds_tokens` function. This allows investors from banned countries to still acquire DS tokens via the on-ramp even after their country has been restricted. The root cause is the absence of a `countries_restriction` field in `OnRampState` and the lack of country validation in investor-facing on-ramp instructions. As a result, investors can accumulate DS tokens that they cannot redeem, leading to economically locked funds. The impact includes user fund lock-in, regulatory misalignment, and potential reputational damage, as the system allows token acquisition without ensuring redemption eligibility. This represents a design-level inconsistency between the two programs.\n",
+            "severity": "low",
+            "location": [
+                "OffRampState::countries_restriction",
+                "OnRampState",
+                "swap_ds_tokens",
+                "redeem_ds_token_handler"
+            ],
+            "files": []
+        }
+    ]
+}

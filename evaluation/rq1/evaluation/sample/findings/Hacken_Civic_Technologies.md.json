@@ -1,0 +1,82 @@
+{
+    "path": "reports/Hacken_Civic_Technologies.md",
+    "project_info": {
+        "url": "https://github.com/identity-com/on-chain-identity-gateway",
+        "commit_id": "d94bfee1a35b533583efc1b2151a9224b1a4b305",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-06-27",
+        "project_path": "contracts/Hacken_Civic_Technologies.md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "F-2023-0982 Denial Of Service State",
+            "description": "1. **Description:** The vulnerability arises in the `issue_vanilla` function when creating a GatewayToken instance without an expiration time. The account is allocated based on the current Borsh-encoded size of the GatewayToken, which varies due to optional fields like `expiretime`. If `expire_time` is not provided, it defaults to None, resulting in a smaller initial size (101 bytes). Later attempts to update the expiration time will increase the size to 109 bytes, which exceeds the allocated space.\n\n2. **Cause:** The root cause is the static allocation of account space based on the initial state of the GatewayToken without accounting for potential future growth when optional fields transition from None to Some(value). This leads to a mismatch between allocated and required space.\n\n3. **Exploitation:** An attacker or user could issue a token without an expiration time, and any subsequent attempt to set or update the expiration (e.g., via `update_expiry` or `expire_token`) would fail due to insufficient account space, effectively freezing the token's state.\n\n4. **Impact:** The impact is a denial of service for specific functionality on affected tokens\u2014namely, the inability to set or update expiration times. This could prevent legitimate token expiration or renewal, undermining the intended lifecycle management of gateway tokens.\n",
+            "severity": "high",
+            "files": [
+                "solana/program/src/processor.rs"
+            ],
+            "location": [
+                "program::processor::issue_vanilla",
+                "program::processor::update_expiry",
+                "program::processor::expire_token"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "F-2023-0983 Improper Account Funding",
+            "description": "1. **Description:** The vulnerability involves the use of `Rent::default()` when funding newly created accounts. This approach may not accurately reflect the actual rent-exempt balance required under current Solana network conditions, leading to either underfunded or overfunded accounts.\n\n2. **Cause:** The root cause is the reliance on `Rent::default()`, which may not dynamically compute the correct rent-exempt minimum based on the account's data size and current rent parameters. Instead, it uses a default or outdated value, which can be insufficient for the actual storage needs.\n\n3. **Exploitation:** An attacker could exploit this by triggering account creation with `Rent::default()`, resulting in an underfunded account that becomes susceptible to being purged by the Solana runtime if it falls below the rent-exempt threshold. This could lead to loss of data or state.\n\n4. **Impact:** The primary impact is the risk of unexpected account purging due to insufficient funds, leading to a loss of state and potential denial of service. Overfunding, while less critical, wastes lamports and increases deployment costs.\n",
+            "severity": "medium",
+            "files": [
+                "solana/program/src/processor.rs"
+            ],
+            "location": [
+                "Rent::default()"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1099"
+                ]
+            },
+            "title": "F-2023-0995 Confusing Code",
+            "description": "1. **Description:** The parameter named `gatekeeper` in certain functions is ambiguous, as it could refer to either the gatekeeper authority (a signing key or authority) or the gatekeeper account (a data account storing gatekeeper state). This lack of clarity can lead to misunderstandings during code review, maintenance, or integration.\n\n2. **Cause:** The root cause is poor naming convention and lack of specificity in parameter naming, which fails to distinguish between different types of gatekeeper-related entities in the codebase.\n\n3. **Exploitation:** While not directly exploitable for malicious purposes, this confusion could lead developers or auditors to misinterpret the control flow or access checks, potentially introducing security bugs during future development or upgrades.\n\n4. **Impact:** The impact is reduced code readability and maintainability, increasing the likelihood of human error in implementation or review. This could indirectly lead to security vulnerabilities in future changes.\n",
+            "severity": "low",
+            "files": [
+                "solana/program/src/processor.rs"
+            ],
+            "location": [
+                "gatekeeper"
+            ]
+        }
+    ]
+}

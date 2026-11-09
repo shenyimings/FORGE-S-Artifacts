@@ -1,0 +1,96 @@
+{
+    "project": "tensor_foundation_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/tensor_foundation_audit_final.pdf.json/marketplace/program/src/instructions/mpl_core/close_expired_listing.rs",
+        "dataset/contracts/tensor_foundation_audit_final.pdf.json/marketplace/program/src/instructions/mpl_core/delist.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-669",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-284",
+        "CWE-435"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Utilization of Improper Payer Account",
+            "description": "In `process_close_expired_listing_core`, the `list_state` account is used as the payer for a CPI transfer, but it is a program-owned account with minimal lamports, likely insufficient for transaction fees. This can cause transaction failure and prevent cleanup of expired listings. Similarly, in `process_delist_core`, the `rent_destination` account is incorrectly required to be a signer and payer, even though its role is only to receive rent refunds. This introduces unnecessary constraints and increases the risk of transaction failure. The root cause is incorrect assignment of payer responsibilities in CPI calls.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code contains two functions: `process_close_expired_listing_core` and `process_delist_core`, both handling the delisting of NFTs on a marketplace. After analyzing the code with respect to the specified CWEs, the following issues were identified:\n\n1. **CWE-284: Improper Access Control** – In `process_close_expired_listing_core`, the `owner` account is marked as `UncheckedAccount` and is not required to sign the transaction. While the instruction checks that the listing has expired and that the `list_state.owner == owner`, it does not validate that the caller is authorized to trigger this action. This could allow any user to prematurely or maliciously close expired listings, potentially disrupting expected behavior or enabling griefing attacks if the `rent_destination` logic is exploitable.\n\n2. **CWE-435: Improper Interaction Between Multiple Correctly-Behaving Entities** – The `TransferV1CpiBuilder` is used in both functions to transfer the asset from the `list_state` (acting as authority) to the `owner`. However, in `process_close_expired_listing_core`, the `.payer(&ctx.accounts.list_state.to_account_info())` is used, which may not hold sufficient funds to pay for the transfer, especially since the `list_state` is being closed. This creates a problematic interaction: the CPI transfer expects a payer, but the account being used is about to be closed and may not be able to cover fees. This could lead to transaction failure or unexpected behavior when the accounts are closed in the same instruction.\n\n3. **CWE-703: Improper Check or Handling of Exceptional Conditions** – Both functions call `validate_asset` and CPI instructions without comprehensive error handling beyond basic `require!` checks. However, there is no handling of potential failures in the `record_event` function. If `record_event` fails, it could abort the transaction after the asset has already been transferred, leading to a state inconsistency. Additionally, the `validate_asset` function is called before the expiry check in `process_close_expired_listing_core`, which may lead to unnecessary computation if the listing is not expired.\n",
+            "findings": [
+                {
+                    "title": "Lack of Caller Authorization in Close Expired Listing",
+                    "description": "The `process_close_expired_listing_core` function allows any caller to close an expired listing without verifying that the caller is the owner or an authorized party. Although the `owner` account is checked via `has_one`, it does not sign the transaction, allowing unauthorized users to trigger the closure. This violates access control principles and could enable denial-of-service or griefing attacks.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Payer Assignment in CPI Transfer for Expired Listing",
+                    "description": "In `process_close_expired_listing_core`, the `list_state` account is used as the payer in the `TransferV1CpiBuilder`, but this account is marked with `close = rent_destination`, meaning it will be closed during the instruction. Using a closing account as a payer may result in insufficient funds or runtime errors, as the account's lamports are being reclaimed. This creates an improper interaction between the transfer and account closure operations.",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient Handling of Exceptional Conditions in Event Recording",
+                    "description": "The `record_event` function is called after the asset transfer in both functions without wrapping it in a try-catch or fallback mechanism. If `record_event` fails, the transaction will revert, but in scenarios where partial execution is possible (e.g., in cross-program contexts), this could lead to inconsistent state. Additionally, in `process_close_expired_listing_core`, `validate_asset` is called before checking expiry, leading to unnecessary computation in non-expired cases.",
+                    "category": "CWE-703",
+                    "severity": "low",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code contains two functions: `process_close_expired_listing_core` and `process_delist_core`, both related to delisting NFTs from a marketplace on Solana. A security analysis against the specified CWEs reveals potential issues primarily around access control and validation.\n\nFirst, in `process_close_expired_listing_core`, the `owner` account is marked as `UncheckedAccount` and is only validated indirectly via the `has_one = owner` constraint on the `list_state` account. However, this constraint is not enforced during CPI calls or asset transfer operations. The function allows transferring the asset to the `owner` without verifying that the `owner` account passed in actually matches the one stored in `list_state`. Since `owner` is not a signer and is unchecked, a malicious actor could potentially pass in a different `owner` account than the real owner, leading to incorrect asset redirection if the `TransferV1CpiBuilder` does not strictly enforce ownership through the Metaplex Core program.\n\nSecond, in `process_delist_core`, the `owner` is correctly required to be a `Signer`, ensuring that only the legitimate owner can delist. However, the `rent_destination` is also required to be a `Signer`, which may be unnecessary and could lead to usability issues, but does not introduce a direct vulnerability. More importantly, both functions rely on `validate_asset` to check the asset and collection, which is good practice.\n\nThe main concern lies in `CloseExpiredListingCore`: it allows closure of expired listings but does not require the `owner` to sign. While this may be intentional (allowing anyone to close expired listings), it must be ensured that the transfer destination is strictly the owner recorded in `list_state`. However, the code uses `&ctx.accounts.owner.to_account_info()` as the `new_owner`, and since `owner` is an unchecked account, an attacker could substitute a different account as long as it matches the key stored in `list_state.owner`. But because the `has_one = owner` constraint ensures `list_state.owner == owner.key`, and the `owner` account is passed in by the caller, there is a risk if the program does not validate that the account at `owner` is a valid signer or otherwise authorized.\n\nHowever, upon closer inspection, the `has_one = owner` in the `list_state` account enforces that the public key of the `owner` account matches the one stored in `list  state.owner`. Since the `TransferV1CpiBuilder` transfers to `&ctx.accounts.owner.to_account_info()`, and the key is validated via `has_one`, the risk is mitigated. Still, because `owner` is not a signer in `close_expired_listing_core`, and the function allows anyone to trigger the closure, this could be acceptable design.\n\nNo other CWEs from the list are clearly triggered. There is no evidence of improper privilege management beyond access control nuances, no authentication issues beyond account validation, and no token generation or communication channel issues.\n\nAfter thorough analysis, no critical vulnerabilities are found that clearly map to the listed CWEs. The design choices appear intentional, especially allowing trustless closure of expired listings.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-269",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-393",
+            "CWE-1038",
+            "CWE-188",
+            "CWE-1270",
+            "CWE-436",
+            "CWE-923",
+            "CWE-1267",
+            "CWE-439",
+            "CWE-228",
+            "CWE-397",
+            "CWE-282",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-754",
+            "CWE-755"
+        ]
+    ]
+}

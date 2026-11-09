@@ -1,0 +1,234 @@
+{
+    "project": "Gameyoo Programs Smart Contract Audit Report - QuillAudits.pdf.json",
+    "files": [
+        "dataset/contracts/Gameyoo Programs Smart Contract Audit Report - QuillAudits.pdf.json/programs/token-faucet/src/lib.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.21052631578947367,
+        "recall": 1.0,
+        "f1": 0.34782608695652173
+    },
+    "cwe_ground_truth": [
+        "CWE-346",
+        "CWE-345",
+        "CWE-693"
+    ],
+    "cwe_detected": [
+        "CWE-358",
+        "CWE-807",
+        "CWE-707",
+        "CWE-655",
+        "CWE-182",
+        "CWE-682",
+        "CWE-691",
+        "CWE-349",
+        "CWE-345",
+        "CWE-284",
+        "CWE-351",
+        "CWE-1293",
+        "CWE-710",
+        "CWE-348",
+        "CWE-346",
+        "CWE-703",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Missing address verification",
+            "description": "The vulnerability involves the lack of verification for critical system account addresses such as the system program, clock, and rent sysvars in certain instructions. The root cause is the absence of explicit address checks for these well-known Solana system accounts, which are assumed to be passed correctly by callers. An attacker could potentially pass a maliciously crafted account instead of the genuine system account, leading to unexpected behavior or denial of service by disrupting normal program execution. While this does not directly lead to fund loss, it may compromise the reliability and availability of the program's functionality.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The program has several security-relevant weaknesses rooted in the provided CWE set. Most importantly, `initialize` is permissionless and writes immutable, security-critical configuration (mint, mint authority, recipient token accounts) into a PDA that can only be created once. This allows front-running/hostile initialization and permanent takeover/DoS (CWE-284, CWE-703).\n\nToken supply capping is implemented incorrectly: it checks `mint.supply < MAX_TOTAL_SUPPLY` before minting but does not ensure `mint.supply + to_mint <= MAX_TOTAL_SUPPLY`, enabling the cap to be exceeded in the final minting call (CWE-682).\n\nThe contract uses `f64` percentages and truncating casts to compute token distribution, which is fragile and can mis-mint due to floating-point precision/rounding, and is generally an on-chain protection mechanism failure (CWE-682, CWE-693).\n\nControl-flow robustness is weak: multiple `unwrap()` calls on checked arithmetic/conversions can panic, causing transaction aborts and potential long-term denial-of-service if intervals become large enough to overflow u64 arithmetic (CWE-703, CWE-691).\n\nAccount validation is insufficient: recipient accounts are `AccountInfo` and only checked for non-emptiness at initialization; they are not validated as SPL Token accounts nor verified to match the configured mint, allowing misconfiguration that later bricks `drip` or directs minting to unintended accounts if combined with the permissionless `initialize` (CWE-707, CWE-284).\n\nFinally, a coding-standard issue exists: `ConfigAccount::default()` uses `unsafe { zeroed() }`, which is discouraged and can mask initialization mistakes (CWE-710).\n",
+            "findings": [
+                {
+                    "title": "Permissionless initialize allows hostile one-time configuration (front-run takeover)",
+                    "description": "`initialize` has no access control and can be called by anyone to create the unique `config_account` PDA (fixed seed `b\"GameYoo-Token\"`). The initializer sets:\n- `mint`\n- `mint_authority`\n- all receiver token account pubkeys\n- timing state\n\nBecause the PDA is initialized once, an attacker can front-run deployment/initialization and permanently lock in attacker-chosen recipients (stealing all future emissions) or choose an incompatible mint/receivers to permanently DoS `drip`.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Total supply cap can be exceeded due to pre-mint check only",
+                    "description": "In `drip`, the code checks `ctx.accounts.mint.supply < MAX_TOTAL_SUPPLY` before minting, but does not check whether the *additional* minted amount would push supply over the cap.\n\nExample: if `mint.supply = MAX_TOTAL_SUPPLY - 1` and `distribution_amounts >= 1`, the require passes and minting proceeds, exceeding `MAX_TOTAL_SUPPLY`.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Floating-point percentage calculations can mis-mint due to precision/rounding",
+                    "description": "Distribution amounts are computed via `((distribution_amounts as f64) * PERCENT) as u64`.\nUsing `f64` on-chain is fragile: binary floating-point cannot exactly represent many decimal fractions, and truncating casts can produce off-by-one (or more) results depending on precision error.\n\nThis can lead to:\n- minting fewer tokens than intended (lost emissions)\n- potentially minting more than intended if precision error makes a product slightly larger before truncation\n- breaking invariants like “sum of parts == total”\n\nThis also weakens deterministic, auditable tokenomics and is a poor protection mechanism for supply control.\n",
+                    "category": "CWE-693",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Single bump reused for multiple PDAs can brick mint authority signing",
+                    "description": "`initialize` takes a single `bump` argument and uses it for:\n- `config_account` PDA bump (seed `b\"GameYoo-Token\"`)\n- `mint_authority` PDA bump (seed `b\"GYC-Mint-Auth\"`)\nand stores it in `config_account.bump`, later used by `drip` to derive the mint-authority signer seeds.\n\nThese are distinct PDAs and generally require different canonical bumps. If they differ, `initialize` may be impossible to execute (no single bump satisfies both), or `initialize` may succeed only under rare coincidence, and `drip` may later fail to sign/mint (permanent DoS).\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unchecked unwrap() panics enable denial-of-service on large intervals/overflows",
+                    "description": "`drip` uses multiple `.unwrap()` calls after `checked_*` arithmetic:\n- `checked_mul` for `distribution_amounts`\n- `checked_add` for `current_block_height`\n- conversions and `checked_*` operations\n\nIf `drip` is not called for a long time, `gen_block_num` can become large enough that `gen_block_num * COIN_NUM_PER_BLOCK` overflows `u64`. This triggers a panic via `unwrap()`, aborting the instruction and potentially preventing recovery without state intervention (since `last_gen_block_timestamp` never advances).\n",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Recipient accounts are not validated as SPL Token accounts for the configured mint",
+                    "description": "Receiver accounts in both `Initialize` and `Drip` are plain `AccountInfo` and are not constrained/validated as:\n- `spl_token::state::Account` (TokenAccount)\n- owned by the SPL Token program\n- having `mint == config_account.mint`\n\n`initialize` only checks `!data_is_empty()`, which does not guarantee correct type or mint. A malicious/incorrect initializer can set invalid accounts, causing `token::mint_to` to fail forever (DoS), or set token accounts they control to capture emissions (when combined with permissionless initialization).\n",
+                    "category": "CWE-707",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Unsafe zero-initialization of ConfigAccount",
+                    "description": "`impl Default for ConfigAccount` uses `unsafe { std::mem::zeroed() }`.\nThis is discouraged and can lead to subtle bugs if `Default` is ever used in contexts assuming invariants (e.g., valid pubkeys/magic). While Anchor typically initializes accounts via serialization, this pattern increases risk and reduces code safety.\n",
+                    "category": "CWE-710",
+                    "severity": "low",
+                    "confidence": 0.75
+                }
+            ]
+        },
+        {
+            "reasoning": "The program’s security model is largely defined by a single global PDA config account (seed \"GameYoo-Token\") that is initialized once and then drives all future minting behavior. However, `initialize` is permissionless and accepts untrusted inputs (mint and receiver accounts) without authenticity/validity verification. This enables a first-caller to permanently “claim” the config and point it at attacker-chosen mint/receivers, which then passes all `drip` `has_one` constraints because those constraints only validate consistency with the stored config, not correctness relative to an intended canonical mint/recipients.\n\nAdditionally, the total-supply cap check is incorrectly implemented: it checks only `mint.supply < MAX_TOTAL_SUPPLY` before minting, but does not ensure `mint.supply + amount_to_mint <= MAX_TOTAL_SUPPLY`, so a single `drip` can exceed the cap when supply is near the maximum (and/or when a long interval has elapsed). Finally, token distribution uses `f64` and casts to `u64`, collapsing values via lossy floating-point rounding; this can cause incorrect mint amounts and interacts badly with cap enforcement.\n\nThere is also an operational/design hazard: the code reuses one `bump` for two different PDAs (\"GameYoo-Token\" and \"GYC-Mint-Auth\"), which is not generally valid and can brick initialization unless a special bump happens to work for both, making the protection mechanism impractical.\n",
+            "findings": [
+                {
+                    "title": "Permissionless initialize allows config hijack and permanent redirection of minting",
+                    "description": "`initialize` can be called by any signer and writes attacker-provided `mint` and all receiver token accounts into the single global PDA config (seeded only by the constant \"GameYoo-Token\"). Because the config PDA can be initialized only once, an attacker can front-run deployment to permanently set:\n- `config_account.mint` to an attacker-chosen SPL mint (they can create a mint whose mint_authority is the program PDA pubkey)\n- all `receiver_*` accounts to attacker-controlled token accounts\n\nAfter this, `drip` will happily mint to those stored receivers due to `has_one` checks, which only confirm consistency with the hijacked config. This is a full takeover/DoS of the intended token distribution setup.\n",
+                    "category": "CWE-807",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Missing authenticity/validity verification for mint and receiver accounts during initialization",
+                    "description": "In `initialize`, receiver accounts are only checked with `!data_is_empty()`, which does not prove they are:\n- SPL Token accounts\n- associated token accounts (ATAs) for the intended owners\n- token accounts for the intended mint\n- owned by the SPL Token program\n\nLikewise, the provided `mint` is not verified to be the intended canonical GYC mint (no hardcoded expected mint pubkey, no admin gate), and the program does not verify at initialization time that the mint’s on-chain `mint_authority` actually equals the `mint_authority` PDA (even though later CPI will fail if it doesn’t, this still allows malicious/invalid configuration and can brick `drip`).\n",
+                    "category": "CWE-345",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Total supply cap can be exceeded due to incorrect pre-mint check",
+                    "description": "`drip` enforces the cap with:\n  require!(mint.supply < MAX_TOTAL_SUPPLY, ...)\nbut it does not check whether the *new* supply after minting stays within the cap:\n  mint.supply + sum(minted_amounts) <= MAX_TOTAL_SUPPLY\n\nIf the current supply is slightly below the cap, a call to `drip` after a long interval (large `gen_block_num`) can mint an amount that pushes total supply past `MAX_TOTAL_SUPPLY`. This breaks the core tokenomics invariant and is exploitable by anyone since `drip` is permissionless.\n",
+                    "category": "CWE-358",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Floating-point percentage math collapses values and can mint incorrect amounts",
+                    "description": "The contract computes allocations using `f64`:\n  ((distribution_amounts as f64) * PERCENTAGE) as u64\n\nThis introduces lossy rounding and precision errors (especially as `distribution_amounts` grows), collapsing values into potentially unsafe outcomes:\n- allocations may not sum to `distribution_amounts` (silent under/over-mint vs intended schedule)\n- floating point rounding could cause unexpected inflation/deflation relative to the intended percentages\n- combined with the missing `supply + to_mint <= cap` check, any over-minting due to rounding increases cap-violation risk\n\nToken accounting should use fixed-point integer math (basis points / numerator-denominator) to avoid precision collapse.\n",
+                    "category": "CWE-182",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Single bump reused for two different PDAs makes initialization brittle and encourages unsafe workarounds",
+                    "description": "The program uses the same `bump` argument for:\n- `config_account` PDA: seeds [\"GameYoo-Token\"]\n- `mint_authority` PDA: seeds [\"GYC-Mint-Auth\"]\n\nIn general, different seed sets yield different bumps. Requiring one bump to satisfy both PDAs can cause `initialize` to be uncallable unless a coincidental bump works for both, creating a high-friction, failure-prone setup. This kind of operational difficulty often leads teams/users to bypass intended safeguards (e.g., redeploys, ad-hoc changes, or relaxing constraints), weakening the overall security posture.\n",
+                    "category": "CWE-655",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The program’s security largely depends on “who” is allowed to establish trusted configuration (mint + recipients) and whether the provided accounts are actually the intended ones. In `initialize`, the contract accepts externally supplied accounts (mint, mint_authority, and multiple “receiver” token accounts) and persists them as trusted configuration without validating their origin/authority or correlating them against a second trusted source. This creates a first-initializer-wins situation where an attacker can set the entire distribution to attacker-controlled accounts (or even to an attacker-created mint) and then anyone can call `drip` to mint according to that malicious configuration.\n\nAdditionally, the program relies solely on `Clock::unix_timestamp` to advance emission, without correlating it to a more robust/independent chain source (e.g., slot), which makes issuance dependent on a less trustworthy data source. This is a classic “single source of truth” weakness in supply logic (even if not always practically exploitable, it is a real root-cause risk).\n",
+            "findings": [
+                {
+                    "title": "Untrusted initialization: no origin/authority validation for configuring mint and recipients",
+                    "description": "The `initialize` instruction can be invoked by any signer (`payer`) and there is no check that the caller is an authorized admin/deployer, nor is there any admin key stored in `ConfigAccount` to enforce future governance.\n\nBecause `config_account` is created at a fixed PDA seed (`[b\"GameYoo-Token\"]`), the first transaction to call `initialize` permanently defines the “trusted” configuration (mint, mint_authority, and all receiver accounts). A malicious party can front-run deployment/initialization and set:\n- `receiver_*` to attacker-controlled token accounts\n- `mint` to an attacker-chosen mint\n- `mint_authority` to the PDA expected by the program (or just pass the PDA account info)\n\nAfter that, `drip` will mint according to attacker-controlled configuration, and it is explicitly callable by anyone.\n",
+                    "category": "CWE-346",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Acceptance of untrusted receiver accounts as trusted distribution endpoints",
+                    "description": "In `initialize`, the program only checks `!receiver_*.data_is_empty()` for each receiver, then stores these pubkeys into `ConfigAccount` and later treats them as trusted recipients in `drip`.\n\nThere is no validation that each `receiver_*` is:\n- an SPL Token Account (owned by the token program),\n- for the configured `mint`,\n- the correct associated token account (ATA) for an expected recipient owner,\n- or even that the account type is a token account at all (they are `AccountInfo`, not `Account<TokenAccount>`).\n\nThis allows an attacker (especially combined with the unprotected `initialize`) to inject arbitrary accounts as “trusted” recipients and redirect emissions. Even without malicious redirection, malformed accounts can cause repeated `drip` failures (availability impact) because the CPI `token::mint_to` will reject invalid `to` accounts.\n",
+                    "category": "CWE-349",
+                    "severity": "high",
+                    "confidence": 0.93
+                },
+                {
+                    "title": "Insufficient type distinction for token accounts (unchecked AccountInfo used where TokenAccount is expected)",
+                    "description": "The receiver accounts are declared as `AccountInfo<'info>` in both `Initialize` and `Drip` rather than `Account<'info, TokenAccount>`. This prevents Anchor from enforcing basic invariants at account validation time (e.g., owner == token program, correct data layout).\n\nThe program effectively relies on downstream CPI failure (or not) instead of explicitly distinguishing and validating types. This increases the risk of:\n- treating non-token accounts as token accounts until CPI,\n- storing invalid accounts in config during `initialize`,\n- denial-of-service scenarios for `drip` (persistent invalid config).\n",
+                    "category": "CWE-351",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Token emission relies on a single, less robust source (unix_timestamp) without correlation to an independent chain source",
+                    "description": "`drip` uses only `Clock::unix_timestamp` and the stored `last_gen_block_timestamp` to compute mint amounts. There is no correlation against an independent, harder-to-skew source such as slot height, and no cross-check between multiple sources.\n\nThis is a “single source” reliance that can amplify any timestamp anomalies (e.g., validator time drift or large timestamp jumps) into unexpectedly large `gen_block_num` and thus large minting events. While Solana sysvar clock is generally trusted, it is still a weaker basis for supply issuance than slot-based accounting, and the program does not attempt to correlate or bound it beyond `current_time > last_gen_block_timestamp`.\n",
+                    "category": "CWE-1293",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Use of less trusted time source (timestamp) for issuance instead of more verifiable on-chain progression (slot)",
+                    "description": "The emission schedule is driven by `unix_timestamp` (a time estimate) rather than slot progression (a more directly consensus-driven measure). This is a form of choosing a less trustworthy/less verifiable source for critical accounting (token issuance), increasing the risk that time irregularities impact supply.\n",
+                    "category": "CWE-348",
+                    "severity": "low",
+                    "confidence": 0.75
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided Solana Anchor program is an on-chain smart contract that is invoked via Solana transactions and performs CPI calls to the SPL Token program. It does not establish, accept, or manage any off-chain communication channels such as WebSockets, nor does it implement any custom network protocol, origin headers, session establishment, or channel negotiation logic. Therefore, the root causes described by CWE-1385 (Missing Origin Validation in WebSockets) and CWE-940 (Improper Verification of Source of a Communication Channel) are not applicable to this codebase as written, and no instances of these CWEs can be identified in the contract logic.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-655",
+            "CWE-345",
+            "CWE-656",
+            "CWE-182",
+            "CWE-330",
+            "CWE-327",
+            "CWE-757",
+            "CWE-358",
+            "CWE-184",
+            "CWE-311",
+            "CWE-326",
+            "CWE-357",
+            "CWE-424",
+            "CWE-778",
+            "CWE-807",
+            "CWE-654"
+        ],
+        [
+            "CWE-1293",
+            "CWE-646",
+            "CWE-924",
+            "CWE-349",
+            "CWE-649",
+            "CWE-360",
+            "CWE-494",
+            "CWE-352",
+            "CWE-353",
+            "CWE-347",
+            "CWE-354",
+            "CWE-346",
+            "CWE-351",
+            "CWE-348",
+            "CWE-616"
+        ],
+        [
+            "CWE-1385",
+            "CWE-940"
+        ]
+    ]
+}

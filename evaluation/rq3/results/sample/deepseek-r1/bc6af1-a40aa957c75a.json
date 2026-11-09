@@ -1,0 +1,91 @@
+{
+    "project": "Pyth%20Governance%20Audit%20Report.pdf.json",
+    "files": [
+        "dataset/contracts/Pyth%20Governance%20Audit%20Report.pdf.json/staking/programs/staking/src/state/voter_weight_record.rs",
+        "dataset/contracts/Pyth%20Governance%20Audit%20Report.pdf.json/staking/programs/staking/src/lib.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.25,
+        "recall": 1.0,
+        "f1": 0.4
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-284",
+        "CWE-682",
+        "CWE-707",
+        "CWE-193"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Max Voter Weight Manipulation",
+            "description": "The vulnerability arises because the maximum voter weight in the Pyth governance system is calculated using the total supply of the governing token mint, which is manipulatable. The root cause is that the total supply can be artificially inflated during voting and then reduced (via token burning) before proposal finalization, thereby altering the voting threshold. An attacker can exploit this by locking a significant portion of tokens (e.g., 33%), initiating an unlock, voting during the pre-unlock phase when their weight is high, and then burning tokens after voting but before finalization. This reduces the total supply, causing their vote to represent a higher percentage of the new, lower supply, potentially pushing a proposal over the required threshold. The impact is severe: an attacker could pass malicious proposals, including those that grant them control or allow minting additional tokens, leading to potential loss of funds and governance takeover.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The analysis reveals three security issues. First, the `withdraw_stake` function lacks an access control check to ensure that the caller is the owner of the stake account, allowing unauthorized withdrawals. Second, the same function incorrectly uses the old token balance (before transfer) in a post-transfer risk validation, which might lead to inconsistent state checks. Third, the `update_voter_weight` function deserializes an account without validating its type or ownership, potentially leading to incorrect voter weight calculation.\n",
+            "findings": [
+                {
+                    "title": "Missing Owner Check in Withdraw Stake",
+                    "description": "The `withdraw_stake` function does not verify that the signer (payer) is the owner of the stake account.\nInstead, it only checks that the destination account is owned by the signer. This allows any user to withdraw\ntokens from any stake account to their own account, leading to loss of funds.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Incorrect Balance in Post-Transfer Validation",
+                    "description": "After transferring tokens in the `withdraw_stake` function, a risk validation check is performed using the old token balance (from before the transfer).\nThis is incorrect because the token balance has been reduced by the transfer. Although a prior validation ensured that the risk condition would hold after the transfer,\nthe redundant check with the old balance might mask issues or cause unexpected behavior. Additionally, if the risk condition were to change during the transaction (which it doesn't in this function),\nthe check would be invalid.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unsafe Deserialization in Voter Weight Update",
+                    "description": "In the `update_voter_weight` function, when the action is `CastVote`, the first remaining account is deserialized as a `ProposalV2` without checking the account discriminator or ownership.\nThis allows an attacker to pass any account, which might be maliciously crafted, leading to incorrect deserialization and potentially incorrect voter weight calculation or program panic.\n",
+                    "category": "CWE-707",
+                    "severity": "high",
+                    "confidence": 0.95
+                }
+            ]
+        },
+        {
+            "reasoning": "We analyzed the provided Rust code for the Solana smart contract. We found one vulnerability in the `close_position` function: it does not check that the provided index is within the bounds of the positions array. This can cause a panic if the index is too large, leading to a denial of service for that transaction. This is an off-by-one error (CWE-193). Other parts of the code use checked arithmetic to avoid overflows and underflows. We did not find other instances of the specified CWEs in the provided code.\n",
+            "findings": [
+                {
+                    "title": "Missing Bounds Check in close_position",
+                    "description": "The function `close_position` does not validate that the provided index is less than MAX_POSITIONS. This can cause an out-of-bounds array access and panic when the index is >= MAX_POSITIONS.",
+                    "category": "CWE-193",
+                    "severity": "medium",
+                    "confidence": 1.0
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-1335",
+            "CWE-1339",
+            "CWE-190",
+            "CWE-191",
+            "CWE-128",
+            "CWE-135",
+            "CWE-369",
+            "CWE-193"
+        ]
+    ]
+}

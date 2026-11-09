@@ -1,0 +1,80 @@
+{
+    "path": "reports/sherlock-presale-audit-nov-2025-50862dad540c07ca5f41ffca25e0d5bd7cab8246.pdf",
+    "project_info": {
+        "url": "https://github.com/MeteoraAg/presale",
+        "commit_id": "50862dad540c07ca5f41ffca25e0d5bd7cab8246",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-11-10",
+        "project_path": "contracts/sherlock-presale-audit-nov-2025-50862dad540c07ca5f41ffca25e0d5bd7cab8246.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Lack of Mechanism to Disable Older Versions of MerkleRootConfig",
+            "description": "The `create_merkle_root_config()` function allows the creation of multiple versions of a Merkle root configuration for the same presale, but there is no mechanism to disable or invalidate older configurations. The root cause is the absence of a function to close or deactivate outdated `MerkleRootConfig` accounts. An attacker can exploit this by using an older configuration (e.g., with higher deposit caps) via `create_permissioned_escrow_with_merkle_proof`, even after a newer, more restrictive configuration has been deployed. This can lead to users benefiting from outdated, potentially more favorable terms, undermining the integrity of the presale rules. Additionally, older configurations cannot be closed, leading to rent accumulation and wasted resources.\n",
+            "severity": "medium",
+            "location": [
+                "process_create_merkle_root_config.rs#22"
+            ],
+            "files": [
+                "programs/presale/src/instructions/process_create_merkle_root_config.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "registry can consume other registry supply",
+            "description": "The `get_remaining_deposit_quota` function in the fixed-price presale handler calculates deposit limits based on global and personal quotas but fails to enforce that a registry's total claimed tokens do not exceed its allocated `presale_supply`. The root cause is the missing validation check against `registry.presale_supply` when processing deposits. This allows one registry to consume tokens beyond its supply limit by exhausting the global pool, effectively depriving other registries of their rightful allocation. For example, one registry could end up with 200 tokens claimed against a 100-token supply, while another receives nothing. The impact is unfair distribution of presale tokens and potential denial of access for legitimate participants in other registries.\n",
+            "severity": "medium",
+            "location": [
+                "fixed_price_presale.rs#183"
+            ],
+            "files": [
+                "programs/presale/src/presale_mode_handler/fixed_price_presale.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "fixed price presale may unable to complete",
+            "description": "In fixed-price presales, the `suggest_deposit_amount` function truncates deposits to ensure they align with token price, which can prevent the total deposit from ever reaching the `presale_maximum_cap`. The root cause is the truncation logic that removes excess amounts during deposit, leading to a final total that falls short of the cap by a small margin (e.g., 99 out of 100). When `presale_minimum_cap` equals `presale_maximum_cap`, this prevents the presale from transitioning to the `Completed` state via `end_presale_if_max_cap_reached`, forcing the presale to run until the `presale_end_time` even if the cap is effectively reached. The impact is that the presale cannot end early, leading to user frustration and reduced efficiency, especially in cases with long end times.\n",
+            "severity": "medium",
+            "location": [
+                "fixed_price_presale.rs#283"
+            ],
+            "files": [
+                "programs/presale/src/presale_mode_handler/fixed_price_presale.rs"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,145 @@
+{
+    "path": "reports-without-source/Mayan - OtterSec Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/mayan-finance/solana-programs",
+            "https://github.com/mayan-finance/swap-bridge"
+        ],
+        "commit_id": [
+            "e323616",
+            "a46288f"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-12-02",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Stealing Tokens While Swapping",
+            "description": "1. **Description:** The vulnerability exists in the `mayan_flash_swap_finish` instruction, where a malicious relayer can steal tokens during a flash swap by manipulating token account parameters. The instruction transfers tokens from `from_acc` to `to_acc`, but due to improper validation, a malicious user can set both to the same account (e.g., the main PDA's ATA), effectively receiving free tokens without fulfilling the swap obligation.\n\n2. **Cause:** The root cause is the use of `mayan_invoke` with `sol_invoke_signed` for all Cross-Program Invocations (CPIs) because `ctx->invoke_with_seed` is globally set to true. This allows a malicious actor to pass in the main PDA's token account as both source and destination, bypassing proper ownership checks.\n\n3. **Exploitation:** An attacker can initiate a swap and, during the `mayan_flash_swap_finish` call, use the main PDA's ATA as both `from_acc` and `to_acc`. This results in a no-cost transfer within the same account, completing the swap without actually transferring the required tokens to the intended recipient.\n\n4. **Impact:** This leads to direct loss of user funds, as the intended recipient does not receive the swapped tokens, while the attacker gains tokens without providing the corresponding value.\n",
+            "severity": "critical",
+            "location": [
+                "mayan_flash_swap_finish",
+                "flash-swap/src/mayanswap.c"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "DOS While Performing Swap - 1",
+            "description": "1. **Description:** The `mayan_flash_swap_start` instruction fails to validate that the `from_acc` used in the swap is the actual account that received the bridged tokens for the current swap. This allows a malicious user to use a different token account under the same PDA to claim funds.\n\n2. **Cause:** The `validate_flash_swap_start` function does not enforce that the `from_acc` must be the Associated Token Account (ATA) or the correct recipient account for the current swap. This lack of validation enables account confusion.\n\n3. **Exploitation:** An attacker can bridge funds to a non-ATA token account under the main PDA and then use the legitimate ATA of another user to complete the swap, thereby consuming the tokens meant for that user.\n\n4. **Impact:** This results in a denial of service for genuine users, as their swaps fail when the required tokens have already been used by the attacker, leading to locked funds until the deadline expires.\n",
+            "severity": "medium",
+            "location": [
+                "mayan_flash_swap_start",
+                "validate_flash_swap_start"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "DOS While Performing Swap - 2",
+            "description": "1. **Description:** The `claim` instruction uses user-provided `mint_to_nonce` to derive a PDA, which is then stored as the destination token address. A malicious user can provide a non-canonical nonce, resulting in an invalid mint address.\n\n2. **Cause:** The `validate_mint_accounts` function does not enforce canonical PDA derivation for `mint_to` and `mint_from`, allowing arbitrary PDAs to be used. This breaks the swap logic when the derived address does not correspond to a real token mint.\n\n3. **Exploitation:** An attacker can call the `claim` instruction with a fake `mint_to_nonce`, causing the system to store an invalid destination address. Subsequent swap attempts will fail because no real token account exists at that address.\n\n4. **Impact:** The swap state becomes unusable, denying service to legitimate users. Although funds can be recovered after a deadline, repeated attacks can render the protocol unreliable.\n",
+            "severity": "medium",
+            "location": [
+                "claim",
+                "validate_mint_accounts"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "DOS While Performing Swap - 3",
+            "description": "1. **Description:** The `init_from_solana` instruction allows a malicious user to pre-initialize a state PDA using the `msg1` and `msg2` accounts of a genuine pending swap, preventing the legitimate user from initializing the state later.\n\n2. **Cause:** The instruction does not require `msg1` and `msg2` to be signers, allowing an attacker to front-run the legitimate `claim` instruction by initializing the state first.\n\n3. **Exploitation:** After a user initiates a swap on Ethereum, an attacker monitors the chain and calls `init_from_solana` with the same `msg1` and `msg2` addresses before the user can claim, thereby locking the state.\n\n4. **Impact:** This causes a denial of service, as the genuine user's swap cannot proceed due to the already-initialized state, disrupting the user flow and potentially delaying fund recovery.\n",
+            "severity": "medium",
+            "location": [
+                "init_from_solana"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Unnecessary Extra Fee Consumption",
+            "description": "1. **Description:** The `mayan_trx` instruction manually transfers a fee from the payer to the token bridge fee account, even though the Wormhole token bridge already collects its own fee directly from the payer.\n\n2. **Cause:** Redundant fee logic in the contract: the `system_transfer` function on line 185 unnecessarily duplicates a fee transfer that the underlying token bridge protocol already handles.\n\n3. **Exploitation:** Every transaction incurs an extra, unjustified fee that is sent to the bridge fee account, increasing the cost for users without providing additional value.\n\n4. **Impact:** Users are overcharged for transactions, leading to unnecessary loss of funds and reduced economic efficiency. While not catastrophic, it degrades user experience and trust.\n",
+            "severity": "low",
+            "location": [
+                "mayan_trx",
+                "flash-swap/src/mayanswap.c#185-190"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Dust Amount Stuck In Contract",
+            "description": "1. **Description:** When users swap tokens with more than 8 decimals or with dust amounts, the token bridge normalizes the amount, leaving a remainder (dust) in the contract. This dust cannot be retrieved.\n\n2. **Cause:** The contract transfers the full `amountIn` to the bridge, but the bridge only processes the normalized amount. The leftover dust remains in the contract balance with no mechanism to recover it.\n\n3. **Exploitation:** Any user swapping tokens with non-zero trailing decimals will inadvertently leave dust in the contract. An attacker could amplify this by performing many small swaps to accumulate unclaimed funds.\n\n4. **Impact:** Funds are permanently locked in the contract, leading to loss for users. While individual amounts are small, the cumulative effect can be significant over time.\n",
+            "severity": "low",
+            "location": [
+                "swap",
+                "wrapAndSwapETH"
+            ],
+            "files": []
+        }
+    ]
+}

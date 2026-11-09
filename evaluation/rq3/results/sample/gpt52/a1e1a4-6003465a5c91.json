@@ -1,0 +1,133 @@
+{
+    "project": "tensor_foundation_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/tensor_foundation_audit_final.pdf.json/marketplace/program/src/instructions/mpl_core/delist.rs",
+        "dataset/contracts/tensor_foundation_audit_final.pdf.json/marketplace/program/src/instructions/mpl_core/close_expired_listing.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.14285714285714285,
+        "recall": 0.5,
+        "f1": 0.22222222222222224
+    },
+    "cwe_ground_truth": [
+        "CWE-669",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-664",
+        "CWE-697",
+        "CWE-435",
+        "CWE-666",
+        "CWE-668",
+        "CWE-703"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Utilization of Improper Payer Account",
+            "description": "In `process_close_expired_listing_core`, the `list_state` account is used as the payer for a CPI transfer, but it is a program-owned account with minimal lamports, likely insufficient for transaction fees. This can cause transaction failure and prevent cleanup of expired listings. Similarly, in `process_delist_core`, the `rent_destination` account is incorrectly required to be a signer and payer, even though its role is only to receive rent refunds. This introduces unnecessary constraints and increases the risk of transaction failure. The root cause is incorrect assignment of payer responsibilities in CPI calls.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code primarily relies on PDA authority (`list_state`) to transfer the asset back to the owner, and uses `validate_asset()` plus Anchor constraints (`seeds`, `has_one`) for correctness. However, there are several security-relevant weaknesses within the allowed CWE set:\n\n1) The CPI to Metaplex Core `TransferV1` is parameterized by user-supplied `collection: Option<UncheckedAccount>`, but the program does not bind that `collection` to the listing state (e.g., storing/validating the expected collection in `list_state`). If Metaplex Core’s transfer rules/authorization paths depend on the presence/identity of the `collection` account, then providing `None` or a different collection can change downstream behavior. This is an integration/“confused deputy” style issue between two otherwise-correct components (your listing state machine and Metaplex Core transfer validation), and also an input validation/neutralization issue because the `collection` account is unchecked and not proven to be the one intended for this listing.\n\n2) In `process_close_expired_listing_core`, the program uses the `list_state` PDA as the CPI `payer`. That means lamports held in the listing state can be consumed by the transfer CPI. Because the same account is also being closed at the end of the instruction, this creates lifetime/resource-control fragility: if the CPI requires more lamports than `list_state` holds (or if Metaplex Core changes fee/rent behavior), closing expired listings can become permanently failing, potentially leaving assets stuck under `list_state` authority. This is both a resource-lifetime control issue and an exceptional-condition handling issue (no mitigation/alternate payer path).\n\n3) The expiry check uses a strict `<` comparison against the current timestamp. This can create an off-by-one style edge case at exactly `expiry == now` where an expired listing cannot be closed until the next second. While not typically critical, it is an incorrect comparison risk in a security-relevant state transition (when third parties can trigger closing).\n",
+            "findings": [
+                {
+                    "title": "Unbound, unchecked `collection` account can alter Metaplex Core transfer semantics (confused deputy)",
+                    "description": "Both `process_delist_core` and `process_close_expired_listing_core` accept a user-supplied\n`collection: Option<UncheckedAccount>` and forward it into `TransferV1CpiBuilder::collection(...)`.\nThe program does not verify that this `collection` is the collection originally associated with\nthe listed asset (nor does it tie `collection` to `list_state`), and `collection` is not an Anchor-checked\naccount type.\n\nIf Metaplex Core uses the provided collection account to select authorization rules, plugins, or\nvalidation pathways, an attacker can pass `None` or an unexpected collection to:\n- bypass stricter collection-based checks (if omission weakens validation), or\n- force the CPI to fail (DoS), preventing delist/close and potentially trapping the asset.\n\nThis is an integration issue between your program and Metaplex Core (two correct components whose\ninteraction becomes unsafe when inputs are not bound to the listing state), and also an input\nwell-formedness issue due to unchecked, unbound structured data passed downstream.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Insufficient neutralization/validation of unchecked accounts forwarded to CPI (`collection`)",
+                    "description": "`asset` and `collection` are `UncheckedAccount`s. While `validate_asset()` is called, the code shown\ndoes not enforce that the optional `collection` account is present/absent consistently with the asset’s\nreal collection state and/or the marketplace’s intended listing constraints, nor that the passed collection\nmatches a value committed in `list_state`.\n\nIf `validate_asset()` treats `None` as “skip collection validation” (common pattern), the instruction becomes\nsensitive to caller-controlled omission of a security-relevant account, which may weaken downstream checks\nin Metaplex Core’s transfer.\n",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.55
+                },
+                {
+                    "title": "`close_expired_listing` uses `list_state` as CPI payer, risking stuck assets due to lamport depletion",
+                    "description": "In `process_close_expired_listing_core`, the CPI builder sets:\n`payer(&ctx.accounts.list_state.to_account_info())`.\nSince the PDA is invoked with `invoke_signed`, it can act as a signer and therefore can spend its lamports.\n\nThis creates a fragile resource-lifetime dependency:\n- If the Metaplex Core transfer requires additional lamports (now or after an upstream program change),\n  the CPI may drain `list_state` below required levels or fail outright due to insufficient funds.\n- A failure prevents the transfer and therefore prevents closing the expired listing, potentially leaving\n  the asset locked under the `list_state` authority indefinitely.\n\nThere is no fallback payer (e.g., a required signer/payer) or recovery path to ensure the listing can always\nbe closed and the asset returned once expired.\n",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Exceptional condition not robustly handled: CPI funding/fee changes can brick expired closing",
+                    "description": "The code assumes the `list_state` PDA can always pay whatever the Metaplex Core transfer requires. If that\nassumption breaks (insufficient lamports, changed rent/fee requirements, or additional required accounts),\nthe instruction fails and leaves the system in an unrecoverable state for that listing (asset remains under\nPDA authority and state cannot be closed).\n\nThis is an exceptional-condition handling weakness because the program does not anticipate or mitigate rare\nbut plausible upstream changes/funding shortfalls.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Edge-case expiry comparison (`<` vs `<=`) may delay expiry transition by 1 second",
+                    "description": "`require!(list_state.expiry < Clock::get()?.unix_timestamp, ...)` treats a listing with `expiry == now` as\nnot expired. If the intended semantic is “expired at or after expiry timestamp”, this introduces an off-by-one\nedge case that can affect time-critical transitions (especially since anyone can trigger the close).\n",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.6
+                }
+            ]
+        },
+        {
+            "reasoning": "Review focused on the provided instruction handlers and their Anchor account constraints, looking specifically for issues rooted in the supplied CWE set. The main concern is the use of a PDA account (`list_state`) that is marked `close = rent_destination` as the CPI `payer` in `process_close_expired_listing_core`. This performs a lamport-consuming operation using a resource that is in (or about to be in) the shutdown/close phase of its lifetime, and (because the instruction is callable by anyone once expired) can lead to avoidable depletion of the lamports that are supposed to be refunded to the stored rent payer. A secondary concern is that `rent_destination` is not required to be a signer or even a system-owned account in the expired-close path, which can result in rent refunds being routed into an account “sphere” that may not be controllable, depending on how `get_rent_payer()` is initialized/validated elsewhere.\n",
+            "findings": [
+                {
+                    "title": "Expired close uses closing PDA (`list_state`) as CPI payer, enabling rent-refund depletion",
+                    "description": "In `process_close_expired_listing_core`, the CPI call sets:\n  - `payer(&ctx.accounts.list_state.to_account_info())`\nwhile `list_state` is also declared with `close = rent_destination`.\n\nThis means the account intended to be closed (and whose lamports are intended to be refunded to `rent_destination`) is also used as a funding source for the CPI. If the downstream `TransferV1` CPI charges lamports for any reason (e.g., rent for account creation/resize patterns in the invoked program, or any other lamport debits performed under the CPI using the payer), the remaining lamports in `list_state` can be reduced before Anchor closes it.\n\nSince `CloseExpiredListingCore.owner` is not a signer and the instruction is effectively permissionless after expiry, an arbitrary third party can trigger this path as soon as the listing expires, causing the listing’s stored rent payer to receive less lamport refund than expected (griefing/forced cost). This is particularly concerning because the code comment itself questions the payer usage (\"pay for what?\"), suggesting the payer choice may not be well-understood/necessary.\n\nRecommendation: avoid using the soon-to-be-closed account as CPI payer; use `rent_destination` (if it is meant to pay) or a dedicated payer passed in and required to sign, or ensure the CPI cannot debit lamports from `list_state`.\n",
+                    "category": "CWE-666",
+                    "severity": "medium",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Rent refund can be routed into an unintended control sphere in expired-close path",
+                    "description": "In `CloseExpiredListingCore`, `rent_destination` is an `UncheckedAccount<'info>` (not a signer), only constrained by:\n  `rent_destination.key() == list_state.get_rent_payer()`.\n\nIf `list_state.get_rent_payer()` can be set (at initialization time) to an address that is not actually controllable by the intended user (e.g., a PDA without a valid withdrawal mechanism, an executable/program-owned account, or otherwise “wrong sphere”), then the automatic close/refund will transfer lamports into an account that may effectively lock or misplace the rent refund.\n\nWhile the correctness of this depends on how `get_rent_payer()` is established and validated elsewhere, the expired-close path specifically does not require any signature or ownership checks on `rent_destination`, increasing the risk that funds are transferred to an account outside the expected control boundary if initialization/validation is imperfect.\n\nRecommendation: constrain `rent_destination` more tightly (e.g., require `SystemAccount` where appropriate, or require it to be a signer when refunds must be guaranteed to a user-controlled key), and ensure rent payer is validated at list creation.\n",
+                    "category": "CWE-668",
+                    "severity": "low",
+                    "confidence": 0.55
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-669",
+            "CWE-913",
+            "CWE-1229",
+            "CWE-400",
+            "CWE-665",
+            "CWE-410",
+            "CWE-668",
+            "CWE-580",
+            "CWE-221",
+            "CWE-1329",
+            "CWE-662",
+            "CWE-666",
+            "CWE-118",
+            "CWE-404",
+            "CWE-704",
+            "CWE-610",
+            "CWE-496",
+            "CWE-501",
+            "CWE-706",
+            "CWE-673",
+            "CWE-911",
+            "CWE-487",
+            "CWE-922",
+            "CWE-372",
+            "CWE-495"
+        ]
+    ]
+}

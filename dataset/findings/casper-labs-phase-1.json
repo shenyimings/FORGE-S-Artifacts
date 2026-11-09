@@ -1,0 +1,203 @@
+{
+    "path": "reports/casper-labs-phase-1.pdf",
+    "project_info": {
+        "url": "https://github.com/casper-network/casper-node/tree/cb1d20ad1ea6e245cd8237f9406885a1e785c669",
+        "commit_id": "cb1d20a",
+        "address": [
+            "casper-node"
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-07-15",
+        "project_path": "contracts/casper-labs-phase-1.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Authentication Relies on Deploy Launcher",
+            "description": "1. **Description:** The vulnerability lies in the authentication mechanism of several functions in the Auction contract, which rely on the deploy origin rather than the immediate caller. Functions such as add_bid, withdraw_bid, delegate, undelegate, and activate_bid authenticate based on the account that initiated the deploy, not the contract making the call.\n\n2. **Cause:** This occurs because the system uses the deploy launcher's identity for authorization checks instead of verifying the direct caller of the function, enabling impersonation by intermediary contracts.\n\n3. **Exploitation:** An attacker could trick a user into interacting with a malicious contract, which then calls these system functions on behalf of the user, effectively performing unauthorized actions using the user\u2019s privileges.\n\n4. **Impact:** This could lead to unauthorized delegation, bidding, or withdrawal of funds, compromising the integrity of staking operations and potentially leading to fund loss or manipulation of validator sets.\n",
+            "severity": "high",
+            "files": [
+                "types/src/system/auction/mod.rs"
+            ],
+            "location": [
+                "Auction::add_bid",
+                "Auction::withdraw_bid",
+                "Auction::delegate",
+                "Auction::undelegate",
+                "Auction::activate_bid",
+                "types/src/system/auction/mod.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Delegated Tokens Are Not Slashed",
+            "description": "1. **Description:** The slash function in the auction module fails to slash delegated stake, contrary to the documented behavior stating that delegated tokens should be treated the same as validator stake.\n\n2. **Cause:** The implementation only reduces the validator's own stake during slashing events, ignoring the delegated amounts from other users.\n\n3. **Exploitation:** A malicious validator could delegate most of their stake to themselves via another account, minimizing their actual loss during slashing events while still benefiting from full validation rewards.\n\n4. **Impact:** This undermines the economic security model by allowing validators to avoid penalties, encouraging malicious behavior and reducing trust in the slashing mechanism.\n",
+            "severity": "high",
+            "files": [
+                "types/src/system/auction/mod.rs"
+            ],
+            "location": [
+                "Auction::slash",
+                "types/src/system/auction/mod.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Unhandled Integer Overflow",
+            "description": "1. **Description:** Multiple locations in the system contracts are susceptible to integer overflow due to unchecked arithmetic operations, particularly involving U512 values used in minting, vesting, and seigniorage calculations.\n\n2. **Cause:** The code uses standard arithmetic operators without overflow checks, and the compiler's overflow protection is not enabled in release mode.\n\n3. **Exploitation:** An attacker could craft inputs that cause arithmetic overflows, leading to unexpectedly large values or wraparounds, potentially resulting in excessive token minting or incorrect reward distribution.\n\n4. **Impact:** Successful exploitation could result in inflationary attacks, fund theft, or disruption of consensus mechanisms due to corrupted state.\n",
+            "severity": "high",
+            "files": [
+                "types/src/system/mint/mod.rs",
+                "types/src/system/auction/bid/vesting.rs",
+                "types/src/system/auction/seigniorage_recipient.rs",
+                "types/src/system/auction/mod.rs",
+                "types/src/system/handle_payment/mod.rs"
+            ],
+            "location": [
+                "types/src/system/mint/mod.rs#76",
+                "types/src/system/mint/mod.rs#140",
+                "types/src/system/auction/bid/vesting.rs#75",
+                "types/src/system/auction/bid/vesting.rs#77",
+                "types/src/system/auction/seigniorage_recipient.rs#38",
+                "types/src/system/auction/seigniorage_recipient.rs#47",
+                "types/src/system/auction/mod.rs#424",
+                "types/src/system/auction/mod.rs#367",
+                "types/src/system/auction/mod.rs#422",
+                "types/src/system/auction/mod.rs#488",
+                "types/src/system/auction/mod.rs#499",
+                "types/src/system/auction/mod.rs#500",
+                "types/src/system/auction/mod.rs#511",
+                "types/src/system/auction/mod.rs#501",
+                "system/handle_payment/mod.rs#127"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "Performance Degradation and Denial of Service",
+            "description": "1. **Description:** Several functions in the auction system exhibit performance degradation as the number of delegators and bids increases, due to unbounded loops and growing data structures.\n\n2. **Cause:** The use of variable-length collections and lack of fixed-size storage design leads to increasing gas costs and processing time proportional to the number of participants.\n\n3. **Exploitation:** An attacker could perform a denial-of-service attack by creating a large number of bids or delegations, causing transaction failures or network slowdowns, especially under fixed gas limits.\n\n4. **Impact:** This could degrade network performance, prevent legitimate transactions, and potentially halt auction operations during peak load or targeted attacks.\n",
+            "severity": "high",
+            "files": [
+                "types/src/system/auction/mod.rs"
+            ],
+            "location": [
+                "auction::bid::process",
+                "Auction::get_era_validators",
+                "Auction::read_seigniorage_recipients",
+                "Auction::add_bid",
+                "Auction::withdraw_bid",
+                "Auction::delegate",
+                "Auction::run_auction",
+                "Auction::distribute",
+                "auction::detail::get_bids",
+                "auction::detail::set_bids",
+                "auction::detail::get_unbonding_purses",
+                "auction::detail::set_unbonding_purses",
+                "auction::detail::process_unbond_requests",
+                "auction::detail::create_unbonding_purse",
+                "auction::detail::reinvest_delegator_rewards",
+                "auction::detail::reinvest_validator_reward"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect Refund Formula",
+            "description": "1. **Description:** The refund calculation in the handle_payment module omits a division by 100, leading to incorrect refund amounts when a non-zero refund percentage is applied.\n\n2. **Cause:** The formula `(total - amount_spent) * REFUND_PERCENTAGE` lacks the necessary division by 100 to convert percentage into a fractional value.\n\n3. **Exploitation:** If the refund percentage is increased above 1, an attacker could deposit more than needed and receive nearly the full amount back, effectively executing transactions for free.\n\n4. **Impact:** This could allow attackers to consume network resources without proper payment, leading to financial loss for the protocol and potential abuse of system functions.\n",
+            "severity": "medium",
+            "files": [
+                "types/src/system/handle_payment/mod.rs"
+            ],
+            "location": [
+                "types/src/system/handle_payment/mod.rs#124"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Balance Probes Do Not Enforce Read Rights",
+            "description": "1. **Description:** The Mint::balance function allows reading account balances without verifying that the querying party has read access rights to the target URef.\n\n2. **Cause:** The function skips the required access control check, violating the intended security model where URefs require explicit read permissions.\n\n3. **Exploitation:** Any contract can probe another user's balance by knowing their purse URef, enabling privacy leaks and surveillance of user activity.\n\n4. **Impact:** While not directly leading to fund loss, this compromises user privacy and weakens the access control model, potentially enabling targeted attacks.\n",
+            "severity": "low",
+            "files": [
+                "types/src/system/mint/mod.rs"
+            ],
+            "location": [
+                "Mint::balance",
+                "types/src/system/mint/mod.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-1280"
+                ]
+            },
+            "title": "Does Not Check Read Access of",
+            "description": "1. **Description:** The Mint::transfer function does not verify whether the source URef has read rights before accessing its balance, which contradicts the expected access control policy.\n\n2. **Cause:** The function directly calls read_balance without first validating that the URef grants read permission, allowing unauthorized reads.\n\n3. **Exploitation:** An attacker could attempt to transfer from a purse they don\u2019t have read access to, potentially bypassing intended restrictions or probing for valid purse references.\n\n4. **Impact:** This undermines the security model by allowing unauthorized data access, though actual fund transfer may still fail due to other checks.\n",
+            "severity": "low",
+            "files": [
+                "types/src/system/mint/mod.rs"
+            ],
+            "location": [
+                "Mint::transfer",
+                "types/src/system/mint/mod.rs#104"
+            ]
+        }
+    ]
+}

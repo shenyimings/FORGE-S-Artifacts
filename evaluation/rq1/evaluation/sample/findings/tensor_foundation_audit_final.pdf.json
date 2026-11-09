@@ -1,0 +1,414 @@
+{
+    "path": "reports/tensor_foundation_audit_final.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/tensor-foundation/toolbox/tree/8daebf976481f935fe9d77a1e78c3b58e6cd04d3",
+            "https://github.com/tensor-foundation/fees/tree/c7cb5bf4deca8081a68f5aa04abd26619df16f3a",
+            "https://github.com/tensor-foundation/escrow/tree/ca3e7d9bc47db7e98d1ea20ea6d7fbd2d0617cdc",
+            "https://github.com/tensor-foundation/whitelist/tree/22686eb4aeda6a833315a9a94d024f5105479cc3",
+            "https://github.com/tensor-foundation/marketplace/tree/5191182520ba285115c60d61e06d2a55b5217817",
+            "https://github.com/tensor-foundation/amm/tree/961670d06515376494595d2849879faa6dd10f18"
+        ],
+        "commit_id": [
+            "8daebf976481f935fe9d77a1e78c3b58e6cd04d3",
+            "c7cb5bf4deca8081a68f5aa04abd26619df16f3a",
+            "ca3e7d9bc47db7e98d1ea20ea6d7fbd2d0617cdc",
+            "22686eb4aeda6a833315a9a94d024f5105479cc3",
+            "5191182520ba285115c60d61e06d2a55b5217817",
+            "961670d06515376494595d2849879faa6dd10f18"
+        ],
+        "address": [
+            "Tensor Marketplace"
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-09-27",
+        "project_path": "contracts/tensor_foundation_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Flawed Logic in case of Shared Escrow",
+            "description": "The vulnerability exists in the `try_autoclose_pool` function where the logic assumes that `pool.amount` reflects available funds when deciding whether to close a pool. However, when a shared escrow is configured, the actual funds are held in the shared escrow account, not in the pool itself, causing `pool.amount` to always be zero. This leads to incorrect evaluation of the condition `pool.amount < pool.current_price(TakerSide::Sell)?`, which always returns true, resulting in premature and erroneous closure of active pools. An attacker could exploit this by configuring a shared escrow and forcing legitimate pools to close even when sufficient funds exist. The impact includes disruption of ongoing trading operations and potential loss of liquidity.\n",
+            "severity": "high",
+            "files": [
+                "amm/program/src/state/pool.rs"
+            ],
+            "location": [
+                "pool.try_autoclose_pool#105-110"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Ineffective Shared Escrow Validation",
+            "description": "In the `CreatePool` instruction, a constraint checks `pool.config.pool_type != PoolType::NFT` to prevent shared escrow usage with NFT pools. However, this check is applied before the pool account is initialized, meaning `pool.config.pool_type` contains uninitialized data and the validation is ineffective. As a result, a malicious actor could create a pool with an invalid configuration by exploiting the uninitialized state. The root cause is improper timing of validation logic\u2014checking uninitialized memory. This could allow configuration of disallowed pool types with shared escrow, leading to undefined behavior or fund loss.\n",
+            "severity": "medium",
+            "files": [
+                "amm/program/src/instructions/create_pool.rs"
+            ],
+            "location": [
+                "CreatePool.constraint#12"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Missing Account Authenticity Checks",
+            "description": "The `MplxShared` structure lacks proper PDA (Program Derived Address) and initialization checks for the `metadata`, `edition`, and `master_edition` accounts. These accounts are critical for verifying NFT authenticity, but without seed and initialization validation, an attacker can pass fake or forged accounts. This allows manipulation of NFT properties and undermines the integrity of NFT validation logic. The impact includes potential minting or transfer of counterfeit NFTs, leading to financial loss and trust degradation in the marketplace.\n",
+            "severity": "medium",
+            "files": [
+                "amm/program/src/state/mplx_shared.rs"
+            ],
+            "location": [
+                "MplxShared.metadata#25",
+                "MplxShared.edition#30"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Improper Rent Calculation",
+            "description": "The `return_rent` function in `price-lock` uses `token_account.get_lamports()` instead of calculating the actual rent-exemption reserve based on account size. This flawed logic assumes all lamports in the account are for rent, so if an attacker deposits excess SOL into the account, the program will attempt to return those excess lamports to the vault. This disrupts trade execution because the program fails to handle large balances correctly, rendering options worthless. The impact includes denial of service for trades and improper SOL transfers, potentially destabilizing the order vault.\n",
+            "severity": "medium",
+            "files": [
+                "marketplace/program/src/instructions/sell_nft_token_pool.rs"
+            ],
+            "location": [
+                "TAmmSellNftTokenPool.return_rent#45-50"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Legacy NFT Validation Gaps",
+            "description": "The `TakeBidLegacy` instruction fails to validate the `master_edition` account's PDA and does not perform seed checks on the `metadata` account for non-pNFTs. Since the `master_edition` proves non-fungibility, its absence allows fungible tokens to be treated as NFTs. Similarly, missing metadata seed checks enable spoofed metadata accounts. Attackers can exploit this by crafting fake NFTs that pass validation, leading to incorrect trades and potential financial loss. The root cause is incomplete validation logic in legacy NFT handling paths.\n",
+            "severity": "medium",
+            "files": [
+                "marketplace/program/src/instructions/legacy/take_bid.rs"
+            ],
+            "location": [
+                "TakeBidLegacy.process#78"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Absence of Royalty Enforcement",
+            "description": "In `process_buy_legacy_spl`, the `optional_royalty_pct` parameter is used without verifying whether royalties are enforced based on `metadata.token_standard`. Some token standards require mandatory royalties, but the system allows user-supplied values to override them. This enables buyers to bypass required royalty payments by setting a lower or zero percentage. The root cause is lack of conditional enforcement logic based on token standard. The impact includes loss of revenue for creators and violation of on-chain royalty expectations.\n",
+            "severity": "medium",
+            "files": [
+                "marketplace/program/src/instructions/legacy/buy_spl.rs"
+            ],
+            "location": [
+                "buy_spl.process_buy_legacy_spl#33"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Utilization of Improper Payer Account",
+            "description": "In `process_close_expired_listing_core`, the `list_state` account is used as the payer for a CPI transfer, but it is a program-owned account with minimal lamports, likely insufficient for transaction fees. This can cause transaction failure and prevent cleanup of expired listings. Similarly, in `process_delist_core`, the `rent_destination` account is incorrectly required to be a signer and payer, even though its role is only to receive rent refunds. This introduces unnecessary constraints and increases the risk of transaction failure. The root cause is incorrect assignment of payer responsibilities in CPI calls.\n",
+            "severity": "medium",
+            "files": [
+                "marketplace/program/src/instructions/mpl_core/close_expired_listing.rs",
+                "marketplace/program/src/instructions/mpl_core/delist.rs"
+            ],
+            "location": [
+                "close_expired_listing.process_close_expired_listing_core#67",
+                "delist.process_delist_core#89"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Denial of Service Due to ATA Ownership Change",
+            "description": "The `WithdrawCollateralShared.validate` function does not prevent the maker from changing ownership of their Associated Token Account (ATA). If the maker changes the ATA owner after locking SOL as collateral, the taker cannot withdraw the collateral even after fulfilling all conditions. This allows the maker to perform a denial-of-service attack by blocking taker withdrawals. The root cause is missing check for ATA authority consistency during withdrawal. The impact is permanent lockup of taker funds and loss of trust in the locking mechanism.\n",
+            "severity": "medium",
+            "files": [
+                "escrow/program/src/instructions/withdraw_collateral_shared.rs"
+            ],
+            "location": [
+                "WithdrawCollateralShared.validate#112"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Spurious Abort on Excess Balance Amount",
+            "description": "The `verify_empty_balance` function in `BidState` strictly checks that the account's lamports exactly equal the rent-exempt balance. If any external entity transfers extra lamports to the `bid_state` account, this check fails and the function aborts with `BidBalanceNotEmptied`. This creates a denial-of-service vector where a malicious actor can prevent bid closure by sending a small amount of SOL. The root cause is overly strict balance validation. The impact is inability to close valid bids, leading to stuck funds and degraded user experience.\n",
+            "severity": "low",
+            "files": [
+                "marketplace/program/src/state.rs"
+            ],
+            "location": [
+                "BidState.verify_empty_balance#201"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Unsafe Account Closure Due to Missing Updates",
+            "description": "The `pools_attached` field in `MarginAccount` is intended to prevent closure of accounts with active bids, but the field is no longer updated when bids are created or closed. As a result, the value becomes stale and may incorrectly indicate zero attached pools, allowing unsafe closure of margin accounts with active liquidity. The root cause is missing update logic in bid lifecycle functions. The impact includes loss of funds for users who unknowingly close accounts with active positions.\n",
+            "severity": "low",
+            "files": [
+                "escrow/program/src/instructions/close_margin_account.rs"
+            ],
+            "location": [
+                "CloseMarginAccount.validate#44"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ]
+            },
+            "title": "Whitelist Version Compatibility Conflict",
+            "description": "The `realloc_whitelist` instruction only allows reallocation for whitelists with version 1, but `init_update_whitelist` can upgrade the version to `CURRENT_WHITELIST_VERSION`, which may be greater than 1. This creates a conflict where updated whitelists become ineligible for reallocation. The root cause is inconsistent version handling logic between two instructions. The impact is permanent inability to resize whitelists after updates, leading to operational inflexibility and potential denial of service.\n",
+            "severity": "low",
+            "files": [
+                "whitelist/program/src/instructions/mod.rs"
+            ],
+            "location": [
+                "realloc_whitelist.validate#15",
+                "init_update_whitelist.process#33"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Missing Timestamp Update",
+            "description": "The `updated_at` field in `BidState` is not updated during `take_bid_shared`, meaning the timestamp does not reflect the latest modification time of the bid. This leads to inaccurate audit trails and affects time-based logic that depends on bid activity. The root cause is omission of timestamp update in the bid modification path. The impact includes degraded monitoring, incorrect analytics, and potential issues in time-sensitive trading logic.\n",
+            "severity": "low",
+            "files": [
+                "marketplace/program/src/instructions/take_bid_common.rs"
+            ],
+            "location": [
+                "take_bid_shared.process#77"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Inconsistent Validation of Starting Price",
+            "description": "The `starting_price` is validated in `create_pool` to ensure it is at least 1, but this check is missing in `edit_pool`. This allows an existing pool to have its starting price modified to an invalid value (e.g., 0), which could disrupt pricing logic. The root cause is decentralized validation logic\u2014checks are not centralized in `PoolConfig::validate`. The impact includes corrupted pool state and potential manipulation of trading parameters.\n",
+            "severity": "low",
+            "files": [
+                "amm/program/src/instructions/edit_pool.rs"
+            ],
+            "location": [
+                "create_pool.process_create_pool#55",
+                "edit_pool.validate_pool_config#67"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Unfair Rent Distribution in order_vault",
+            "description": "The order_vault account's source_ta token account holds a rent-exempt reserve funded by the maker when creating an order. However, upon closing the order, the rent from this account is transferred to the taker regardless of who funded it. This occurs due to incorrect logic in the `return_rent` function, which calculates and transfers excess rent without considering the original funder. An attacker could exploit this by repeatedly taking expired or canceled orders to collect rent paid by makers. The impact is a loss of SOL for makers, though limited to rent amounts, resulting in unfair economic behavior and erosion of trust in the system.\n",
+            "severity": "low",
+            "files": [
+                "amm/program/src/instructions/sell_nft_token_pool.rs"
+            ],
+            "location": [
+                "order_vault.return_rent#1"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing Validation in transfer_cnft Parameters",
+            "description": "The `transfer_cnft` instruction relies on critical parameters such as root, nonce, index, data_hash, and creator_hash, which are used in compressed NFT transfers. These parameters are passed through instructions like CloseExpiredListing and Delist without sufficient validation to ensure correctness or consistency. If mismatched or incorrect values are provided, it could result in improper or unauthorized NFT transfers. The root cause is the lack of pre-execution checks on these parameters against on-chain state or proofs. This could be exploited by a malicious actor crafting malformed inputs during listing closure, potentially leading to loss or misrouting of NFTs, especially in edge cases involving concurrent operations.\n",
+            "severity": "high",
+            "files": [
+                "marketplace/program/src/instructions/take_bid_common.rs",
+                "marketplace/program/src/instructions/compressed/close_expired_listing.rs",
+                "marketplace/program/src/instructions/compressed/delist.rs"
+            ],
+            "location": [
+                "transfer_cnft#1",
+                "CloseExpiredListing#1",
+                "Delist#1"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "Redundant and Unutilized Code",
+            "description": "Several instances of redundant or unutilized code exist in the codebase, including unused fields like bid_state.currency and shard_num with unreachable conditions, redundant calculations of current_price and mm_fee across multiple functions, and unused functions like assert_decode_mint_proof. Additionally, the bid expiry logic contains duplicated time calculations that could be simplified using assert_expiry. While not directly exploitable, these reduce code clarity and increase maintenance burden. The root cause is lack of code hygiene and refactoring. If left unaddressed, such issues may obscure real vulnerabilities during future audits or lead to logic errors during updates.\n",
+            "severity": "informational",
+            "files": [
+                "marketplace/program/src/instructions/bid.rs"
+            ],
+            "location": [
+                "bid::process_bid#1"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Potential Fund Stranding in PDA Transfers",
+            "description": "The function transfer_lamports_from_pda_min_balance skips transfers if the amount would leave the recipient below rent-exempt balance, potentially stranding funds in the PDA. This is problematic because small residual balances cannot be recovered, leading to permanent loss of funds. The root cause is an all-or-nothing transfer logic instead of truncating the transfer amount to the maximum allowable under rent-exemption rules. An attacker could force such conditions by manipulating account balances, leading to denial of access to funds. This issue also affects amm::close_expired_pool, which does not use the safe transfer function, increasing risk of fund loss during pool closure.\n",
+            "severity": "medium",
+            "files": [
+                "amm/program/src/state/pool.rs",
+                "marketplace/program/src/instructions/take_bid_common.rs"
+            ],
+            "location": [
+                "marketplace.transfer_lamports_from_pda_min_balance#1",
+                "amm::close_expired_pool#1"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect POOL_SIZE Calculation in amm::pool",
+            "description": "The constant POOL_SIZE is incorrectly calculated as 452 bytes instead of the correct 447 bytes due to miscalculating the size of NullableOption<u16> (2 bytes, not 3) and replacing taker_sell_count and taker_buy_count with price_offset (4 bytes instead of 8). This discrepancy can lead to account serialization errors, data corruption, or failed instructions if the account size does not match expectations. The root cause is outdated size computation after field changes. If not corrected, this could result in runtime errors during account creation or deserialization, especially after upgrades, leading to denial of service.\n",
+            "severity": "high",
+            "files": [
+                "amm/program/src/state/pool.rs",
+                "amm/program/src/instructions/withdraw_sol.rs"
+            ],
+            "location": [
+                "amm::pool.POOL_SIZE#1"
+            ]
+        }
+    ]
+}

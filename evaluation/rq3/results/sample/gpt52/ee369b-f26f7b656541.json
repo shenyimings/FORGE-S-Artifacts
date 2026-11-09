@@ -1,0 +1,87 @@
+{
+    "project": "squads_v4_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/squads_v4_audit_final.pdf.json/programs/multisig/src/instructions/batch_add_transaction.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-665",
+        "CWE-453",
+        "CWE-664",
+        "CWE-1188",
+        "CWE-1419"
+    ],
+    "cwe_detected": [
+        "CWE-691",
+        "CWE-435",
+        "CWE-284",
+        "CWE-710",
+        "CWE-703"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Blocked Transaction Addition",
+            "description": "When creating a batch transaction, the associated proposal can be initialized in either Draft or Active state. The validation in `BatchAddTransaction::validate` only allows transaction additions if the proposal is in Draft state. However, a malicious actor with proposal creation privileges can set the proposal to Active state upon creation, thereby permanently blocking any transaction from being added to the batch. The root cause is the lack of enforcement that the proposal must be created in Draft state for a new batch. This allows an attacker to render a batch unusable before any transactions are added, resulting in a denial of service for batch execution workflows.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The instruction is generally well-structured (Anchor seeds/bump constraints and an explicit `validate()`), but several security-relevant issues exist around (a) panic-based error handling and (b) authorization semantics for who may mutate a draft proposal/batch. Additionally, the transaction PDA derivation depends on a mutable counter (`batch.size + 1`) with no user-provided expected value, which enables predictable front-running/griefing failure modes. These issues map primarily to CWE-703/CWE-691 (panic/exceptional control flow), CWE-710 (unsafe unwrap/expect patterns), CWE-284 (potentially overly-broad authorization), and CWE-435 (integration/front-running interaction issues).\n",
+            "findings": [
+                {
+                    "title": "Panic/abort on counter overflow and missing bump (DoS via unwrap/expect)",
+                    "description": "The instruction uses multiple `unwrap()`/`expect()` calls in security-relevant state transitions:\n- In the `transaction` PDA seeds: `&batch.size.checked_add(1).unwrap().to_le_bytes()`\n- When persisting: `batch.size = batch.size.checked_add(1).expect(\"overflow\");`\n- When reading bumps: `*ctx.bumps.get(\"transaction\").unwrap()`\n\nIf `batch.size` reaches its maximum value for the underlying integer type (unknown from this snippet) the program will panic/abort rather than returning a controlled error. This creates a denial-of-service condition for that batch (and potentially for any instruction path that touches it), because the program cannot gracefully reject further additions.\n\nEven if overflow seems “unreachable” in normal operation, Solana programs should not abort; they should return an error code. Aborting is also brittle against future refactors (e.g., changing `batch.size` type, changing seed logic) and can lead to unexpected program termination.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Insufficient control-flow management due to panic-based error handling",
+                    "description": "The same `unwrap()`/`expect()` patterns cause uncontrolled termination of execution rather than explicit error handling. In on-chain programs, panics bypass intended error paths and can make the program’s behavior under exceptional conditions unpredictable (e.g., compute budget waste, inability to distinguish failure reasons, brittle behavior across upgrades).\n\nReplace panics with `require!`/`ok_or` and dedicated error variants (e.g., `MultisigError::BatchSizeOverflow`, `MultisigError::MissingBump`) so the program returns deterministic errors instead of aborting.\n",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Potential improper access control: any Initiate-permission member can mutate any Draft proposal's batch",
+                    "description": "`validate()` checks that `member`:\n- is a multisig member, and\n- has `Permission::Initiate`\nand that `proposal.status` is `Draft`.\n\nHowever, there is no check that the `member` is the proposal creator/owner/authority (if such a concept exists in the protocol design), nor that the member is otherwise authorized to modify *this specific* proposal/batch beyond having the global `Initiate` permission.\n\nIf the intended policy is “only the proposal author (or a narrower role) may add transactions to their draft,” then this is an access control weakness: any member with `Initiate` can modify/poison another member’s draft proposal by adding transactions the author did not intend.\n\nIf the intended policy is “any Initiate member can collaboratively build drafts,” then this is not a vulnerability; but the current code implements the broader policy.\n",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Front-running/griefing risk from PDA derivation using mutable `batch.size + 1` without an expected-size guard",
+                    "description": "The new `transaction` account address is derived from `batch.size.checked_add(1)` (i.e., the “next index”) and the instruction also requires `batch` as `mut`. A third party who can call this instruction (any Initiate member) can front-run another member’s pending `batch_add_transaction` by incrementing `batch.size` first, causing the victim’s transaction to attempt to `init` a PDA at an address that no longer matches the current `batch.size + 1`, making it fail.\n\nThis is an interaction/integration weakness: each instruction behaves correctly alone, but concurrent/mempool conditions enable predictable failure of other users’ transactions (griefing/DoS). A common mitigation is to include an `expected_batch_size` argument and `require!(batch.size == expected_batch_size, ...)` to make races explicit and user-detectable, or derive the PDA from a client-chosen nonce that is verified/stored.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Improper adherence to secure on-chain coding standards (panic usage)",
+                    "description": "Use of `unwrap()`/`expect()` in on-chain Rust/Anchor code is generally considered unsafe coding practice because it can cause program aborts under exceptional conditions. This increases attack surface for denial-of-service and makes failures non-deterministic to callers.\n\nThis is a standards issue that also amplifies the impact of CWE-703/CWE-691 findings.\n",
+                    "category": "CWE-710",
+                    "severity": "low",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

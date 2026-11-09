@@ -1,0 +1,157 @@
+{
+    "path": "reports/2024-11-orgaandmerk-securityreview.pdf",
+    "project_info": {
+        "url": "https://github.com/turbofish-org/orga",
+        "commit_id": "53595ff",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-11-19",
+        "project_path": "contracts/2024-11-orgaandmerk-securityreview.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Slashing of re-delegated stake is computed incorrectly",
+            "description": "The staking module incorrectly computes the slashing percentage for re-delegated stake when a validator is slashed due to double-signing. The root cause is a miscalculation where the multiplier (1 - slash_fraction_double_sign) is treated as an amount to deduct, rather than the final balance after slashing. This leads to an incorrect forfeiture of funds\u2014for example, 95% instead of the intended 5% if the slash fraction is 1/20. An attacker could exploit this by encouraging delegators to redelegate, then intentionally committing a double-sign fault, causing delegators to lose a disproportionate amount of stake while the attacker only loses the intended small percentage. The impact includes financial loss for delegators and potential manipulation of token supply by malicious validators.\n",
+            "severity": "medium",
+            "files": [
+                "src/coins/staking/mod.rs",
+                "src/coins/staking/delegator.rs"
+            ],
+            "location": [
+                "orga/src/coins/staking/mod.rs#503-511",
+                "orga/src/coins/staking/delegator.rs#124-133"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ]
+            },
+            "title": "Malicious state sync peer can cause syncing nodes to crash",
+            "description": "A malicious node can cause syncing peers to crash during the state sync process by triggering an assertion failure. The vulnerability exists because the code uses an assert_eq! to validate the stated length of a snapshot against the remaining chunks, which is unsafe when the data comes from an untrusted peer. The root cause is the use of panic-inducing assertions on externally provided data. An attacker can exploit this by advertising a valid app hash but providing an incorrect Snapshot::chunks value, causing connecting nodes to panic. The impact is a denial of service, preventing new nodes from joining the network and harming the network's reputation and scalability.\n",
+            "severity": "low",
+            "files": [
+                "src/merk/snapshot.rs"
+            ],
+            "location": [
+                "merk/src/merk/restore.rs#176-177"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Interrupted snapshots can lead to inconsistent state",
+            "description": "When Tendermint switches to a new snapshot during state sync, the Orga implementation fails to reset the existing sync state, leading to inconsistent on-disk state and panics. The root cause is the failure to clear the Restorer state upon receiving a new OfferSnapshot request. As a result, new chunks from honest peers are rejected due to verification failures against a partially constructed tree. A malicious node could serve old chunks under a new snapshot, making synchronization appear successful while resulting in a mismatch between block height and app hash. The impact is node crashes, indefinite hangs, and failure to synchronize, degrading network reliability.\n",
+            "severity": "low",
+            "files": [
+                "src/merk/store.rs"
+            ],
+            "location": [
+                "orga/src/merk/store.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-179"
+                ]
+            },
+            "title": "Malicious state sync peer can cause a stack overflow in Merk",
+            "description": "A maliciously constructed Merk snapshot with a very long leftmost path can cause a stack overflow during recursive verification. The root cause is the use of recursion in verify_height_proof and verify_completeness functions without prior validation of the tree's root hash against the consensus app_hash. Since verification occurs before hash validation, an attacker can provide a degenerate tree with thousands of nodes in a single path. Exploitation involves serving such a tree during state sync, causing the syncing node to crash. The impact is a denial of service that prevents new nodes from joining the network.\n",
+            "severity": "low",
+            "files": [
+                "src/merk/ics23.rs"
+            ],
+            "location": [
+                "merk/src/proofs/chunk.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-193"
+                ]
+            },
+            "title": "Merk trunk splitting can lead to panics on degenerate trees",
+            "description": "Syncing nodes will panic if the Merk AVL tree is highly skewed and the trunk is not a perfect binary tree. The root cause is an assumption in the code that all trunks are perfect binary trees, combined with an off-by-one error that fails to account for valid but incomplete trunks at truncation height. The assertion `assert_eq!(self.remaining_chunks_unchecked(), chunks_remaining)` fails in such cases. Although this requires a maliciously crafted sequence of key insertions, it could still be exploited to crash all syncing nodes. The impact is a denial of service, especially under adversarial conditions, despite the low practical exploitability.\n",
+            "severity": "low",
+            "files": [
+                "src/merk/snapshot.rs"
+            ],
+            "location": [
+                "merk/src/merk/restore.rs#167-168"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Stored IBC consensus states cannot be pruned",
+            "description": "The IBC client fails to prune old consensus states due to a key mismatch in the deletion logic. The root cause is that `delete_consensus_state` uses only the revision height as the key, while the insertion logic uses a concatenated string of revision number and height. This discrepancy means the deletion operation never finds the correct key, so old states accumulate indefinitely. An attacker or natural operation over time can cause excessive memory and storage consumption, eventually leading to node crashes. The impact is long-term degradation of node performance and potential denial of service due to resource exhaustion.\n",
+            "severity": "low",
+            "files": [
+                "src/ibc/client_contexts.rs"
+            ],
+            "location": [
+                "orga/src/ibc/client_contexts.rs#190-209",
+                "orga/src/ibc/client_contexts.rs#154-188"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Merk proofs can be forged to claim arbitrary key/value inclusions",
+            "description": "A malicious actor can forge Merk proofs to claim inclusion of arbitrary key-value pairs in a tree root. The root cause is that the proof verification allows KV nodes as children of Hash nodes, which are normally placeholders for omitted subtrees. Since Hash node children are not included in the root hash calculation, adding forged KV nodes does not alter the root hash but affects lookup results. This breaks the integrity guarantees of Merkle proofs. Although currently not exploitable in Orga or Nomic due to lack of security-critical usage, it is high severity for Merk as a standalone library. Exploitation could allow theft of funds on bridges or light clients that rely on these proofs.\n",
+            "severity": "high",
+            "files": [
+                "src/merk/ics23.rs"
+            ],
+            "location": [
+                "merk/src/proofs/tree.rs#51-64"
+            ]
+        }
+    ]
+}

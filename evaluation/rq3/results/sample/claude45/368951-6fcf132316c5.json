@@ -1,0 +1,206 @@
+{
+    "project": "blocksec_ref_lp_as_collateral_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_lp_as_collateral_v1.0-signed.pdf.json/ref-contracts/ref-exchange/src/shadow_actions.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.23529411764705882,
+        "recall": 0.8,
+        "f1": 0.3636363636363636
+    },
+    "cwe_ground_truth": [
+        "CWE-1339",
+        "CWE-252",
+        "CWE-682",
+        "CWE-703",
+        "CWE-754"
+    ],
+    "cwe_detected": [
+        "CWE-252",
+        "CWE-664",
+        "CWE-190",
+        "CWE-682",
+        "CWE-228",
+        "CWE-691",
+        "CWE-435",
+        "CWE-284",
+        "CWE-253",
+        "CWE-394",
+        "CWE-703",
+        "CWE-754",
+        "CWE-369",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Permanently Locked User",
+            "description": "1. **Description:** The `callback_process_shadow_force_close_result()` function is responsible for unlocking an account after a forced closure, but it may panic during execution due to an unchecked arithmetic operation.\n2. **Cause:** Although `internal_shadow_force_close()` verifies that `asset.reversed > amount`, this state is not guaranteed during the callback, leading to potential arithmetic underflow.\n3. **Exploitation:** If the callback panics, the account remains locked indefinitely, even though the liquidation process may have partially executed.\n4. **Impact:** The affected user is permanently locked out of their account, unable to access deposited, borrowed, or collateralized assets, resulting in a denial-of-service condition.\n"
+        },
+        {
+            "title": "Lack of Consistent Precision in on_remove_shadow()",
+            "description": "1. **Description:** The `on_cast_shadow()` function scales the input `amount` by `10**extra_decimals`, but `on_remove_shadow()` uses the raw `amount` without applying the same scaling factor.\n2. **Cause:** Inconsistent handling of decimal precision between two related functions leads to incorrect value calculations.\n3. **Exploitation:** An attacker could exploit the discrepancy during shadow position removal to receive incorrect amounts or manipulate internal balances.\n4. **Impact:** Results in incorrect accounting and potential loss of funds due to miscalculated shares or balances in the system.\n"
+        },
+        {
+            "title": "Potential Drain of Funds due to Early Return of Shares",
+            "description": "1. **Description:** The `FromFarming` and `FromBurrowland` implementations in `ShadowActions` immediately increase the `free_shares` of LP tokens, allowing liquidity to be removed in the same block.\n2. **Cause:** The design allows liquidity removal before confirming the success of `on_remove_shadow()` in dependent contracts.\n3. **Exploitation:** If `on_remove_shadow()` fails in Boost Farming or Burrowland after shares are released, the LP tokens remain staked while liquidity is withdrawn, enabling double use of the same assets.\n4. **Impact:** This can lead to a complete drain of funds from the Boost Farming and Burrowland contracts due to inconsistent state across systems.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code (which is actually a NEAR Protocol contract in Rust), I've identified several security vulnerabilities stemming from the candidate CWE list:\n\n1. **CWE-284 (Improper Access Control)**: The `on_burrow_liquidation` function only checks if the predecessor is `burrowland_id`, but doesn't validate if the liquidation is legitimate or if the liquidator has proper authorization. There's no verification that the liquidation_account_id actually has the shadow shares being liquidated.\n\n2. **CWE-682 (Incorrect Calculation)**: In `on_burrow_liquidation`, the calculation of `withdraw_seed_amount` has a logic flaw. When `available_shares > liquidate_share_amount.0`, it sets `withdraw_seed_amount = 0`, but when `available_shares <= liquidate_share_amount.0`, it calculates `liquidate_share_amount.0 - available_shares`. However, this doesn't account for the case where `available_shares` could be exactly equal to `liquidate_share_amount.0`, potentially causing unnecessary farming withdrawals.\n\n3. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: The `shadow_id_to_pool_id` function uses `.expect(\"Invalid shadow_id\")` which will panic if the shadow_id format is invalid. This could be exploited to cause DoS by passing malformed shadow_ids. Additionally, the function assumes the split will always produce at least 2 elements, which may not be true.\n\n4. **CWE-691 (Insufficient Control Flow Management)**: In `callback_on_shadow`, when a promise fails for `FromFarming` or `FromBurrowland` actions, the state is rolled back but no refund of storage fees is provided to the user, unlike the `ToFarming` and `ToBurrowland` cases. This inconsistency in control flow handling could lead to users losing storage fees.\n\n5. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The storage fee calculation in `shadow_action` for `FromFarming` and `FromBurrowland` actions checks if `prev_storage > env::storage_usage()` but doesn't handle the case where storage increases (which would require additional payment). This could lead to storage staking attacks.\n\n6. **CWE-435 (Improper Interaction Between Multiple Correctly-Behaving Entities)**: The contract interacts with external contracts (`burrowland_id` and `boost_farm_id`) through cross-contract calls, but doesn't implement proper reentrancy guards or state locking mechanisms. If these external contracts make callbacks, they could potentially manipulate the state during execution.\n",
+            "findings": [
+                {
+                    "title": "Missing Authorization Check in Liquidation Function",
+                    "description": "The `on_burrow_liquidation` function only verifies that the caller is the burrowland contract but doesn't validate that the liquidation_account_id actually owns the shadow shares being liquidated. An attacker could potentially exploit this by having the burrowland contract call this function with arbitrary account IDs, leading to unauthorized liquidation of user positions.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Incorrect Calculation of Withdraw Seed Amount",
+                    "description": "In the `on_burrow_liquidation` function, the calculation of `withdraw_seed_amount` contains a logical flaw. When `available_shares > liquidate_share_amount.0`, it sets `withdraw_seed_amount = 0`, but the condition doesn't properly handle edge cases where available_shares equals liquidate_share_amount.0, potentially causing unnecessary farming withdrawals or incorrect state updates.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unhandled Exception in Shadow ID Parsing",
+                    "description": "The `shadow_id_to_pool_id` function uses `.expect()` and assumes the shadow_id will always be in the correct format with at least two parts after splitting. If an invalid shadow_id is passed, this will cause a panic and potential denial of service. The function should implement proper error handling instead of panicking.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Inconsistent Storage Fee Refund in Callback",
+                    "description": "In the `callback_on_shadow` function, when promises fail for `ToFarming` and `ToBurrowland` actions, storage fees are refunded to users. However, for `FromFarming` and `FromBurrowland` actions, no such refund mechanism exists in the failure case, creating an inconsistency where users could lose storage fees if the external call fails.",
+                    "category": "CWE-691",
+                    "severity": "low",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Improper Storage Fee Calculation for Withdrawal Actions",
+                    "description": "In the `shadow_action` function, for `FromFarming` and `FromBurrowland` actions, the storage fee calculation only handles the case where storage decreases (`prev_storage > env::storage_usage()`). It doesn't handle cases where storage might increase, which could lead to insufficient storage staking and potential storage-related attacks.",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Lack of Reentrancy Protection in Cross-Contract Calls",
+                    "description": "The contract makes cross-contract calls to external contracts (`burrowland_id` and `boost_farm_id`) without implementing reentrancy guards or state locking mechanisms. If these external contracts make callbacks during execution, they could potentially manipulate the contract state in unexpected ways, leading to race conditions or state inconsistencies.",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.75
+                }
+            ]
+        },
+        {
+            "reasoning": "After carefully analyzing the provided Rust source code for potential security issues related to the specified CWE candidates, I have identified several vulnerabilities:\n\n1. **CWE-190 (Integer Overflow)**: In the `get_unit_lpt_assets` function, the expression `10u128.pow(share_decimals as u32)` can cause integer overflow. If `share_decimals` is a large value (e.g., 255), then `10^255` would vastly exceed u128's maximum value (2^128 - 1), causing a panic or wraparound. This is a critical issue as it can lead to incorrect calculations or denial of service.\n\n2. **CWE-369 (Divide By Zero)**: While not explicitly present in division operations, the code uses `pool.remove_liquidity()` which could internally perform divisions. If the pool's total supply or share balance is zero, this could lead to division by zero errors. However, without seeing the implementation of `remove_liquidity`, this is a potential concern rather than a confirmed issue.\n\n3. **CWE-191 (Integer Underflow)**: In the `on_burrow_liquidation` function, the calculation `liquidate_share_amount.0 - available_shares` could underflow if `available_shares > liquidate_share_amount.0`. While there's a check `if available_shares > liquidate_share_amount.0 { 0 }`, the logic flow suggests this check prevents the underflow, but the code structure is confusing and could be error-prone in future modifications.\n\n4. **CWE-191 (Integer Underflow)**: In both `shadow_action` and `on_burrow_liquidation` functions, the storage fee calculation `(prev_storage - env::storage_usage())` could underflow if `env::storage_usage() > prev_storage`. While there are checks `if prev_storage > env::storage_usage()`, if this condition is not met, the subtraction is skipped, but the logic assumes storage can only increase, which may not always be true.\n\n5. **CWE-754 (Improper Check for Exceptional Conditions)**: The `shadow_id_to_pool_id` function uses `.expect(\"Invalid shadow_id\")` which will panic if the shadow_id format is invalid. This doesn't properly handle the exceptional condition of malformed input and could lead to denial of service.\n\n6. **CWE-228 (Improper Handling of Syntactically Invalid Structure)**: The `shadow_id_to_pool_id` function assumes a specific format (\"shadow_ref_v1-{pool_id}\") and uses simple string splitting without validation. If the shadow_id doesn't contain a hyphen or has multiple hyphens, the indexing `[1]` could panic or return incorrect data.\n",
+            "findings": [
+                {
+                    "title": "Integer Overflow in Power Calculation",
+                    "description": "In the `get_unit_lpt_assets` function, the expression `10u128.pow(share_decimals as u32)` can cause integer overflow when `share_decimals` is large. For example, if `share_decimals` is 39 or higher, `10^39` exceeds u128::MAX (approximately 3.4 × 10^38), causing a panic in debug mode or wraparound in release mode. This can lead to incorrect liquidity calculations or denial of service.",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Potential Integer Underflow in Storage Calculation",
+                    "description": "In the `shadow_action` function's `FromFarming` and `FromBurrowland` branches, the calculation `(prev_storage - env::storage_usage())` is only protected by an if-check. If storage usage increases unexpectedly, this could lead to underflow. While the check prevents the immediate issue, the assumption that storage only decreases in these operations may not hold in all edge cases.",
+                    "category": "CWE-191",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Improper Input Validation in shadow_id_to_pool_id",
+                    "description": "The `shadow_id_to_pool_id` function uses simple string splitting without proper validation. It assumes the shadow_id format is 'shadow_ref_v1-{pool_id}' and directly accesses index [1] after splitting by '-'. If the shadow_id is malformed (e.g., no hyphen, multiple hyphens, or non-numeric pool_id), this will panic with 'Invalid shadow_id' or cause an index out of bounds error, leading to denial of service.",
+                    "category": "CWE-228",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient Exception Handling for Invalid Input Format",
+                    "description": "The `shadow_id_to_pool_id` function uses `.expect()` which causes a panic on invalid input rather than returning a proper error. This is an improper way to handle exceptional conditions in a smart contract context, as it can lead to transaction failures and denial of service when invalid shadow_ids are provided.",
+                    "category": "CWE-754",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Potential Division by Zero in Liquidity Removal",
+                    "description": "The `remove_liquidity` function is called in multiple places without explicit checks for zero total supply or zero share balance. If the pool's internal state allows for zero values in denominators during share-to-token conversions, this could lead to division by zero errors. While the actual implementation is not visible, this is a common vulnerability pattern in liquidity pool operations.",
+                    "category": "CWE-369",
+                    "severity": "medium",
+                    "confidence": 0.6
+                }
+            ]
+        },
+        {
+            "reasoning": "After carefully analyzing the provided Solana smart contract code (which is actually a NEAR Protocol contract in Rust), I examined it for the specific CWE categories listed. Here are my findings:\n\n1. **CWE-252 (Unchecked Return Value)**: The code contains multiple instances where promise return values are not properly checked:\n   - In `shadow_action()`, the cross-contract calls to `ext_shadow_receiver::on_cast_shadow()` and `ext_shadow_receiver::on_remove_shadow()` are made, but their success is only checked in the callback function `callback_on_shadow()`. However, in `on_burrow_liquidation()`, there's a cross-contract call at the end that has NO callback to check if it succeeded. If this call fails, the state changes (updating shadow records, removing liquidity) have already been committed, but the external contract was never notified.\n   \n2. **CWE-394 (Unexpected Status Code or Return Value)**: In `callback_on_shadow()`, the function uses `is_promise_success()` to check if the previous promise succeeded. However, it only returns a boolean and doesn't handle partial failures or provide detailed error information. The function returns `false` on failure but this return value might not be properly handled by callers.\n\n3. **CWE-253 (Incorrect Check of Function Return Value)**: The `callback_on_burrow_liquidation()` function checks `is_promise_success()` but only logs the result without taking any corrective action. If the promise fails, the shadow records have already been updated in `on_burrow_liquidation()`, creating an inconsistent state between the contract and the farming contract.\n\nThe most critical issue is in `on_burrow_liquidation()` where if `withdraw_seed_amount > 0`, a cross-contract call is made to remove shadow from farming, but if this fails (checked only in a callback that just logs), the internal state has already been modified (liquidation account's shadow records updated, liquidity removed, tokens transferred to liquidator). This creates a state inconsistency.\n",
+            "findings": [
+                {
+                    "title": "Unchecked Cross-Contract Call in Burrow Liquidation",
+                    "description": "In the `on_burrow_liquidation()` function, when `withdraw_seed_amount > 0`, a cross-contract call is made to `ext_shadow_receiver::on_remove_shadow()` to notify the farming contract. However, the callback `callback_on_burrow_liquidation()` only logs the success/failure status without taking any corrective action. If this external call fails, the internal state (shadow records, liquidity removal, token transfers) has already been committed, leading to state inconsistency between this contract and the farming contract. The farming contract may still believe the user has seeds staked while this contract has already processed the liquidation.",
+                    "category": "CWE-252",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Inadequate Error Handling in Shadow Action Callback",
+                    "description": "The `callback_on_shadow()` function checks `is_promise_success()` and attempts to revert state changes on failure. However, it only returns a boolean value without propagating detailed error information. The return value may not be properly handled by upstream callers, and the function doesn't verify that the state rollback itself succeeded. Additionally, there's no mechanism to handle partial failures or retry logic, which could leave the system in an inconsistent state if the rollback operations fail.",
+                    "category": "CWE-394",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Insufficient Failure Handling in Burrow Liquidation Callback",
+                    "description": "The `callback_on_burrow_liquidation()` function only logs whether the promise succeeded or failed using `is_promise_success()`, but takes no corrective action on failure. When the external call to remove farming seeds fails, the liquidation has already been processed (shadow records updated, liquidity removed, tokens transferred), but the farming contract was not successfully notified. This creates a permanent inconsistency where the user's shadow records in this contract don't match their actual staked position in the farming contract.",
+                    "category": "CWE-253",
+                    "severity": "high",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "I analyzed the provided Solana smart contract code for CWE-690 (Unchecked Return Value to NULL Pointer Dereference). However, this code is actually a NEAR Protocol smart contract written in Rust, not a Solana contract. \n\nExamining the code for CWE-690 vulnerabilities, I looked for instances where function calls that could return NULL/None are used without proper checking:\n\n1. In `get_unit_lpt_assets()`: `self.pools.get(pool_id).expect(ERR85_NO_POOL)` - Uses `.expect()` which will panic if None, not a NULL pointer dereference.\n\n2. In `shadow_action()`: `self.pools.get(pool_id).expect(ERR85_NO_POOL)` - Same pattern, uses `.expect()`.\n\n3. In `on_burrow_liquidation()`: `self.pools.get(pool_id).expect(ERR85_NO_POOL)` - Same pattern.\n\n4. Multiple calls to `account.get_shadow_record(pool_id)` return `Option<T>` and are properly handled with `if let Some(record)` patterns or default values.\n\n5. The `shadow_id_to_pool_id()` function uses `.expect(\"Invalid shadow_id\")` on the parse result, which will panic rather than cause a NULL pointer dereference.\n\nIn Rust, the type system prevents NULL pointer dereferences through the Option<T> type. All potentially None values are wrapped in Option, and the code either:\n- Uses `.expect()` which panics (controlled failure, not undefined behavior)\n- Uses pattern matching (`if let Some(...)`) to safely handle None cases\n- Provides default values\n\nThere are no instances where a function returning a pointer/reference is used without checking, leading to a NULL pointer dereference. The Rust compiler and type system prevent this class of vulnerability. All Option<T> values are either explicitly unwrapped with error handling (expect/unwrap) or safely matched.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-135",
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-191",
+            "CWE-228",
+            "CWE-397",
+            "CWE-754",
+            "CWE-755",
+            "CWE-393",
+            "CWE-1339"
+        ],
+        [
+            "CWE-273",
+            "CWE-253",
+            "CWE-252",
+            "CWE-394",
+            "CWE-354"
+        ],
+        [
+            "CWE-690"
+        ]
+    ]
+}

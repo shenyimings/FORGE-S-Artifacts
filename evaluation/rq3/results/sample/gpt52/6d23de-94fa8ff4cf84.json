@@ -1,0 +1,234 @@
+{
+    "project": "sec3_invariant_report.pdf.json",
+    "files": [
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/transfer_position_ownership.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/math.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/lib.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/change_fee_receiver.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/create_fee_tier.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/initialize_oracle.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/util.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/swap.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/structs/position.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3,
+        "recall": 0.17647058823529413,
+        "f1": 0.22222222222222224
+    },
+    "cwe_ground_truth": [
+        "CWE-669",
+        "CWE-665",
+        "CWE-707",
+        "CWE-664",
+        "CWE-697",
+        "CWE-190",
+        "CWE-682",
+        "CWE-909",
+        "CWE-456",
+        "CWE-435",
+        "CWE-1284",
+        "CWE-691",
+        "CWE-1164",
+        "CWE-710",
+        "CWE-1041",
+        "CWE-20",
+        "CWE-834"
+    ],
+    "cwe_detected": [
+        "CWE-1339",
+        "CWE-190",
+        "CWE-682",
+        "CWE-435",
+        "CWE-439",
+        "CWE-284",
+        "CWE-188",
+        "CWE-703",
+        "CWE-369",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect pool key after pool ownership transfer",
+            "description": "This issue arises from a copy-paste error in the transfer_position_ownership instruction where the new position's pool field is incorrectly set to the recipient's key instead of the original pool key. The cause is a simple programming mistake at line 67, where *self.recipient.key is assigned instead of removed_position.pool. This leads to corruption of the pool reference in the transferred position, making it point to an invalid or non-existent pool. An attacker could potentially exploit positions with incorrect pool keys to disrupt accounting or cause failed transactions. The impact is medium as it corrupts state integrity and may lead to loss of access or incorrect behavior, though it does not directly enable fund theft.\n"
+        },
+        {
+            "title": "Arithmetic overflows",
+            "description": "Multiple variables across the codebase are susceptible to arithmetic overflow due to insufficient type safety and lack of runtime overflow checks. The root causes include using narrow integer types (e.g., u32 for head counters, u128 for position_iterator) and performing unchecked arithmetic operations on values like timestamps, tick indices, and fee accumulators. For example, decrementing owner_list.head without underflow protection or incrementing position_iterator without bounds checking could lead to wraparound. An attacker could exploit these overflows to manipulate state, bypass logic, or cause unexpected behavior. The impact is low because the protocol uses runtime checks in some places and the likelihood of hitting exact overflow conditions may be low, but the potential for state corruption exists.\n"
+        },
+        {
+            "title": "Not resetting the last position after moving",
+            "description": "In the transfer_position_ownership instruction, when moving the last position into the slot of the removed one, the original last position is not reset to a default or empty state. The cause is the omission of a reset step (e.g., *last_position = Default::default()) after transferring its data. This leaves stale data in the last position account, which could be misinterpreted as a valid position in future operations. An attacker might exploit this by triggering edge cases where the stale position is accessed, potentially leading to incorrect state transitions or double usage. The impact is low as it affects internal state consistency but does not directly enable fund loss.\n"
+        },
+        {
+            "title": "Inconsistent tick checks",
+            "description": "There is inconsistency in how tick bounds are validated across the codebase. Some functions allow tick == MAX_TICK while others enforce strict inequality (tick < MAX_TICK). The root cause is a lack of unified validation logic and unclear specification on whether MAX_TICK is a valid state. This can lead to unpredictable behavior when positions are created or modified at boundary ticks. An attacker could potentially exploit the discrepancy to create edge-case positions that behave differently than expected during swaps or fee calculations. The impact is low as it primarily affects edge-case correctness rather than core functionality.\n"
+        },
+        {
+            "title": "Missing checks on tick_spacing",
+            "description": "The create_fee_tier instruction does not validate that tick_spacing is non-zero, despite tick_spacing being used in arithmetic operations like division and bit shifting. The root cause is the absence of a basic input validation check. A zero tick_spacing would lead to division-by-zero errors or infinite loops in tick-related calculations. An attacker could create a fee tier with tick_spacing = 0, causing subsequent operations (e.g., pool creation, swaps) to fail or panic. The impact is low as it leads to denial of service for specific pools rather than global fund loss.\n"
+        },
+        {
+            "title": "Inconsistent access control in change_protocol_fee",
+            "description": "The change_protocol_fee instruction uses an access control check that depends on the current fee_receiver being the admin. However, if the fee_receiver has been changed to a non-admin account via change_fee_receiver, the access control will permanently fail. The root cause is a flawed dependency between two independent state-changing functions. This creates a situation where the protocol fee cannot be updated after a fee receiver change, effectively locking the fee at its current value. The impact is low as it results in a loss of protocol governance flexibility but does not compromise fund security.\n"
+        },
+        {
+            "title": "Inconsistent amount_out and amount_in in swap",
+            "description": "In the swap logic, when the output amount exceeds the specified limit, amount_out is clamped to the limit, but amount_in is not adjusted accordingly. The root cause is incomplete logic in the swap amount capping mechanism. This leads to inconsistency between input and output amounts, potentially causing incorrect slippage calculations or user confusion. While the protocol may still function safely, the discrepancy could affect accounting accuracy or frontend interpretations. The impact is informational as it does not break core functionality or lead to fund loss.\n"
+        },
+        {
+            "title": "Redundancies in PDA seeds and account checks",
+            "description": "The code contains redundant checks and seed constructions. For example, in the swap instruction, checking reserve_x.owner and reserve_x.mint is redundant if reserve_x is already verified via PDA derivation. Similarly, including the program_id in PDA seeds is unnecessary since it is already part of the address derivation. The root cause is over-cautious or copy-pasted validation logic. While safe, these redundancies increase code complexity and gas costs slightly. The impact is informational as they do not introduce vulnerabilities but represent suboptimal design.\n"
+        },
+        {
+            "title": "Swap exceeds computation limit",
+            "description": "The swap instruction contains a loop that iterates through ticks until remaining_amount is zero, which can exceed Solana's compute limit under certain conditions. The root cause is the unbounded loop and lack of early termination when liquidity reaches zero. As shown in the PoC, the loop continues even when liquidity is zero, leading to unnecessary iterations and potential out-of-memory errors. An attacker could craft a scenario with many ticks and zero liquidity to force transaction failure, causing denial of service. The impact is informational as it affects reliability but not security per se.\n"
+        },
+        {
+            "title": "Oracle can be set but is not used",
+            "description": "The initialize_oracle instruction allows setting an oracle address, but the oracle is not used anywhere in the current code. The root cause is an incomplete or placeholder feature. This raises questions about future plans and potential attack surfaces if the oracle is later activated without proper safeguards. The impact is informational as it does not affect current functionality but may indicate technical debt or undocumented design choices.\n"
+        },
+        {
+            "title": "Redundant account and access control",
+            "description": "The change_fee_receiver instruction includes a program_authority account that is not used in the handler logic, making it redundant. Additionally, the #[access_control] macro duplicates a constraint already enforced by the account validation. The root cause is inconsistent code design and overuse of access control patterns. While not insecure, it increases complexity and gas usage. The impact is informational as it reflects poor code hygiene but no direct risk.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "Review focused on the provided instructions and math/util helpers from the perspective of the allowed CWE root causes.\n\nThe main issues are:\n1) `transfer_position_ownership` mutates list counters (`head`) using unchecked arithmetic and derives/uses indices in ways that can underflow/overflow and/or desynchronize list state. It also appears to assign an incorrect `pool` field in the transferred `Position`, which can corrupt invariants and potentially lock funds/fees.\n2) Several places (notably `math.rs` and `util.rs`) use `assert!`/`unwrap()` on conditions that can be reached via on-chain state and/or user-controlled inputs (swap amount/limit), causing program panics (transaction abort/DoS).\n3) `initialize_oracle` is callable by anyone and lets the first caller bind an arbitrary program-owned, zeroed account as the pool’s oracle (unseeded), which is a one-time privileged configuration action without access control.\n4) There is also a subtle multi-account interaction hazard in `transfer_position_ownership`: when transferring the last position, `removed_position` and `last_position` can be the same PDA, which can cause unexpected behavior/DoS depending on Anchor’s duplicate-account handling and runtime borrow semantics.\n",
+            "findings": [
+                {
+                    "title": "Unchecked head underflow/overflow in TransferPositionOwnership can corrupt list state",
+                    "description": "In `TransferPositionOwnership::handler`, the program performs unchecked arithmetic:\n- `owner_list.head -= 1;`\n- `recipient_list.head += 1;`\nwithout validating bounds (e.g., `owner_list.head > 0`) or using checked math.\n\nIf `owner_list.head` is 0, `head -= 1` will underflow (wrap in release builds), corrupting the list length and making subsequent PDA derivations inconsistent (e.g., `last_position` seed uses `owner_list.head - 1` at account-validation time). Similarly, `recipient_list.head += 1` can overflow.\n\nBecause `head` is used as a security-relevant index/seed component for positions, corrupting it can break ownership tracking, make future removals/transfers impossible, or lead to unexpected account addressing.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Incorrect Position.pool assignment during ownership transfer can break invariants and lock assets",
+                    "description": "In `transfer_position_ownership.rs`, `new_position` is constructed with:\n  pool: *self.recipient.key,\nwhich is almost certainly incorrect. The pool should typically remain the same as the original position’s pool (e.g., `removed_position.pool`), not the recipient wallet address.\n\nThis corrupts the `Position` state and can cause downstream instructions that rely on `position.pool` (e.g., fee claims, liquidity modifications, or pool/position association checks) to fail or behave incorrectly. Practically, this can lock the position’s liquidity/fees for the recipient (and/or create inconsistent accounting).\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Potential duplicate-account aliasing when transferring the last position (removed_position == last_position)",
+                    "description": "Account constraints define:\n- `removed_position` PDA at (owner, index)\n- `last_position` PDA at (owner, owner_list.head - 1)\n\nWhen `index` is the last index, these PDAs are identical. The instruction does not prevent the same account from being supplied for both `removed_position` and `last_position`.\n\nDepending on Anchor/runtime behavior, this can lead to:\n- unexpected borrow/aliasing failures (DoS),\n- unexpected close semantics (since `last_position` has `close = owner`),\n- or other unintended interactions between two \"separate\" mutable account handles referring to the same underlying account.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Panic/abort paths via assert!/unwrap() in math/util enable denial-of-service on edge inputs/state",
+                    "description": "Multiple functions use `assert!` and `unwrap()` where failures can be triggered by edge-case state or user-controlled swap parameters, causing program panics (transaction abort):\n- `calculate_price_sqrt`: `assert!(tick <= MAX_TICK, ...)`\n- `get_next_sqrt_price_from_input/output`: `assert!(!price_sqrt.is_zero()); assert!(!liquidity.is_zero());`\n- `get_next_sqrt_price_x_up`: `checked_add/checked_sub(...).unwrap()` (can underflow when `!add` and amount*price exceeds liquidity term)\n- `get_delta_y`: multiple `checked_add/checked_div(...).unwrap()`\n- `calculate_amount_delta`: `.unwrap()` on `get_delta_x/get_delta_y` Option results\n- `util::cross_tick`: `checked_sub(...).unwrap()` on timestamps\n- `util::get_current_timestamp`: `Clock::get().unwrap()` + `try_into().unwrap()`\n\nIn Solana programs, panics abort the instruction, so an attacker can often force repeated failures (DoS) by selecting pathological swap parameters (`amount`, `sqrt_price_limit`) or by pushing pool state into extreme ranges (large liquidity/price).\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Oracle initialization is a one-time privileged action with no access control and unseeded oracle account",
+                    "description": "`initialize_oracle` allows any `payer` (no admin/fee_receiver gating) to initialize a pool’s oracle as long as `!pool.oracle_initialized`.\n\nAdditionally, the oracle account is only constrained with `#[account(zero)]` and is not derived from a PDA seed tied to the pool. This lets the first caller choose *which* program-owned, zeroed account becomes the pool’s oracle.\n\nIf the oracle influences pricing, TWAP, or other safety checks elsewhere in the program, this is a configuration takeover/front-run risk. Even if the oracle data is program-owned, the ability for an arbitrary party to bind the pool to an arbitrary oracle account is a sensitive capability.\n",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Division-by-zero panic risk in calculate_max_liquidity_per_tick with tick_spacing = 0",
+                    "description": "`calculate_max_liquidity_per_tick(tick_spacing: u16)` performs:\n  MAX_TICKS_AMOUNT.checked_div(tick_spacing.try_into().unwrap()).unwrap();\nwith no explicit check that `tick_spacing != 0`.\n\nA zero `tick_spacing` can be introduced via `create_fee_tier` (no validation shown here) and later cause panics in any code path that calls `calculate_max_liquidity_per_tick`, leading to instruction abort/DoS for pools using that tier.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains multiple arithmetic and layout hazards that map to the provided CWE root causes. The most severe are unchecked integer updates of list “head” counters (can wrap in Solana BPF release builds), and an unchecked division by `tick_spacing` that can be zero (panic/DoS). Additionally, several `.unwrap()` calls on checked arithmetic can panic on unexpected state (notably timestamp subtraction), and the program relies on packed/zero-copy memory layout and even suppresses unaligned reference warnings, which is brittle and can lead to undefined behavior across environments/toolchains. Finally, the swap math intentionally reduces precision, which can cause economically significant inaccuracies and edge cases.\n",
+            "findings": [
+                {
+                    "title": "Unchecked decrement of PositionList.head can underflow and corrupt account addressing",
+                    "description": "In `transfer_position_ownership.rs::handler`, the code performs `owner_list.head -= 1;` on an unsigned counter without any `checked_sub`/bounds check that `head > 0`.\nIn Solana BPF release builds, this will wrap on underflow, potentially turning `0` into `u32::MAX` (or whatever the underlying type is), corrupting the list length and subsequent logic.\nThis is compounded by the `last_position` account seed using `&(owner_list.load()?.head - 1).to_le_bytes()` in the account constraints; if `head == 0` at instruction entry, the seed expression underflows during account validation, leading to nonsensical PDA derivations and likely instruction failure (DoS) or state corruption if a matching PDA existed.\n",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unchecked increment of PositionList.head can overflow causing index reuse/collisions",
+                    "description": "In `transfer_position_ownership.rs::handler`, the code performs `recipient_list.head += 1;` without `checked_add` or a maximum positions bound.\nIf `head` reaches the max representable value, it will wrap to 0 in release builds, causing position index reuse and potentially PDA collisions/overwrites in future position creations (since position PDAs are derived from `head`).\n",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Division by zero panic when tick_spacing is 0 in calculate_max_liquidity_per_tick",
+                    "description": "In `math.rs::calculate_max_liquidity_per_tick`, the line:\n  `MAX_TICKS_AMOUNT.checked_div(tick_spacing.try_into().unwrap()).unwrap();`\nwill panic if `tick_spacing == 0` (checked_div returns `None`).\n`tick_spacing` ultimately comes from the fee tier/pool configuration; `CreateFeeTier::handler` does not enforce `tick_spacing > 0`.\nThis function is used during position modifications (`Position::modify`), so a pool configured with tick_spacing=0 can brick key instructions (panic/DoS).\n",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Timestamp arithmetic unwrap can panic if pool.start_timestamp is in the future",
+                    "description": "In `util.rs::cross_tick`:\n  `let seconds_passed: u64 = current_timestamp.checked_sub(pool.start_timestamp).unwrap();`\nwill panic if `current_timestamp < pool.start_timestamp`.\nIf `start_timestamp` can ever be set incorrectly (e.g., via initialization bugs, migration, or corrupted state), then crossing a tick becomes a deterministic DoS vector.\nSimilar risk exists in `get_current_timestamp()` which does `unix_timestamp.try_into().unwrap()` and will panic if the cluster timestamp is negative.\n",
+                    "category": "CWE-191",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Behavior differs between debug/tests and on-chain release due to unchecked integer ops",
+                    "description": "Several critical arithmetic updates use unchecked operators (`-=`, `+=`, `- 1` in seeds). Rust debug builds typically panic on overflow, while Solana on-chain programs are built with optimizations where these operations wrap.\nThis discrepancy can cause developers/tests to miss wraparound behavior that occurs on-chain (e.g., `owner_list.head -= 1`, `recipient_list.head += 1`, seed `head - 1`), potentially enabling state corruption that wouldn’t appear in local debug testing.\n",
+                    "category": "CWE-439",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Reliance on packed/zero-copy memory layout and unaligned references",
+                    "description": "`Position` is declared as `#[account(zero_copy)] #[repr(packed)]`, and the codebase explicitly uses `#[allow(unaligned_references)]` in `math.rs`.\nPacked structs can cause unaligned field accesses; taking references to packed fields is undefined behavior in Rust unless handled with unaligned reads/writes. This creates a brittle dependency on compiler/codegen and platform alignment behavior (especially across toolchain upgrades), risking incorrect reads/writes of on-chain state.\n",
+                    "category": "CWE-188",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Reduced-precision price math may cause economically significant inaccuracies and edge cases",
+                    "description": "`math.rs::calculate_price_sqrt` explicitly “converts ticks to price with reduced precision”, and the test suite documents rounding-caused anomalies (e.g., different desired outputs requiring the same input, small swaps not moving price, etc.).\nSuch precision loss can lead to mispricing, unexpected fee computation outcomes, and exploitable edge cases around tick crossing and swap limiting, depending on how other components assume exactness.\n",
+                    "category": "CWE-1339",
+                    "severity": "medium",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "CWE-680 concerns cases where an integer overflow occurs while computing a memory allocation size, resulting in allocating less memory than required and subsequently overflowing a buffer.\n\nIn the provided Solana/Anchor code, there are no patterns consistent with CWE-680:\n- No dynamic heap allocations (e.g., Vec/Box allocations sized from arithmetic on user-controlled values) that are followed by manual/unchecked writes.\n- Account initialization sizes are determined by Anchor from the account type (e.g., AccountLoader<Position>, AccountLoader<FeeTier>), not by a computed length derived from potentially overflowing arithmetic.\n- The manual write in `util::close()` writes a fixed 8-byte discriminator into the account data; it does not involve any allocation-size computation. If the data buffer were too small, `write_all` returns an error rather than overflowing.\n\nWhile there are various integer arithmetic operations throughout the code (ticks, liquidity math, head counters), they do not feed into a memory-allocation-size calculation that could under-allocate and then overflow a buffer. Therefore, no CWE-680 instances were identified in the provided sources.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-436",
+            "CWE-135",
+            "CWE-439",
+            "CWE-188",
+            "CWE-191",
+            "CWE-1038",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-1339"
+        ],
+        [
+            "CWE-680"
+        ]
+    ]
+}

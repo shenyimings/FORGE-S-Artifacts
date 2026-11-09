@@ -1,0 +1,107 @@
+{
+    "project": "628b07305b8820cc04fba580_624a49f3a51dfbdbbf74ff09_Soteria UXD Audit Report Final.pdf.json",
+    "files": [
+        "dataset/contracts/628b07305b8820cc04fba580_624a49f3a51dfbdbbf74ff09_Soteria UXD Audit Report Final.pdf.json/programs/uxd/src/instructions/mango_dex/mint_with_mango_depository.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.25,
+        "recall": 0.5,
+        "f1": 0.3333333333333333
+    },
+    "cwe_ground_truth": [
+        "CWE-703",
+        "CWE-754"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-682",
+        "CWE-691",
+        "CWE-755"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "[I-3] unhandled corner scenario in mint_with_mango_depository",
+            "description": "The mint_with_mango_depository function does not properly handle cases where the collateral amount is less than the perp market's base lot size. The cause is the absence of a pre-check before computing the base lot amount, leading to a division result that floors to zero. This results in a quantity of 0 being passed to mango_program::place_perp_order, which reverts with MangoErrorCode::InvalidParam. The impact is a denial of service for small deposits, preventing users from minting UXD with low collateral. This could affect user experience and onboarding but does not lead to fund loss.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code implements a Solana program instruction `mint_with_mango_depository` that allows users to mint redeemable tokens by depositing collateral and opening a short perpetual position on Mango Markets. Upon analysis, several security issues were identified based on the specified CWEs.\n\nFirst, the instruction lacks proper access control on the `user` account. While the `user` must sign the transaction, there is no restriction on who can invoke this function. This is not inherently problematic since the function is intended to be public, but the real issue arises in the validation logic. The `validate` function checks that `user_collateral.amount >= collateral_amount`, but this check occurs *before* any state changes and does not account for reentrancy or race conditions. However, more critically, the function uses `planned_collateral_delta` derived from `perp_order.quantity`, which is based on `base_lot_amount` — a value that is floored. This means the actual collateral deposited may be less than the user intended, but the system still transfers the full `planned_collateral_delta`, potentially leading to over-withdrawal from the user. This is a critical miscalculation.\n\nSecond, the code performs a transfer of `planned_collateral_delta` to the passthrough account, but this value is computed using fixed-point arithmetic with `I80F48`. The conversion from `u64` to `I80F48`, division by `base_lot_size`, flooring, and then back to `u64` can result in a value that is *less than or equal to* the original `collateral_amount`. However, the code transfers `planned_collateral_delta`, which is derived from the floored lot amount, but this value is not necessarily equal to the actual amount of collateral the user intended to deposit. Worse, the `planned_collateral_delta` is used in the deposit to Mango, but the user is charged the full `collateral_amount` via transfer. This discrepancy can cause the user to lose funds if `planned_collateral_delta < collateral_amount`, which is possible due to flooring. This is an incorrect calculation (CWE-682) that affects security.\n\nThird, the function checks `check_redeemable_global_supply_cap_overflow` *after* minting the tokens. This is a critical flaw in control flow: the redeemable tokens are minted first, and only afterward is the global cap checked. If the cap is exceeded, the transaction should revert *before* minting. However, because the check happens after minting, it is ineffective — the mint has already occurred. This is a severe control flow issue (CWE-691) that could allow supply cap violations if the check were to pass due to race conditions or miscalculations.\n\nAdditionally, the `check_mango_depositories_redeemable_soft_cap_overflow` is performed *before* minting, which is correct, but the global cap check is not, indicating inconsistent control flow management.\n",
+            "findings": [
+                {
+                    "title": "Incorrect Calculation of Collateral Delta Due to Base Lot Flooring",
+                    "description": "The function calculates `planned_collateral_delta` using `base_lot_amount = floor(collateral_amount / base_lot_size) * base_lot_size`, which can be less than `collateral_amount`. However, the full `collateral_amount` is transferred from the user, but only `planned_collateral_delta` is used in the Mango deposit. This discrepancy can cause users to lose up to one base lot of collateral per transaction due to truncation, constituting an incorrect calculation that affects fund handling.",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Insufficient Control Flow Management: Global Supply Cap Check After Minting",
+                    "description": "The function mints redeemable tokens before checking the global supply cap via `check_redeemable_global_supply_cap_overflow`. Even though the check occurs later, the mint operation is irreversible. This incorrect control flow means that if the cap is exceeded, the mint has already occurred, potentially leading to an oversupply. The check should occur before any state changes, especially before minting.",
+                    "category": "CWE-691",
+                    "severity": "critical",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Improper Handling of Exceptional Conditions in Fixed-Point Arithmetic",
+                    "description": "The code uses `I80F48` for fixed-point arithmetic but does not adequately handle edge cases such as overflow or precision loss during conversion from `u64`. Functions like `checked_div`, `floor`, and `checked_to_num` are used, but the final `planned_collateral_delta` may not reflect the expected value due to truncation. The lack of post-calculation validation against the original `collateral_amount` increases the risk of unexpected behavior under extreme market conditions or with specific lot sizes.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code implements a Solana program instruction `mint_with_mango_depository` that allows users to mint redeemable tokens by depositing collateral and opening a short perpetual position on Mango Markets. Upon analysis, no direct instances of the listed CWEs were found in terms of clear integer overflows, underflows, race conditions, or control flow issues.\n\nHowever, one critical issue stands out: the function `check_redeemable_global_supply_cap_overflow` performs a check that is logically incorrect. It checks whether the *current* circulating supply is less than or equal to the cap, but this check is performed *after* the redeemable tokens have already been minted (via `mint_to`), meaning the actual update to `redeemable_circulating_supply` has already occurred before this check runs. This leads to a flawed validation sequence.\n\nThe actual accounting update happens in `update_onchain_accounting`, which is called *before* `check_redeemable_global_supply_cap_overflow`. Therefore, when the cap check runs, the `redeemable_circulating_supply` has already been increased. However, the check does not prevent overflows because it only validates the state *after* the increase, but there is no rollback mechanism if the cap is exceeded. This results in a situation where the cap check is effectively useless — it’s a post-condition check without enforcement.\n\nThis constitutes CWE-755 (Improper Handling of Exceptional Conditions), as the program fails to properly handle the exceptional condition of exceeding the global supply cap *before* minting occurs. The check should be done *before* minting and must prevent minting if the new total would exceed the cap.\n\nNo other CWEs from the provided list are triggered upon close inspection. Arithmetic operations use `checked_` methods, synchronization is not relevant in a single-threaded blockchain context, loops are absent, and access control is handled via PDA signers.\n",
+            "findings": [
+                {
+                    "title": "Global Redeemable Supply Cap Check Occurs After Minting",
+                    "description": "The function `check_redeemable_global_supply_cap_overflow` is called after the redeemable tokens have already been minted and the circulating supply updated. This makes the cap check ineffective as a protective measure, since the damage (overflow) has already occurred. The check should be performed *before* minting and must prevent execution if the new supply would exceed the cap. This is a critical logic flaw in supply control.",
+                    "category": "CWE-755",
+                    "severity": "critical",
+                    "confidence": 0.98
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-662",
+            "CWE-193",
+            "CWE-834",
+            "CWE-191",
+            "CWE-393",
+            "CWE-841",
+            "CWE-799",
+            "CWE-190",
+            "CWE-1265",
+            "CWE-362",
+            "CWE-135",
+            "CWE-705",
+            "CWE-369",
+            "CWE-228",
+            "CWE-397",
+            "CWE-430",
+            "CWE-128",
+            "CWE-1339",
+            "CWE-670",
+            "CWE-431",
+            "CWE-768",
+            "CWE-754",
+            "CWE-1335",
+            "CWE-755"
+        ]
+    ]
+}

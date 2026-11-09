@@ -1,0 +1,106 @@
+{
+    "path": "reports/Light Protocol Audit Report.pdf",
+    "project_info": {
+        "url": "https://github.com/Lightprotocol/light-protocol-onchain",
+        "commit_id": "26f0604d1c9709ab7b5c9bf8c8ba17d6534364fb",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-03-14",
+        "project_path": "contracts/Light Protocol Audit Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "Modification of shared state is not an atomic operation",
+            "description": "1. **Description:** The Merkle tree account maintains a shared state across all users, and modifications to this state must be atomic to preserve data integrity. However, the current implementation allows non-atomic and concurrent updates due to an incomplete locking mechanism.\n2. **Cause:** The lock is bound to the signer's public key instead of the temporary storage account (tmp_storage_pda), allowing multiple instructions from the same signer but different temporary accounts to proceed concurrently. Additionally, state modifications occur mid-instruction sequence (e.g., line 65 in instructions.rs), breaking atomicity.\n3. **Exploitation:** An attacker can exploit this by sending two shielded transactions, each missing the final instruction. Due to the flawed lock, the second transaction\u2019s intermediate state is accepted. The attacker then completes the first transaction, advancing the next_index while retaining the second transaction\u2019s state. Finally, a third full transaction incorporates the second transaction\u2019s UTXO into the Merkle root without the corresponding deposit.\n4. **Impact:** This allows an attacker to insert a leaf into the Merkle tree without depositing funds, enabling theft of arbitrary amounts from the shielded pool.\n",
+            "severity": "critical",
+            "files": [
+                "program/src/poseidon_merkle_tree/processor.rs",
+                "program/src/poseidon_merkle_tree/instructions.rs"
+            ],
+            "location": [
+                "poseidon_merkle_tree/processor.rs#159",
+                "poseidon_merkle_tree/processor.rs#170",
+                "poseidon_merkle_tree/instructions.rs#65-66",
+                "poseidon_merkle_tree/instructions.rs#insert_1_inner_loop",
+                "poseidon_merkle_tree/instructions.rs#insert_last_double"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Precomputed data is not validated",
+            "description": "1. **Description:** The constant array ZERO_BYTES_MERKLE_TREE_18 contains precomputed Poseidon hashes for the empty Merkle tree, but its correctness is not verified in code. This lack of validation makes it difficult for reviewers to confirm whether the values are accurate.\n2. **Cause:** The precomputed data is hardcoded without accompanying tests or derivation logic, introducing trust assumptions about the integrity of the data.\n3. **Exploitation:** If the precomputed values were incorrect or maliciously chosen, they could act as trapdoors, allowing invalid Merkle roots to be accepted and enabling unauthorized withdrawals.\n4. **Impact:** While no immediate exploit is demonstrated, the absence of validation undermines trust in the correctness of the Merkle tree logic and could lead to serious vulnerabilities if the data were compromised.\n",
+            "severity": "low",
+            "files": [
+                "program/src/utils/config.rs"
+            ],
+            "location": [
+                "src/utils/config.rs#ZERO_BYTES_MERKLE_TREE_18"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Inconsistent definition of the same data structure",
+            "description": "1. **Description:** The temporary storage account data structure is defined in multiple files (src/state.rs and src/groth16_verifier/prepare_inputs/state.rs) with differing serialization rules, leading to potential misinterpretation of fields.\n2. **Cause:** The serialization logic for TmpStoragePda is duplicated across different structs (e.g., ChecksAndTransferState, PrepareInputsState) without a unified Pack implementation, resulting in inconsistent packing/unpacking behavior.\n3. **Exploitation:** While not currently exploitable, future changes could result in deserialization mismatches, leading to incorrect state interpretation and potential logic errors.\n4. **Impact:** The inconsistency increases maintenance burden and introduces risk of bugs during future development, potentially leading to security weaknesses if fields are misread.\n",
+            "severity": "low",
+            "files": [
+                "program/src/state.rs",
+                "program/src/groth16_verifier/prepare_inputs/state.rs"
+            ],
+            "location": [
+                "src/state.rs",
+                "src/groth16_verifier/prepare_inputs/state.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "Unused code and redundant instructions",
+            "description": "1. **Description:** Several instructions are defined but unused (e.g., IDs 121, 122 in final exponentiation), while others are used but undefined (e.g., instruction ID 1 in IX_ORDER for the Miller loop).\n2. **Cause:** Incomplete instruction set definitions and failure to remove obsolete code, likely due to refactoring without cleanup.\n3. **Exploitation:** Unused or undefined instructions do not directly enable attacks but can confuse auditors and developers, increasing the risk of logic errors during future updates.\n4. **Impact:** Reduces code clarity and maintainability; while not directly exploitable, it contributes to technical debt and potential future vulnerabilities.\n",
+            "severity": "informational",
+            "files": [
+                "program/src/groth16_verifier/final_exponentiation/instructions.rs",
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "src/groth16_verifier/final_exponentiation/instructions.rs",
+                "src/lib.rs"
+            ]
+        }
+    ]
+}

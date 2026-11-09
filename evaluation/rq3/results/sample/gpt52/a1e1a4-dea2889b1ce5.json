@@ -1,0 +1,68 @@
+{
+    "project": "tensor_foundation_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/tensor_foundation_audit_final.pdf.json/amm/program/src/instructions/sell_nft_token_pool.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-669",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-284",
+        "CWE-682",
+        "CWE-707"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Unfair Rent Distribution in order_vault",
+            "description": "The order_vault account's source_ta token account holds a rent-exempt reserve funded by the maker when creating an order. However, upon closing the order, the rent from this account is transferred to the taker regardless of who funded it. This occurs due to incorrect logic in the `return_rent` function, which calculates and transfers excess rent without considering the original funder. An attacker could exploit this by repeatedly taking expired or canceled orders to collect rent paid by makers. The impact is a loss of SOL for makers, though limited to rent amounts, resulting in unfair economic behavior and erosion of trust in the system.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The instruction is generally careful about using checked arithmetic and will revert atomically on errors, but there are a few security-relevant gaps that stem from the listed CWEs.\n\nThe largest concern is access-control/identity binding: the `owner` account is documented as “has_one = owner in pool”, but no such constraint exists, and `pool` itself is not constrained to the expected PDA seeds. The handler derives `signer_seeds` from the *passed-in* `owner_pubkey` and `pool.pool_id`, and uses those seeds to sign transfers and shared-escrow withdrawals. While an incorrect `owner` will typically cause CPI signature failure (and thus revert), this missing binding is still a protection-mechanism failure: other logic (shared escrow validation, NFT destination) relies on `owner` being the pool owner, yet that relationship is not enforced at the account validation layer.\n\nA second issue is calculation/exception handling around fees: `optional_royalty_pct` is accepted unchecked. If it can exceed intended bounds (e.g., >100% or >10_000 bps depending on convention), `creators_fee` may exceed `current_price`, causing `left_for_seller.checked_sub(...)` to fail and the instruction to error. This creates a reliable DoS vector against otherwise-valid sells (especially if callers can be induced to pass malformed royalty pct) and indicates incorrect calculation/insufficient exceptional-condition handling.\n\nFinally, royalties payout depends on `ctx.remaining_accounts` ordering/content. If `transfer_creators_fee` does not strictly verify that each provided remaining account matches the expected creator addresses (and not just the count/order), an attacker could substitute accounts and redirect royalties. This is a common integration pitfall (improper interaction / improper neutralization of structured inputs). The risk here depends on the implementation of `transfer_creators_fee` in `tensor_toolbox`, which is not shown.\n",
+            "findings": [
+                {
+                    "title": "Pool owner identity is not enforced (missing owner<->pool binding and PDA seed constraints)",
+                    "description": "The `owner` account is treated as “the owner of the pool and the buyer/recipient of the NFT”, but there is no constraint that `owner.key() == pool.owner` (despite the comment) and no seeds constraint ensuring `pool` is the expected PDA (e.g., `seeds=[b\"pool\", owner, pool_id]`).\n\nSecurity-relevant consequences:\n- `signer_seeds` for `invoke_signed` are derived from the *passed-in* `owner_pubkey`, not a value proven to be tied to `pool`.\n- The shared-escrow validation uses `assert_decode_margin_account(..., owner)` but `owner` is unchecked and not required to be the pool’s actual owner.\n- The NFT destination ATA (`owner_ta`) is derived from the passed `owner`, so correctness depends on `owner` being the true pool owner.\n\nIn many cases a mismatched `owner` will cause CPI signature failure and revert, but the lack of enforced identity binding is still an access-control/protection-mechanism gap and increases the chance of future bypasses if surrounding logic changes.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.83
+                },
+                {
+                    "title": "Unchecked optional_royalty_pct can cause fee underflow and transaction DoS",
+                    "description": "`optional_royalty_pct: Option<u16>` is accepted without validating bounds. It influences:\n  `creators_fee = pool.calc_creators_fee(metadata, current_price, optional_royalty_pct)?;`\nfollowed by:\n  `left_for_seller = left_for_seller.checked_sub(actual_creators_fee)?;`\n\nIf `optional_royalty_pct` is larger than intended (e.g., >100% / >10_000 bps), `creators_fee` (and potentially `actual_creators_fee`) can exceed `current_price`, leading to a checked-sub underflow and an error. This makes sells fail reliably (DoS) for malformed inputs and indicates incorrect fee calculation assumptions.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.76
+                },
+                {
+                    "title": "Royalties payout relies on remaining_accounts; potential account substitution if helper doesn’t enforce creator keys",
+                    "description": "Royalties are paid via `transfer_creators_fee(..., remaining_accounts, creators_fee, ...)`, where `remaining_accounts` is `ctx.remaining_accounts.iter()`.\n\nIf `transfer_creators_fee` does not strictly verify that each remaining account’s pubkey matches the corresponding creator address from metadata (and instead relies on caller-supplied ordering/count), a caller could provide arbitrary accounts to redirect royalty payments. This is an integration/input-neutralization risk that depends on the toolbox implementation (not shown here).\n",
+                    "category": "CWE-707",
+                    "severity": "high",
+                    "confidence": 0.55
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

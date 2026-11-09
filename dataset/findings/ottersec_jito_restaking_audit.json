@@ -1,0 +1,122 @@
+{
+    "path": "reports/ottersec_jito_restaking_audit.pdf",
+    "project_info": {
+        "url": "https://github.com/jito-foundation/restaking",
+        "commit_id": "f04242f",
+        "address": [
+            "vault_staker_withdrawal_ticket_token_account",
+            "vault_fee_token_account",
+            "staker_token_account"
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-09-20",
+        "project_path": "contracts/ottersec_jito_restaking_audit.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Unauthorized Withdrawal of Unstaked Amount",
+            "description": "1. **Description:** The burn instruction in the restaking program allows any user holding VRT tokens to withdraw unstaked amounts without possessing a legitimate withdrawal ticket, bypassing the intended withdrawal process.\n2. **Cause:** The function `process_burn_withdrawal_ticket` only checks that the amount being burned is less than the total VRT supply, without verifying whether the caller has an associated withdrawal ticket or unstaked balance.\n3. **Exploitation:** An attacker can call the burn instruction with any amount of VRT tokens they own, triggering a withdrawal of underlying tokens even if they never initiated a withdrawal request or had staked funds.\n4. **Impact:** This leads to unauthorized withdrawal of funds from the vault, resulting in direct loss of assets for the protocol and legitimate stakers.\n",
+            "severity": "critical",
+            "location": [
+                "vault_program::process_burn_withdrawal_ticket"
+            ],
+            "files": [
+                "vault_program/src/burn_withdrawal_ticket.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Slashing-Induced Share Dilution",
+            "description": "1. **Description:** When a vault undergoes slashing that reduces the deposited token balance to zero but leaves VRT tokens in circulation, the next depositor receives VRT shares equal to their deposit amount without accounting for existing VRT supply from prior stakeholders.\n2. **Cause:** The `calculate_vrt_mint_amount` function returns the full deposit amount as minted VRT when `tokens_deposited` is zero, ignoring outstanding VRT supply from prior stakeholders.\n3. **Exploitation:** After a full slash, a new depositor can deposit tokens and receive a disproportionately large number of VRT tokens, effectively donating value to previous holders who retain their shares.\n4. **Impact:** This results in economic imbalance and share dilution, undermining the fairness of the restaking mechanism and potentially causing overflow in share calculations.\n",
+            "severity": "high",
+            "location": [
+                "vault_core/src/vault.rs#calculate_vrt_mint_amount"
+            ],
+            "files": [
+                "vault_core/src/vault.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "DOS Due to Withdrawal Ticket Desynchronization",
+            "description": "1. **Description:** An attacker can desynchronize the VRT token amount in the `vault_staker_withdrawal_ticket_token_account` from the amount recorded in the `VaultStakerWithdrawalTicket` account by directly transferring VRT tokens to the token account.\n2. **Cause:** The program does not validate the token account balance against the state account before processing burns or closing accounts, allowing external manipulation of token balances.\n3. **Exploitation:** By sending extra VRT tokens directly to the withdrawal ticket token account, the attacker causes a mismatch that prevents the `close_account` instruction from succeeding due to non-zero balance checks.\n4. **Impact:** Legitimate stakers are unable to close their withdrawal tickets and claim their funds, resulting in a denial-of-service condition.\n",
+            "severity": "high",
+            "location": [
+                "vault_program::process_burn_withdrawal_ticket",
+                "vault_staker_withdrawal_ticket_token_account"
+            ],
+            "files": [
+                "vault_program/src/burn_withdrawal_ticket.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack of Proper Permission Checks and Safeguards",
+            "description": "1. **Description:** The `process_burn_withdrawal_ticket` function lacks validation on the `min_amount_out` parameter and does not enforce calling the `CrankVaultUpdateStateTracker` instruction, enabling manipulation by malicious users.\n2. **Cause:** The function accepts any `min_amount_out` value without bounds checking and allows omission of a critical state update step, both due to missing safeguards.\n3. **Exploitation:** An attacker can set an unreasonably low `min_amount_out`, proceed with the burn, and potentially receive far fewer tokens than expected, or skip reward updates by omitting the crank call.\n4. **Impact:** Users may suffer unfair losses or miss out on entitled rewards, compromising the integrity and reliability of the withdrawal process.\n",
+            "severity": "high",
+            "location": [
+                "vault_program/src/burn_withdrawal_ticket.rs#process_burn_withdrawal_ticket"
+            ],
+            "files": [
+                "vault_program/src/burn_withdrawal_ticket.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Vault Share Inflation Risk",
+            "description": "1. **Description:** An attacker can exploit the `UpdateVaultBalance` mechanism after a vault has been slashed to inflate their share of VRT tokens by depositing tokens when the token-to-share ratio is skewed.\n2. **Cause:** The share calculation does not account for prior slashing events that reduce the underlying asset balance while leaving VRT supply unchanged, allowing disproportionate minting.\n3. **Exploitation:** By depositing tokens into a slashed vault and triggering balance updates, the attacker receives more VRT tokens than fair market value, effectively stealing value from existing stakeholders.\n4. **Impact:** This leads to unfair distribution of vault ownership and economic loss for honest participants due to share inflation.\n",
+            "severity": "high",
+            "location": [
+                "UpdateVaultBalance"
+            ],
+            "files": [
+                "vault_program/src/update_vault.rs"
+            ]
+        }
+    ]
+}

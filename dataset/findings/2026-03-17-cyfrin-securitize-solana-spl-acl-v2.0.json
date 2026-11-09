@@ -1,0 +1,229 @@
+{
+    "path": "reports-without-source/2026-03-17-cyfrin-securitize-solana-spl-acl-v2.0.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/securitize-io/bc-solana-spl-acl-sc"
+        ],
+        "commit_id": [
+            "df60662bbc470e215e05cdcb929799b16c686230"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-03-10",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-430"
+                ]
+            },
+            "title": "Permissionless freeze setup is wired to the thaw extra-metas PDA instead of the freeze PDA",
+            "description": "The program only uses a single extra-metas seed, thaw_extra_account_metas, for both freeze and thaw operations, despite the Token-ACL program expecting distinct PDAs for freeze and thaw. This miswiring occurs because setup_extra_metas only initializes the thaw-side PDA, and the freezePermissionless instruction forwards this thaw-side PDA instead of a freeze-specific one. The root cause is the lack of a dedicated freeze extra-metas seed and derivation logic in the codebase. An attacker cannot directly exploit this for financial gain, but any gating program that relies on freeze_extra_account_metas for account resolution will fail during permissionless freeze operations, leading to a denial of service for legitimate users. The impact is that permissionless freeze functionality becomes unreliable or non-functional for gating programs expecting correct freeze-side metadata, undermining the intended security model.\n",
+            "severity": "medium",
+            "location": [
+                "constants.rs",
+                "setup_extra_metas",
+                "freezePermissionless builder"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "setup_extra_metas forwards PDA signer authority to an unvalidated gating_program in an admin-only path",
+            "description": "The setup_extra_metas instruction only verifies that the supplied gating_program is executable but does not validate that it matches the gating program configured for the mint. The root cause is the absence of a cross-check between the provided gating_program and the stored configuration in the Token-ACL state. Although this path is restricted to admins, a malicious or misconfigured frontend could trick an admin into forwarding signer privileges (via the access_control_authority PDA) to an unintended program. This could result in unintended CPI invocations from a rogue gating program, potentially leading to unauthorized state changes or fund locks if combined with other vulnerabilities. The impact is primarily operational risk and reduced safety for admin operations, rather than direct fund loss.\n",
+            "severity": "low",
+            "location": [
+                "setup_extra_metas"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "thaw_permissionless and freeze_permissionless Can Be Bypassed by Direct token_acl Invocation",
+            "description": "The pause mechanism in the spl-token-access-control program is bypassable because users can invoke thaw_permissionless and freeze_permissionless directly on the token_acl program, which does not check the AccessControlState.is_paused flag. The root cause is the decentralized nature of CPI calls: while the ACL program enforces the pause state before making CPIs to token_acl, the token_acl program itself does not validate the pausing state of the calling program. An attacker can exploit this by constructing a transaction that calls token_acl directly, circumventing the ACL program's access control entirely. The impact is that the admin's ability to pause permissionless operations is ineffective, allowing users to continue freezing or thawing accounts even when the feature is supposed to be disabled, potentially leading to unauthorized account freezes during emergency situations.\n",
+            "severity": "low",
+            "location": [
+                "thaw_permissionless_handler",
+                "freeze_permissionless_handler",
+                "token_acl program"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "change_admin is single-step and permits irreversible admin loss through bad input",
+            "description": "The change_admin function immediately overwrites the current admin with a new one without requiring confirmation or validation of the new admin address. The root cause is the lack of a two-step ownership transfer pattern and absence of input validation against sentinel addresses like Pubkey::default() or system_program::ID. An attacker cannot directly exploit this, but an honest admin could accidentally input an incorrect or invalid address, resulting in permanent loss of administrative control. The impact is irreversible administrative lockout, which could render the contract unmanageable and prevent critical operations such as pausing or updating configurations.\n",
+            "severity": "informational",
+            "location": [
+                "change_admin"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "token_account is missing a local mint == mint.key() constraint in authority flows",
+            "description": "The freeze_account, thaw_account, and mint_to_checked instructions do not locally verify that the provided token_account belongs to the expected mint. The root cause is reliance solely on downstream checks in the Token-2022 or Token-ACL programs instead of enforcing this invariant locally. While the downstream programs should reject mismatches, the lack of a local check increases the error surface and delays failure detection. An attacker could exploit this by submitting malformed accounts to trigger obscure reverts or potentially bypass certain frontend validations. The impact is reduced code robustness and degraded developer/user experience due to less clear error messages, though no direct financial loss is possible.\n",
+            "severity": "informational",
+            "location": [
+                "freeze_account",
+                "thaw_account",
+                "mint_to_checked"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Several error variants are defined but currently unused",
+            "description": "The program's error enum includes several variants such as SameAuthority, InvalidProgram, InsufficientBalance, and others that are not used in any instruction logic or tests. The root cause is likely incomplete implementation or leftover placeholders from early development. These unused variants create confusion for developers and increase the cognitive load when auditing or extending the code. There is no direct security impact, but it may lead to incorrect assumptions about validation coverage. The impact is reduced code clarity and maintainability, making it harder to trust the completeness of error handling.\n",
+            "severity": "informational",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Incorrect Documentation Comment for create_config_handler",
+            "description": "The documentation comment for create_config_handler incorrectly states that it deletes a config and sends lamports, when in fact it creates a config via CPI to the token-acl program. The root cause is a copy-paste error or outdated comment. This misleads developers who rely on documentation for integration or maintenance. An attacker cannot exploit this, but a developer might误use the function based on the wrong assumption, leading to bugs or failed transactions. The impact is confusion and potential integration errors, reducing the reliability of the codebase for external contributors.\n",
+            "severity": "informational",
+            "location": [
+                "create_config_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "new_freeze_authority Omitted from DeleteConfig Event",
+            "description": "The DeleteConfig event does not include the new_freeze_authority field, even though the instruction transfers freeze authority to this account. The root cause is an inconsistency in event design compared to other authority-change events like SetFreezeAuthority, which do log both old and new authorities. This omission breaks the completeness of the audit trail. Off-chain indexers and monitoring tools cannot reconstruct the full history of authority changes without querying on-chain account states directly. The impact is degraded observability and increased complexity for external systems that depend on event data for tracking access control changes.\n",
+            "severity": "informational",
+            "location": [
+                "DeleteConfig event"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-662"
+                ],
+                "3": [
+                    "CWE-821"
+                ]
+            },
+            "title": "Unnecessary mut constraint on mint in read-only ops delays genuine operations that require mint to be mutable",
+            "description": "Instructions like set_gating_program and toggle_permissionless mark the mint account as mutable despite only reading from it. The root cause is incorrect account mutability annotation in the instruction context. On Solana, marking an account as mutable acquires a write lock, preventing other instructions from modifying it concurrently. This creates unnecessary contention: if one instruction holds a mutable mint reference, another genuine state-modifying instruction like mint_to_checked must wait. The impact is increased transaction latency and potential delays in time-sensitive operations, reducing the efficiency and responsiveness of the system.\n",
+            "severity": "informational",
+            "location": [
+                "set_gating_program.rs",
+                "toggle_permissionless.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Redundant executable check for token ACL program after address validation",
+            "description": "The code performs both an address check against the TOKEN_ACL constant and an executable check on the token ACL program account. The root cause is redundant validation logic. Since a program deployed at a known address on Solana is inherently executable, the executable check adds no additional security once the address is confirmed. Each such check consumes extra compute units, increasing transaction costs unnecessarily. The impact is higher gas consumption across multiple instructions, reducing cost efficiency for users without any security benefit.\n",
+            "severity": "informational",
+            "location": [
+                "create_config.rs",
+                "delete_config.rs",
+                "freeze_permissionless.rs",
+                "set_gating_program.rs",
+                "thaw_permissionless.rs",
+                "toggle_permissionless.rs",
+                "freeze_account.rs",
+                "thaw_account.rs",
+                "set_authority.rs"
+            ],
+            "files": []
+        }
+    ]
+}

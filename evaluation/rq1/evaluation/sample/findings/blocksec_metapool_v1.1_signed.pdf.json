@@ -1,0 +1,203 @@
+{
+    "path": "reports/blocksec_metapool_v1.1_signed.pdf",
+    "project_info": {
+        "url": "https://github.com/Narwallets/meta-pool/",
+        "commit_id": "1739b8782d88ba2793de3f02ef7fe99a7eacee25",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-03-01",
+        "project_path": "contracts/blocksec_metapool_v1.1_signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Missing check on the total weight of all the staking pools",
+            "description": "1. **Description:** The smart contract allows the owner to set the weight_basis_points for individual staking pools without enforcing that the total sum of all weights equals 100%. This can lead to an invalid distribution state.\n2. **Cause:** The function `set_staking_pool_weight` only enforces that a single pool's weight is below 50%, but does not validate the cumulative total of all staking pool weights.\n3. **Exploitation:** A malicious or mistaken owner could set weights such that their sum exceeds 100%, disrupting the intended staking distribution logic during reward distribution.\n4. **Impact:** The imbalance in total weight could cause starvation in lower-weight staking pools during reward distribution, leading to unfair allocation and potential loss of user trust or funds.\n",
+            "severity": "medium",
+            "files": [
+                "metapool/src/owner.rs"
+            ],
+            "location": [
+                "StakingPoolInfo.weight_basis_points#21",
+                "MetaPool.set_staking_pool_weight#72-87"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Conflicts between account roles are not fully considered",
+            "description": "1. **Description:** During contract initialization, the code does not check if the `treasury_account_id` is distinct from the `DEVELOPERS_ACCOUNT_ID`, which could result in overlapping roles.\n2. **Cause:** The `new` function performs several equality checks between account IDs but omits the comparison between `treasury_account_id` and `DEVELOPERS_ACCOUNT_ID`.\n3. **Exploitation:** An attacker or misconfigured deployment could set the same account for both treasury and developer roles, allowing the developer to claim treasury rewards.\n4. **Impact:** This could lead to unauthorized access to treasury funds, resulting in loss of funds designated for other purposes such as operations or community rewards.\n",
+            "severity": "low",
+            "files": [
+                "metapool/src/owner.rs"
+            ],
+            "location": [
+                "MetaPool.new#251-267"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "Missing check on the conflicts while setting account roles",
+            "description": "1. **Description:** Functions that update critical account roles, such as `set_operator_account_id` and `set_owner_id`, do not validate that the new account IDs are distinct from other privileged accounts like `DEVELOPERS_ACCOUNT_ID`.\n2. **Cause:** The absence of comprehensive uniqueness checks during role updates allows for potential role collisions.\n3. **Exploitation:** An owner could inadvertently or maliciously assign overlapping roles, leading to privilege escalation or fund misdirection.\n4. **Impact:** Overlapping roles could allow a single entity to control multiple functions, undermining access control and potentially leading to theft or mismanagement of funds.\n",
+            "severity": "low",
+            "files": [
+                "metapool/src/owner.rs"
+            ],
+            "location": [
+                "MetaPool.set_operator_account_id#128-131",
+                "MetaPool.set_owner_id#133-136"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "Account treasury_account cannot be read or modified",
+            "description": "1. **Description:** Once the contract is initialized, the `treasury_account_id` is immutable and lacks getter or setter functions for external inspection or update.\n2. **Cause:** The contract does not implement any public method to read or modify the treasury account after initialization.\n3. **Exploitation:** If the treasury account is compromised or needs to be rotated, there is no mechanism to do so, rendering the contract inflexible.\n4. **Impact:** This reduces the operational flexibility and security maintainability of the contract, potentially leading to permanent loss of access to treasury funds if the account is lost or compromised.\n",
+            "severity": "low",
+            "files": [
+                "metapool/src/owner.rs"
+            ],
+            "location": [
+                "MetaPool.new#251-267"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Function assert_callback_calling can be replaced by #[private]",
+            "description": "1. **Description:** The custom function `assert_callback_calling` manually checks that the caller is the contract itself, a functionality already provided by the `#[private]` macro in NEAR SDK.\n2. **Cause:** The developer implemented a manual check instead of using the built-in macro, increasing code complexity and maintenance burden.\n3. **Exploitation:** While not directly exploitable, this pattern may mislead developers into thinking the function is private when it is actually public and relies on runtime checks.\n4. **Impact:** Increased risk of future bugs due to unclear access control semantics and reduced code readability, though no direct financial impact.\n",
+            "severity": "informational",
+            "files": [
+                "metapool/src/utils.rs"
+            ],
+            "location": [
+                "Utils.assert_callback_calling#33-35"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unused macro is found",
+            "description": "1. **Description:** The `#[payable]` macro is applied to the `set_reward_fee` function despite the function not requiring any attached deposit.\n2. **Cause:** The macro was likely added by mistake or left over from a previous implementation.\n3. **Exploitation:** An attacker could attach a deposit when calling the function, which would be accepted but not handled, potentially leading to lost funds.\n4. **Impact:** Users may lose funds if they mistakenly attach tokens, and the contract wastes gas processing unnecessary deposits.\n",
+            "severity": "low",
+            "files": [
+                "metapool/src/owner.rs"
+            ],
+            "location": [
+                "MetaPool.set_reward_fee#447-453"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "Dead code is found",
+            "description": "1. **Description:** The utility function `between` is defined but never used anywhere in the codebase.\n2. **Cause:** The function was likely added for future use or testing but was never integrated.\n3. **Exploitation:** No direct exploitation path, but dead code increases audit surface and maintenance cost.\n4. **Impact:** Reduces code clarity and increases the risk of confusion during future development or audits.\n",
+            "severity": "low",
+            "files": [
+                "metapool/src/utils.rs"
+            ],
+            "location": [
+                "Utils.between#121-123"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Inconsistent implementation between function realize_meta_massive and realize_meta",
+            "description": "1. **Description:** The function `realize_meta_massive` includes an additional validation check when updating user accounts that is missing in the single-user `realize_meta` function.\n2. **Cause:** Divergent logic paths were implemented without synchronization between batch and single operations.\n3. **Exploitation:** An attacker could exploit the missing check in `realize_meta` to perform unauthorized or invalid state updates that would be blocked in the batch version.\n4. **Impact:** Inconsistencies in validation logic could lead to state corruption or unauthorized reward claims.\n",
+            "severity": "low",
+            "files": [
+                "metapool/src/owner.rs"
+            ],
+            "location": [
+                "MetaPool.realize_meta_massive#849",
+                "MetaPool.realize_meta"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "Function get_staking_pool_list may not work",
+            "description": "1. **Description:** The function `get_staking_pool_list` iterates over all staking pools and returns a full list, which could consume excessive gas if the number of pools is large.\n2. **Cause:** The function lacks pagination or index-based filtering, forcing a full iteration and data serialization in a single transaction.\n3. **Exploitation:** An attacker or legitimate user invoking this function when the staking pool count is high could cause transaction failure due to gas limits.\n4. **Impact:** The function may become unusable at scale, leading to denial of service for clients relying on this endpoint.\n",
+            "severity": "low",
+            "files": [
+                "metapool/src/owner.rs"
+            ],
+            "location": [
+                "MetaPool.get_staking_pool_list#41-57"
+            ]
+        }
+    ]
+}

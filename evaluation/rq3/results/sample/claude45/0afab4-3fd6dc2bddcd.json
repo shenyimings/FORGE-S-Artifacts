@@ -1,0 +1,203 @@
+{
+    "project": "blocksec_ref_token-locker-v2.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_token-locker-v2.0-signed.pdf.json/contracts/contract/src/token_receiver.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.21428571428571427,
+        "recall": 1.0,
+        "f1": 0.35294117647058826
+    },
+    "cwe_ground_truth": [
+        "CWE-20",
+        "CWE-707",
+        "CWE-1287"
+    ],
+    "cwe_detected": [
+        "CWE-1173",
+        "CWE-1285",
+        "CWE-707",
+        "CWE-1288",
+        "CWE-664",
+        "CWE-682",
+        "CWE-228",
+        "CWE-1286",
+        "CWE-74",
+        "CWE-1284",
+        "CWE-284",
+        "CWE-703",
+        "CWE-20",
+        "CWE-1287"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Lack of token whitelist check",
+            "description": "The contract allows users to lock tokens without validating whether the incoming token complies with the NEP-141 standard. This occurs in the `ft_on_transfer()` function, which does not enforce a whitelist of allowed tokens. The absence of a token whitelist validation mechanism enables malicious actors to lock arbitrary or invalid tokens. An attacker can lock a non-compliant or malicious token, consuming a slot in the user's lock limit (up to 64 tokens), thereby preventing legitimate users from locking their intended tokens. Users may be blocked from locking their desired tokens due to the exhaustion of available lock slots by invalid tokens, leading to a denial-of-service condition.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Rust source code for a Solana/NEAR smart contract, I have identified several security issues stemming from the candidate CWE list:\n1. **CWE-284 (Improper Access Control)**: The `ft_on_transfer` function uses `env::predecessor_account_id()` to determine the token contract address. This is vulnerable because any contract can call this function and claim to be any token contract. There's no whitelist or validation of allowed token contracts, allowing unauthorized tokens to be locked in the system.\n2. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: Both `ft_on_transfer` and `mft_on_transfer` use `.expect('INVALID MSG')` when parsing the message. This will cause a panic if the message format is invalid, which could be exploited for denial of service. Additionally, `internal_unwrap_account` (based on naming convention) likely panics if the account doesn't exist, rather than handling this gracefully.\n3. **CWE-682 (Incorrect Calculation)**: The `unlock_time_sec` parameter is a u32 representing seconds, but there's no validation that it represents a future time or reasonable duration. An attacker could set `unlock_time_sec` to 0 or a past timestamp, potentially bypassing the locking mechanism entirely. There's also no overflow checking when this value is used in calculations.\n4. **CWE-707 (Improper Neutralization)**: The `msg` parameter is parsed without proper validation of its structure or content. While JSON parsing provides some structure validation, there's no validation of the semantic correctness of the `unlock_time_sec` value or bounds checking.\n5. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The contract always returns `PromiseOrValue::Value(U128(0))`, meaning it never returns tokens to the sender even in error cases. Once tokens are transferred to this contract, they cannot be rejected, which could lead to tokens being permanently locked if sent incorrectly.\n6. **CWE-691 (Insufficient Control Flow Management)**: There's no validation of the token_id format in `mft_on_transfer` before calling `generate_mft_token_id`. If this function doesn't handle all possible inputs correctly, it could lead to unexpected behavior or collisions in token identification.",
+            "findings": [
+                {
+                    "title": "Missing Token Contract Whitelist Allows Unauthorized Token Locking",
+                    "description": "The `ft_on_transfer` function accepts tokens from any contract by using `env::predecessor_account_id()` without validation. An attacker can deploy a malicious token contract and lock worthless tokens in user accounts, potentially causing confusion or exploiting downstream logic that assumes only legitimate tokens are locked.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Panic on Invalid Message Format Enables Denial of Service",
+                    "description": "Both token receiver functions use `.expect('INVALID MSG')` when parsing the message parameter. An attacker can send tokens with an invalid message format, causing the contract to panic and potentially preventing legitimate token transfers from being processed.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "No Validation of Unlock Time Allows Immediate Unlock",
+                    "description": "The `unlock_time_sec` parameter is not validated to ensure it represents a future timestamp. An attacker could set this to 0 or a past timestamp, potentially bypassing the token locking mechanism and immediately withdrawing tokens that should be locked.",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Unconditional Token Acceptance Prevents Error Recovery",
+                    "description": "The contract always returns `U128(0)` from token receiver functions, meaning it never rejects or returns tokens even when errors occur. This violates the NEP-141 standard's error handling mechanism and could result in tokens being permanently locked if sent with incorrect parameters or to wrong accounts.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Insufficient Input Validation on Message Parameter",
+                    "description": "The `msg` parameter is parsed as JSON without validating the semantic correctness of its contents. While the structure is validated by serde_json, there's no bounds checking on `unlock_time_sec` (e.g., maximum lock duration) or validation that the value is reasonable, allowing potential integer overflow or extremely long lock periods.",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code (which appears to be NEAR Protocol code, not Solana), I've examined it from the perspective of the specified CWE candidates focusing on input validation, encoding, and data structure handling issues.\n\nKey findings:\n\n1. **CWE-20 (Improper Input Validation)**: The code uses `expect(\"INVALID MSG\")` when parsing the `msg` parameter in both `ft_on_transfer` and `mft_on_transfer` functions. This causes a panic on invalid input rather than gracefully handling it. While this prevents processing of malformed data, it can lead to denial of service as any malformed message will cause the transaction to fail with a panic. The code should validate the message format and return an appropriate error or refund amount instead of panicking.\n\n2. **CWE-20 (Improper Input Validation)**: The `unlock_time_sec` parameter is accepted without validation. There's no check to ensure it's a reasonable future timestamp, not in the past, or within acceptable bounds. This could allow users to lock tokens with invalid unlock times (e.g., 0, past timestamps, or extremely far future values).\n\n3. **CWE-74 (Injection)**: In the `ft_on_transfer` function, `token_id` is derived from `env::predecessor_account_id()` and converted to string using `.to_string()`. While NEAR's account IDs have format restrictions, the code doesn't validate that the predecessor is actually a legitimate token contract. An attacker could potentially call this function from a malicious contract with a crafted account ID that could interfere with the token tracking system.\n\n4. **CWE-74 (Injection)**: In `mft_on_transfer`, the `token_id` parameter comes from user input and is passed to `generate_mft_token_id()` without visible validation in this code snippet. If `generate_mft_token_id()` doesn't properly sanitize or validate the input, it could lead to injection issues in the token identification system.\n\n5. **CWE-228 (Improper Handling of Syntactically Invalid Structure)**: The JSON deserialization using `serde_json::from_str` with `expect()` doesn't handle syntactically invalid JSON gracefully. Any malformed JSON will cause a panic rather than being handled as an error case.\n",
+            "findings": [
+                {
+                    "title": "Panic on Invalid Message Format Leading to Potential DoS",
+                    "description": "Both `ft_on_transfer` and `mft_on_transfer` functions use `expect('INVALID MSG')` when deserializing the message parameter. This causes the contract to panic on any malformed JSON input, which could be exploited for denial of service. Instead of panicking, the contract should validate the input and return an appropriate error or refund the full amount to indicate the transfer was rejected.",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Missing Validation of unlock_time_sec Parameter",
+                    "description": "The `unlock_time_sec` parameter in the `TokenReceiverMessage::Lock` variant is not validated. There are no checks to ensure it represents a valid future timestamp, is not in the past, or falls within reasonable bounds. This could allow users to lock tokens with nonsensical unlock times (e.g., 0, past timestamps, or timestamps billions of years in the future), potentially causing issues with the locking mechanism.",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient Validation of Token Contract Identity",
+                    "description": "In `ft_on_transfer`, the `token_id` is derived directly from `env::predecessor_account_id()` without validating that the predecessor is a legitimate token contract. While NEAR account IDs have format restrictions, there's no whitelist or verification mechanism to ensure only authorized token contracts can interact with this receiver. A malicious contract could potentially call this function and manipulate the token tracking system.",
+                    "category": "CWE-74",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Potential Injection via User-Controlled token_id in MFT Transfer",
+                    "description": "In `mft_on_transfer`, the `token_id` parameter is user-controlled input that is passed to `generate_mft_token_id()`. Without seeing the implementation of this function, there's a risk that insufficient validation or sanitization could allow injection attacks if the generated token ID is used in downstream operations. The contract should validate that the token_id conforms to expected formats before processing.",
+                    "category": "CWE-74",
+                    "severity": "low",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Improper Handling of Syntactically Invalid JSON Structure",
+                    "description": "The contract uses `serde_json::from_str` with `expect()` to parse the message parameter. This approach causes a panic when encountering syntactically invalid JSON rather than handling it as a recoverable error. The contract should use proper error handling (e.g., pattern matching on Result) to gracefully reject invalid messages and return the transferred amount to indicate rejection.",
+                    "category": "CWE-228",
+                    "severity": "medium",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided Rust source code for a Solana/NEAR smart contract token receiver implementation, I've examined it from the perspective of the specified CWE categories related to input validation. Here are my findings:\n\n1. **CWE-1173 (Improper Use of Validation Framework)**: The code uses `expect(\"INVALID MSG\")` for JSON deserialization, which will panic on invalid input rather than gracefully handling the error. This is an improper use of error handling that could lead to denial of service.\n\n2. **CWE-1286 (Improper Validation of Syntactic Correctness of Input)**: The `msg` parameter is expected to be valid JSON matching the `TokenReceiverMessage` enum structure, but the validation is insufficient. The code only checks if it can be deserialized but doesn't validate the semantic correctness of the fields (e.g., whether `unlock_time_sec` is reasonable).\n\n3. **CWE-1284 (Improper Validation of Specified Quantity in Input)**: The `amount` parameter (U128) is not validated. There's no check for zero amounts, maximum amounts, or whether the amount is reasonable. An attacker could potentially pass extreme values.\n\n4. **CWE-1285 (Improper Validation of Specified Index, Position, or Offset in Input)**: The `unlock_time_sec` parameter represents a time offset/position but is not validated. There's no check to ensure it's in the future, not too far in the future, or within reasonable bounds. An attacker could set unlock times in the past or extremely far in the future.\n\n5. **CWE-1287 (Improper Validation of Specified Type of Input)**: While the code expects `token_id` to be a String in `mft_on_transfer`, there's no validation of its format or content. The `generate_mft_token_id` function is called but we don't see validation of the input before transformation.\n\n6. **CWE-1288 (Improper Validation of Consistency within Input)**: There's no validation of consistency between the `amount`, `unlock_time_sec`, and the current state. For example, there's no check that the unlock time is consistent with the amount being locked or that multiple locks are consistent with each other.\n",
+            "findings": [
+                {
+                    "title": "Panic on Invalid JSON Message Input",
+                    "description": "The functions `ft_on_transfer` and `mft_on_transfer` use `expect(\"INVALID MSG\")` when deserializing the `msg` parameter. This causes the contract to panic on invalid JSON input, leading to a denial of service. The contract should gracefully handle invalid input and return an appropriate error or refund the tokens.",
+                    "category": "CWE-1173",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Missing Validation of unlock_time_sec Parameter",
+                    "description": "The `unlock_time_sec` parameter is not validated in either `ft_on_transfer` or `mft_on_transfer`. There are no checks to ensure the unlock time is in the future, within reasonable bounds, or not set to extreme values (e.g., 0 or u32::MAX). An attacker could lock tokens with a past timestamp (immediately unlockable) or an extremely far future timestamp (effectively burning tokens).",
+                    "category": "CWE-1285",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Missing Validation of Token Amount",
+                    "description": "The `amount` parameter (U128) is not validated in either function. There are no checks for zero amounts, negative values (if applicable), or maximum reasonable amounts. An attacker could potentially pass zero amounts to create invalid lock entries or extreme values that could cause overflow issues in subsequent operations.",
+                    "category": "CWE-1284",
+                    "severity": "medium",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Insufficient Validation of Message Structure",
+                    "description": "While the code deserializes the `msg` parameter into `TokenReceiverMessage`, it only validates syntactic JSON correctness, not semantic correctness. The code doesn't validate that the deserialized values are within acceptable ranges or make logical sense in the context of the operation.",
+                    "category": "CWE-1286",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Missing Validation of Token ID Format",
+                    "description": "In `mft_on_transfer`, the `token_id` string parameter is passed to `generate_mft_token_id` without prior validation. There's no check for empty strings, excessively long strings, or malformed token IDs that could cause issues in the transformation or storage.",
+                    "category": "CWE-1287",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "No Consistency Validation Between Lock Parameters",
+                    "description": "The contract doesn't validate consistency between the `amount` and `unlock_time_sec` parameters, or between new locks and existing locks. For example, there's no validation that prevents creating locks with inconsistent or conflicting parameters that could lead to unexpected behavior in the locking mechanism.",
+                    "category": "CWE-1288",
+                    "severity": "low",
+                    "confidence": 0.75
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-138",
+            "CWE-20",
+            "CWE-116",
+            "CWE-172",
+            "CWE-1426",
+            "CWE-228",
+            "CWE-74",
+            "CWE-240",
+            "CWE-463",
+            "CWE-170"
+        ],
+        [
+            "CWE-1287",
+            "CWE-1289",
+            "CWE-1173",
+            "CWE-1285",
+            "CWE-179",
+            "CWE-1286",
+            "CWE-1288",
+            "CWE-1284"
+        ]
+    ]
+}

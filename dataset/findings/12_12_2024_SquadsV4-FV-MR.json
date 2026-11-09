@@ -1,0 +1,121 @@
+{
+    "path": "reports/certora/12_12_2024_SquadsV4-FV-MR.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/Squads-Protocol/v4"
+        ],
+        "commit_id": [
+            "d48660833989ecea3145ff726164fe640bd90696f03ce00dfd0cda258cbf2fac"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-09-03",
+        "project_path": "contracts/12_12_2024_SquadsV4-FV-MR.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-706"
+                ],
+                "3": [
+                    "CWE-386"
+                ]
+            },
+            "title": "Transaction buffer account may become inaccessible and unclosable",
+            "description": "The vulnerability exists in the transaction buffer functionality, where the PDA (Program-Derived Address) for a transaction buffer is derived using the current multisig transaction index instead of the index saved in the transaction buffer account itself. This causes a mismatch when the multisig transaction index advances due to other transactions being processed in between operations on the buffer.\n\nThe root cause is the incorrect use of the global multisig transaction index for deriving PDAs, rather than using the transaction index stored in the transaction buffer account. This leads to the transaction buffer becoming inaccessible if any other transaction is executed in the multisig after its creation.\n\nAn attacker within the multisig can exploit this by creating another transaction (e.g., a config transaction) immediately after a victim creates a transaction buffer but before they can extend or convert it. This advances the transaction index, making the buffer's PDA invalid and thus inaccessible.\n\nAs a result, the transaction buffer account becomes permanently unclosable, causing the creator to lose their rent-exempt SOL deposit. This represents a direct financial loss and renders the feature unusible in practice due to the impossibility of guaranteeing sequential execution without interference.\n",
+            "severity": "high",
+            "location": [
+                "transaction_buffer_close.rs"
+            ],
+            "files": [
+                "v4/programs/squads_multisig_program/src/instructions/transaction_buffer_close.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Transaction buffer account may become inaccessible",
+            "description": "This issue affects the `vault_transaction_create_from_buffers.rs` instruction, which is used to convert a transaction buffer into a vault transaction. Due to the same root cause as the high-severity finding, the PDA for the transaction buffer is derived using the current multisig transaction index.\n\nIf the multisig transaction index increases between the creation of the buffer and the attempt to convert it, the derived PDA will no longer match the original account's address. This renders the buffer inaccessible for conversion.\n\nAn attacker can force this condition by submitting another transaction (e.g., a config transaction) after the buffer is created but before conversion. This breaks the expected workflow and forces the user to restart the entire process.\n\nThe impact is lower than the high-severity finding because it does not result in permanent loss of funds—only operational disruption and inconvenience. However, it still prevents reliable use of the transaction buffer feature.\n",
+            "severity": "low",
+            "location": [
+                "vault_transaction_create_from_buffers.rs"
+            ],
+            "files": [
+                "v4/programs/squads_multisig_program/src/instructions/vault_transaction_create_from_buffer.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "Transaction buffer account may become inaccessible",
+            "description": "This issue affects the `transaction_buffer_extend.rs` instruction, which allows users to extend the size of a transaction buffer. Like the other related findings, the vulnerability stems from deriving the transaction buffer's PDA using the current multisig transaction index.\n\nIf the multisig transaction index is incremented by another transaction before the extend operation, the PDA derivation fails, making the buffer inaccessible for extension.\n\nAn attacker can exploit this by creating a competing transaction (e.g., a config transaction) after the buffer is created but before it is extended. This forces the user to abandon the current buffer and start over.\n\nThe impact is limited to usability and reliability of the feature, without direct fund loss, hence the Low severity classification.\n",
+            "severity": "low",
+            "location": [
+                "transaction_buffer_extend.rs"
+            ],
+            "files": [
+                "v4/programs/squads_multisig_program/src/instructions/transaction_buffer_extend.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Comment does not match check in code",
+            "description": "In the file `spending_limits.rs`, a comment states \"The amount must be positive\", but the actual code checks whether the amount is not equal to zero. Since the amount is of an unsigned integer type, it cannot be negative, making the comment misleading.\n\nThe root cause is a mismatch between documentation and implementation, likely due to oversight during development or review.\n\nWhile this does not introduce a direct security vulnerability, it can mislead auditors or developers into assuming stricter validation is in place than actually exists, potentially leading to incorrect assumptions in downstream logic.\n\nThe impact is purely informational—no functional or security risk—but correcting the comment improves code clarity and maintainability.\n",
+            "severity": "informational",
+            "location": [
+                "spending_limits.rs"
+            ],
+            "files": [
+                "v4/programs/squads_multisig_program/src/instructions/spending_limit_use.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Comment does not match code",
+            "description": "In the file `transaction_buffer_close.rs`, the comment above the `transaction_buffer_close()` function incorrectly states \"Creates a new vault transaction\", which is not what the function does. The function is responsible for closing a transaction buffer account, not creating a vault transaction.\n\nThis is a documentation error that could confuse developers or auditors about the function's purpose and behavior.\n\nThere is no direct security impact, but inaccurate comments increase the cognitive load and risk of misunderstanding during audits or maintenance.\n\nUpdating the comment to accurately reflect the function's behavior improves code readability and reduces the chance of future bugs due to incorrect assumptions.\n",
+            "severity": "informational",
+            "location": [
+                "transaction_buffer_close.rs"
+            ],
+            "files": [
+                "v4/programs/squads_multisig_program/src/instructions/transaction_buffer_close.rs"
+            ]
+        }
+    ]
+}

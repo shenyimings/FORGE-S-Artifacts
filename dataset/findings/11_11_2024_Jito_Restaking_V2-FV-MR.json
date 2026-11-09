@@ -1,0 +1,180 @@
+{
+    "path": "reports/certora/11_11_2024_Jito_Restaking_V2-FV-MR.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/jito-foundation/restaking"
+        ],
+        "commit_id": [
+            "ecbe19a55dc4d1ce91a926102174f87ef9cb72ba"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-10-31",
+        "project_path": "contracts/11_11_2024_Jito_Restaking_V2-FV-MR.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Zero Supply States Can Permanently Break VRT: Token Ratio",
+            "description": "The vault has a critical vulnerability in handling states where either deposited tokens or VRT supply reaches zero. When either supply becomes zero, the VRT:Token ratio becomes either infinite (0 tokens) or zero (0 VRT), creating an unrecoverable state that breaks the vault's economic model.\n\nThe root cause is the lack of protection against zero-supply states in the implementation. The code only checks for zero token deposits but does not guard against scenarios where the supply of tokens or VRT drops to zero after initialization. This oversight allows the system to enter an invalid economic state.\n\nAn attacker or edge condition (e.g., slashing) could trigger a state where either token or VRT supply reaches zero. Once in this state, the ratio becomes undefined or zero, making price discovery impossible and preventing correct valuation of assets.\n\nThe impact includes permanent breakage of the vault's economic model, potential instability in the protocol, and the inability to recover without external intervention. This could render the vault unusable and erode user trust.\n",
+            "severity": "high",
+            "location": [
+                "vault.rs"
+            ],
+            "files": [
+                "restaking/vault_core/src/vault.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Incorrect Asset Unstaking Logic Leads to Over-Unstaking",
+            "description": "The initialize_vault_update_state_tracker function contains a flaw in its unstaking logic. It incorrectly assumes that a zero value of additional_assets_need_unstaking indicates the completion of the previous update state. However, this assumption fails when all assets have been unstaked but not all operators have been processed, leading to over-unstaking.\n\nThe cause is the absence of proper tracking for the progress of cranks (processing steps) across operators. The logic does not verify whether all operator-related operations are complete before proceeding, and it updates state prematurely.\n\nAn attacker could exploit this by manipulating the order or timing of operations to trigger unstaking of more assets than intended, potentially bypassing cooldown periods and withdrawing assets earlier than allowed.\n\nThe impact includes disruption of vault economics, assets skipping required cooldown periods, and the inability to reliably detect incomplete operations. This undermines the integrity of the unstaking mechanism and could lead to unfair advantages or fund mismanagement.\n",
+            "severity": "high",
+            "location": [
+                "initialize_vault_update_state_tracker.rs"
+            ],
+            "files": [
+                "restaking/vault_program/src/initialize_vault_update_state_tracker.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Inconsistent Token Program Usage and Validation Creates Potential Vulnerabilities",
+            "description": "The protocol inconsistently handles interactions between SPL Token and Token2022 programs. Multiple instruction handlers use a mix of both token program versions without consistent validation of token program addresses or ownership checks.\n\nThe root cause is the lack of standardized validation logic across different instruction handlers. Some functions validate token program addresses while others do not, and ownership checks between mints and accounts are missing in certain paths.\n\nAn attacker could potentially spoof token program addresses or use invalid token accounts if the validation is bypassed in a vulnerable handler. This could lead to unexpected behavior or transaction failures.\n\nThe impact includes potential for token program address spoofing, risk of accepting invalid token accounts, inconsistent behavior across operations, and possible violation of security assumptions when mixing token program versions. While direct fund loss is not immediate, the inconsistency introduces reliability and security risks.\n",
+            "severity": "medium",
+            "location": [
+                "mint_to.rs",
+                "burn_withdrawal_ticket.rs",
+                "enqueue_withdrawal.rs",
+                "delegate_token_account.rs",
+                "operator_delegate_token_account.rs",
+                "ncn_delegate_token_account.rs",
+                "loader.rs",
+                "initialize_vault.rs"
+            ],
+            "files": [
+                "restaking/vault_program/src/mint_to.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Inefficient Token Account State Unpacking and Missing Extension Validation",
+            "description": "The protocol uses inefficient methods for unpacking token account state and fails to validate Token2022 extensions. It uses full Account::unpack when only basic state checks are needed, leading to unnecessary compute usage. Additionally, it does not handle extension-specific behaviors such as transfer fees.\n\nThe cause is the use of generic and inefficient state unpacking patterns in high-frequency operations and the lack of validation logic for token extensions at critical points like vault initialization and deposits.\n\nWhile not directly exploitable for fund theft, an attacker could use tokens with extensions (e.g., interest-bearing or fee-charging tokens) to trigger accounting errors or incompatibilities, especially if the protocol does not account for fees or balance changes due to extensions.\n\nThe impact includes potential incompatibility with certain token extensions and risk of accounting errors, which could affect balance tracking and lead to incorrect state transitions. The issue also results in higher compute costs, affecting performance and scalability.\n",
+            "severity": "medium",
+            "location": [
+                "burn_withdrawal_ticket.rs",
+                "update_vault_balance.rs",
+                "loader.rs",
+                "delegate_token_account.rs",
+                "initialize_vault.rs"
+            ],
+            "files": [
+                "restaking/clients/rust/vault_client/src/generated/instructions/burn_withdrawal_ticket.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing Maximum Bounds Validation in Fee Rate Controls",
+            "description": "Multiple administrative functions that set fee rates in the vault lack maximum bounds validation against MAX_BPS (10,000 basis points = 100%). Although these functions are restricted to admin access, the absence of input validation could allow misconfiguration that renders the protocol unusable.\n\nThe root cause is the missing validation check to ensure that fee inputs do not exceed 10,000 basis points. While arithmetic checks prevent overflows, they do not prevent setting fees above 100%, which would cause transactions to fail.\n\nAn admin could accidentally or maliciously set fee rates above 100%, leading to transaction failures due to arithmetic reverts. This would disrupt protocol operations and prevent users from interacting with the system.\n\nThe impact is protocol dysfunction and denial of service due to misconfigured fees. While direct fund loss is unlikely due to admin controls and existing arithmetic safeguards, the lack of validation increases operational risk and reduces system robustness.\n",
+            "severity": "medium",
+            "location": [
+                "vault.rs"
+            ],
+            "files": [
+                "restaking/vault_program/src/lib.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "VaultStakerWithdrawalTicket Uses Suboptimal PDA Address Verification Method",
+            "description": "The VaultStakerWithdrawalTicket::load() function uses find_program_address for PDA verification instead of create_program_address, despite already storing the bump seed in the account data. This is suboptimal in terms of performance and best practices.\n\nThe cause is the redundant use of find_program_address, which performs a loop to derive the bump, even though the correct bump is already known and stored. This wastes compute units and increases transaction costs.\n\nWhile not directly exploitable, the inefficiency increases the cost of every verification operation. An attacker could potentially exploit this by forcing repeated validations to increase resource consumption, though the impact is limited.\n\nThe impact is higher compute unit consumption per verification, leading to increased transaction fees and reduced efficiency. The stored bump seed is not utilized, representing a missed optimization opportunity. The issue does not compromise security but violates performance best practices.\n",
+            "severity": "low",
+            "location": [
+                "vault_staker_withdrawal_ticket.rs"
+            ],
+            "files": [
+                "restaking/clients/rust/vault_client/src/generated/accounts/vault_staker_withdrawal_ticket.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Inconsistent Epoch Calculation Methods",
+            "description": "The protocol uses inconsistent methods for calculating epochs across different components. This lack of standardization can lead to discrepancies in time-based logic and state transitions.\n\nThe root cause is the absence of a centralized or standardized epoch calculation function, leading different modules to implement their own logic, potentially with different assumptions or rounding methods.\n\nIf different parts of the system calculate epochs differently, it could result in race conditions, incorrect state updates, or timing vulnerabilities, especially in operations that depend on epoch boundaries.\n\nThe impact includes potential logic errors in time-dependent functions, reduced code maintainability, and increased risk of bugs during upgrades. While the immediate security risk is low, the inconsistency could lead to subtle bugs that are hard to detect.\n",
+            "severity": "low",
+            "location": [],
+            "files": [
+                "restaking/core/src/slot_toggle.rs",
+                "restaking/clients/js/restaking_client/accounts/config.ts",
+                "restaking/clients/js/vault_client/accounts/config.ts",
+                "restaking/clients/rust/restaking_client/src/generated/accounts/config.rs",
+                "restaking/clients/rust/vault_client/src/generated/accounts/config.rs"
+            ]
+        }
+    ]
+}

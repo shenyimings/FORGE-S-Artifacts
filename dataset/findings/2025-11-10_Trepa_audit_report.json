@@ -1,0 +1,236 @@
+{
+    "path": "reports-without-source/2025-11-10_Trepa_audit_report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/TrepaOrg/trepa-onchain-svm",
+            "https://github.com/AdevarLabs/trepa-onchain-svm-20251020"
+        ],
+        "commit_id": [
+            "26b4fbf0caf8607fa8d4ff036cf0a355c8e1f180",
+            "58d292f0ae4f2adc859073ccabaab269d9fa1091"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-11-10",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-222"
+                ]
+            },
+            "title": "Vulnerability to Log Truncation in Event Emissions",
+            "description": "The protocol uses Anchor's emit! macro to emit events critical for off-chain reward computation and settlement. However, Solana's sol_log_data syscall is prone to log truncation when logs exceed 10kB, which can be triggered by a malicious user inserting a spam instruction at the start of a transaction. This causes subsequent events to be silently dropped, leading to incomplete or missing event data.\n\nThe root cause is the reliance on the legacy emit! macro instead of the more robust emit_cpi! mechanism, which embeds event data within CPI calls and avoids log truncation. An attacker can exploit this by crafting transactions with large logs, especially in high-volume scenarios.\n\nThe impact includes inaccurate off-chain parsing of reward distributions, potential under- or over-allocation of rewards, user fund losses due to erroneous payouts, and increased operational failure rates. This undermines trust in the resolver system and could lead to disputes or compliance issues.\n",
+            "severity": "high",
+            "location": [
+                "lib.rs::emit!#83"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Unclaimed rewards are not handled correctly",
+            "description": "The claim_rewards function allows users to claim rewards after a pool is finalized, but there is no time limit for claiming. This can result in some users, especially those with small rewards, never claiming their payouts.\n\nThe root cause is the absence of an expiration mechanism or time-bound cleanup logic for prediction accounts. Without such a mechanism, the protocol cannot reclaim rent from unclaimed reward accounts, leading to permanent rent lock-up.\n\nAn attacker or passive user could exploit this by simply not claiming, but the primary risk is economic inefficiency rather than active exploitation. The impact includes permanent loss of rent-exempt SOL from the protocol's perspective and bloated on-chain state, reducing overall efficiency and increasing long-term costs.\n",
+            "severity": "low",
+            "location": [
+                "lib.rs::claim_rewards#568"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing Validation Constraints for Prediction Outcome Bounds and Step Size in Pool Creation",
+            "description": "The create_pool function validates basic parameters like min_outcome < max_outcome and step > 0, but fails to ensure that the prediction range is fully coverable by valid steps. Specifically, it lacks checks for: (1) (max_outcome - min_outcome) >= step, (2) (max_outcome - min_outcome) % step == 0, and (3) min_outcome % step == 0.\n\nThe root cause is incomplete input validation logic during pool initialization. This allows the creation of pools that are technically valid but practically unusable because no valid predictions can be made within the defined bounds.\n\nAn attacker could exploit this by creating broken pools to grief the system, clutter the platform, or cause indexer overload. The impact includes user frustration due to prediction failures, economic waste from unusable rent-exempt accounts, and reduced platform credibility in a competitive DeFi environment.\n",
+            "severity": "low",
+            "location": [
+                "lib.rs::create_pool#207-209"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Using non-canonical SPL token account can distribute stake across many prediction pools",
+            "description": "The predict function's context only validates that the pool_token_account has the correct owner and mint, but does not verify that it is the canonical associated token account (ATA) derived from the pool and mint keys. This allows users to create multiple non-canonical token accounts and distribute their stake across them.\n\nThe root cause is the lack of ATA derivation checks in the account constraints. This design flaw enables a user to fragment their stake across arbitrarily many token accounts.\n\nAn attacker could exploit this to complicate stake consolidation, create event parsing confusion, and potentially overwhelm off-chain indexers with redundant accounts. The impact includes operational complexity for indexers, increased storage bloat, and degraded user experience due to fragmented data, though there is no direct fund loss.\n",
+            "severity": "low",
+            "location": [
+                "context.rs::pool_token_account#154-155"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-357"
+                ]
+            },
+            "title": "Implement secure access update functionality",
+            "description": "The protocol allows the admin to update the creator and resolver Pubkeys via the update_access function without additional safeguards. The root cause is the lack of a two-step verification process, which could lead to accidental assignment of incorrect addresses. Although the admin can correct erroneous updates, the risk lies in operational mistakes rather than malicious takeovers. An attacker cannot directly exploit this to gain control, but a misconfigured address could lead to loss of functionality or delayed responses. The impact is moderate, primarily affecting operational reliability and trust in admin actions.\n",
+            "severity": "medium",
+            "location": [
+                "programs/trepa/src/lib.rs#162-166"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-439"
+                ]
+            },
+            "title": "Incomplete Token 2022 implementation will cause incompatibility with Token Extensions",
+            "description": "The program supports both SPL Token and Token-2022 programs but implements incomplete compatibility with Token-2022. The cause is the use of Account instead of InterfaceAccount for Mint and TokenAccount, and the use of token::transfer instead of token::transfer_checked, which is incompatible with Token-2022 extensions like TransferHook and TransferFees. An attacker could exploit this by minting tokens with such extensions enabled, leading to unexpected behavior during transfers, such as reduced received amounts or side effects from hook programs. The impact includes potential loss of funds or incorrect state assumptions in the protocol logic. Additionally, the absence of extension validation increases risk if permissionless pool creation is enabled in the future.\n",
+            "severity": "high",
+            "location": [
+                "programs/trepa/src/context.rs#460-470"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Adding balance validation will prevent transaction failures and improve user experience",
+            "description": "The createPrediction function in the SDK does not validate the user's token balance before submitting a transaction, only checking for the existence of the associated token account (ATA). The root cause is the lack of a pre-flight balance check. An attacker cannot directly exploit this, but users may submit transactions that are guaranteed to fail due to insufficient balance, especially when the ATA does not yet exist and needs to be created. This leads to wasted transaction fees and poor user experience. The impact is financial loss for users and reduced usability, though no funds are lost from the protocol itself.\n",
+            "severity": "low",
+            "location": [
+                "programs/trepa/src/lib.rs#447-456"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Using environment variables will improve maintainability by avoiding hardcoded public keys in source files",
+            "description": "The initialize function lacks an admin authorization check, marked as a TODO for mainnet deployment. The cause is the absence of a build-time injectable admin check, which could allow any user to initialize the program if deployed without safeguards. While deployment practices may mitigate this, the lack of code-level enforcement increases risk. An attacker could exploit this in a scenario where the program is redeployed or initialized in a new environment without proper access control, leading to full platform takeover. The impact is critical if exploited, as the admin controls key parameters and functionality. The recommendation is to use environment variables and deployment scripts to inject the admin pubkey securely.\n",
+            "severity": "critical",
+            "location": [
+                "programs/trepa/src/lib.rs#45"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Removing duplicate check will result in cleaner code",
+            "description": "The claim_rewards function contains a duplicate check ensuring the merkle root in the pool is non-zero. The root cause is redundant validation logic that was likely added for defensive programming but is already enforced elsewhere. This does not introduce a security vulnerability but increases compute unit (CU) consumption unnecessarily. There is no direct exploitation path, but it contributes to higher transaction costs. The impact is reduced efficiency and higher gas fees for users. Removing the duplicate check would improve code clarity and reduce execution cost without affecting security.\n",
+            "severity": "low",
+            "location": [
+                "programs/trepa/src/lib.rs#579"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1093"
+                ]
+            },
+            "title": "Changing platform_fee data type will reduce cost of programs",
+            "description": "The platform_fee field is defined as a u64, but since the maximum allowed value is 10,000 (basis points), a smaller u16 type would suffice. The cause is inefficient data type selection, which increases storage and memory usage. This is not a security vulnerability but an optimization opportunity. An attacker cannot exploit this directly, but the larger data type increases the program's memory footprint and compute cost. The impact is higher execution fees and inefficient use of on-chain resources. Changing the type to u16 would reduce storage costs and improve performance.\n",
+            "severity": "low",
+            "location": [
+                "programs/trepa/src/state.rs#9"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Semantic Ambiguity in Merkle Root Construction Due to Variable Input Lengths",
+            "description": "The Merkle tree implementation produces different types of root hashes depending on the number of winners: when there is a single winner, the root is directly taken as the leaf hash (derived from a 40-byte input), whereas with two or more winners, the root is an internal node hash (from a 64-byte input). This change in the \"type\" of root hash based on input size introduces semantic ambiguity, as the same hash value could theoretically be interpreted in multiple contexts. The root cause is the lack of domain separation between leaf and internal node hashing, compounded by structural differences in hash construction based on tree size. An attacker could potentially exploit this ambiguity in systems where hash interpretation is context-sensitive, especially if future protocol changes alter leaf formats or hashing rules. The impact is moderate, primarily affecting long-term cryptographic robustness and increasing the risk of collision or misinterpretation in cross-protocol scenarios.\n",
+            "severity": "medium",
+            "location": [],
+            "files": []
+        }
+    ]
+}

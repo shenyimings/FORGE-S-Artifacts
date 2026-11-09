@@ -1,0 +1,174 @@
+{
+    "path": "reports/zenith-dfs-audit-oct-2025.pdf",
+    "project_info": {
+        "url": "https://github.com/MeteoraAg/dynamic-fee-sharing",
+        "commit_id": "a1e79d65851a08ec9f941c70e08c410f1cfdb8e4",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-10-08",
+        "project_path": "contracts/zenith-dfs-audit-oct-2025.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "DBC surplus claims can revert if curve has not finished yet",
+            "description": "The dynamic fee-sharing claim functions are designed to never revert to ensure that integrations built on top and potentially looping over multiple claims do not fail. To achieve this, the functions handle_funding_by_claim_dbc_creator_surplus and handle_funding_by_claim_dbc_partner_surplus return Ok(()) if the surplus has already been claimed. However, this logic fails to account for the case where the curve has not yet completed, which can still cause the transaction to revert due to a require! check. This creates a situation where external integrations that loop over multiple claims may unexpectedly fail when encountering a pool whose curve is not complete. As a result, the intended reliability of the system is compromised, leading to potential denial of service for batch claim operations.\n",
+            "severity": "medium",
+            "location": [
+                "ix_funding_by_claim_dbc_creator_surplus#52",
+                "ix_funding_by_claim_dbc_partner_surplus#52"
+            ],
+            "files": [
+                "programs/dynamic-fee-sharing/src/instructions/ix_funding_by_claim_dbc_creator_surplus.rs",
+                "programs/dynamic-fee-sharing/src/instructions/ix_funding_by_claim_dbc_partner_surplus.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Missing restriction on claims allow for grieving",
+            "description": "The newly added claim functions allow any user to initiate a claim on behalf of a fee vault. This design enables griefing attacks in scenarios where the vault is associated with a token that imposes a maximum transfer fee (e.g., FOT tokens). In such cases, vault owners would prefer to minimize the number of claims to reduce fee costs. However, since anyone can trigger a claim, malicious actors can force frequent claims, causing the vault owner to incur higher fees than necessary. The root cause is the lack of access control, as the functions do not restrict callers to authorized parties such as shareholders. This leads to economic griefing, where attackers can increase the operational costs for vault owners without any direct benefit to themselves, purely to cause harm or disruption.\n",
+            "severity": "medium",
+            "location": [
+                "ix_funding_by_claim_damm_v2#14",
+                "ix_funding_by_claim_dbc_creator_surplus#14",
+                "ix_funding_by_claim_dbc_creator_trading_fee#14",
+                "ix_funding_by_claim_dbc_partner_surplus#14",
+                "ix_funding_by_claim_dbc_partner_trading_fee#14"
+            ],
+            "files": [
+                "programs/dynamic-fee-sharing/src/instructions/ix_funding_by_claim_damm_v2.rs",
+                "programs/dynamic-fee-sharing/src/instructions/ix_funding_by_claim_dbc_creator_surplus.rs",
+                "programs/dynamic-fee-sharing/src/instructions/ix_funding_by_claim_dbc_creator_trading_fee.rs",
+                "programs/dynamic-fee-sharing/src/instructions/ix_funding_by_claim_dbc_partner_surplus.rs",
+                "programs/dynamic-fee-sharing/src/instructions/ix_funding_by_claim_dbc_partner_trading_fee.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Fee sharing can't be used with memo required receivers",
+            "description": "The claim_fee instruction allows users to withdraw their share of fees from a fee vault. However, it does not support Token2022 accounts that have the memo transfer extension enabled, which requires every incoming transfer to include a memo instruction. The current implementation performs a standard transfer_checked instruction without including a memo, which will cause the transfer to fail when the recipient enforces memo requirements. This limits the usability of the fee-sharing system for wallets or entities that rely on memo-based transaction tracking or compliance. The impact is that legitimate users with memo-enforced accounts are unable to claim their fees, resulting in a loss of functionality and potential fund lock-up for those users.\n",
+            "severity": "low",
+            "location": [
+                "ix_claim_fee#39-46"
+            ],
+            "files": [
+                "programs/dynamic-fee-sharing/src/instructions/ix_claim_fee.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "No IX for claim_rewards for funding by DAMM-v2",
+            "description": "The dynamic_fee-sharing program does not provide an instruction to claim rewards from DAMM-V2 positions. While DAMM-V2 supports reward claiming for position owners, the absence of a corresponding claim_rewards instruction in the fee-sharing program means that any rewards earned by a position tied to a fee vault cannot be retrieved. This results in accumulated rewards being permanently locked in the pool, inaccessible to the fee vault or its beneficiaries. The issue stems from incomplete integration between the two systems, limiting the financial efficiency of the fee vault when used with reward-generating positions.\n",
+            "severity": "low",
+            "location": [
+                "lib.rs"
+            ],
+            "files": [
+                "programs/dynamic-fee-sharing/src/lib.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-431"
+                ]
+            },
+            "title": "Missing withdraw_migration_fee IX for funding by DBC",
+            "description": "The program lacks a dedicated instruction to withdraw migration fees from DBC pools and deposit them into the fee vault. This omission prevents the collection of migration fees, which could otherwise contribute to the vault's balance. Additionally, because the pool's fee_claimer and creator cannot be changed after being linked to the fee vault, there is no alternative method to retrieve these funds. This represents a missed opportunity for revenue and reduces the comprehensiveness of the fee aggregation mechanism. The root cause is the absence of a specific instruction to handle migration fee withdrawals.\n",
+            "severity": "low",
+            "location": [
+                "lib.rs"
+            ],
+            "files": [
+                "programs/dynamic-fee-sharing/src/lib.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "funding_by_claim_dbc_creator_trading_fee fails to verify config account against pool",
+            "description": "The funding_by_claim_dbc_creator_trading_fee instruction verifies that the config's collect_fee_mode is set to 0 (quote token only) but does not confirm that the provided config account is actually associated with the target pool. It only checks the quote_mint, allowing an attacker to pass in a different config account with collect_fee_mode = 0 that is not linked to the pool. Although the actual financial impact is minimal—because the underlying CPI will return zero base amount—the inconsistency could lead to confusion or incorrect state assumptions. The lack of proper validation weakens the integrity of the instruction's preconditions.\n",
+            "severity": "low",
+            "location": [
+                "ix_funding_by_claim_dbc_creator_trading_fee#18-19",
+                "ix_funding_by_claim_dbc_creator_trading_fee#66-69"
+            ],
+            "files": [
+                "programs/dynamic-fee-sharing/src/instructions/ix_funding_by_claim_dbc_creator_trading_fee.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-684"
+                ],
+                "3": [
+                    "CWE-440"
+                ]
+            },
+            "title": "Incorrect error msg for InvalidDbcPool",
+            "description": "The error message for InvalidDbcPool is incorrectly set to \"Invalid dammv2 pool\", which is the same message used for InvalidDammv2Pool. This mislabeling causes Anchor to emit misleading error logs when an InvalidDbcPool condition occurs, potentially confusing developers and users during debugging or monitoring. While this does not introduce a security vulnerability, it reduces the clarity and reliability of error reporting. The issue arises from duplicated #[msg] attributes in the error enum definition, leading to ambiguous diagnostics.\n",
+            "severity": "informational",
+            "location": [
+                "error.rs#35"
+            ],
+            "files": [
+                "programs/dynamic-fee-sharing/src/error.rs"
+            ]
+        }
+    ]
+}

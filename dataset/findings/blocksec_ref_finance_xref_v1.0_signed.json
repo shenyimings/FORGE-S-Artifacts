@@ -1,0 +1,77 @@
+{
+    "path": "reports/blocksec_ref_finance_xref_v1.0_signed.pdf",
+    "project_info": {
+        "url": "https://github.com/ref-finance/ref-token",
+        "commit_id": "1f92f64c3ee773a42649d400c91b1decf322f953",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-10-12",
+        "project_path": "contracts/blocksec_ref_finance_xref_v1.0_signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Improper Transfer Failure Handling during Unstaking",
+            "description": "1. **Description:** The function `callback_post_unstake()` mints outdated shares (xREF) back to the user based on the exchange ratio from block N, even though the callback executes in block N+1, where the ratio may have changed.\n2. **Cause:** The contract does not recalculate the xREF shares at the time of the callback execution, relying instead on stale data from the original unstake attempt.\n3. **Exploitation:** An attacker could potentially manipulate timing or take advantage of large exchange rate fluctuations between blocks to receive more favorable (or unfair) share amounts upon transfer failure.\n4. **Impact:** Users may receive an incorrect amount of xREF tokens, leading to economic unfairness or disputes, though no direct fund loss occurs due to the revert mechanism.\n",
+            "severity": "low",
+            "files": [
+                "xref-token/src/xref.rs"
+            ],
+            "location": [
+                "XRef.callback_post_unstake#120"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-390"
+                ]
+            },
+            "title": "Unrecoverable Tokens for the Unregistered Account",
+            "description": "1. **Description:** If `callback_post_unstake()` is called after a failed `ft_transfer` and the sender's account is unregistered, the locked tokens are not returned to any recoverable location.\n2. **Cause:** The contract only attempts to deposit tokens back to the user if the account exists; otherwise, it emits a log without recording the amount, leaving tokens stranded in the contract.\n3. **Exploitation:** An attacker could target users who have unregistered their accounts, knowing their unstaked tokens will be lost upon transfer failure, potentially enabling theft via social engineering or front-running.\n4. **Impact:** The unstaked tokens become permanently unrecoverable, resulting in a loss of user funds.\n",
+            "severity": "low",
+            "files": [
+                "xref-token/src/xref.rs"
+            ],
+            "location": [
+                "XRef.callback_post_unstake#128-135"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Optional Reward Distribution before Modifying Reward Rate",
+            "description": "1. **Description:** The `modify_reward_per_sec` function allows the owner to optionally skip reward distribution before updating the reward rate, based on a boolean flag.\n2. **Cause:** The logic permits the owner to change the reward rate without first distributing accrued rewards, introducing inconsistency and potential unfairness.\n3. **Exploitation:** A malicious or compromised owner could withhold distribution before lowering the reward rate, thereby reducing the total rewards users receive over time.\n4. **Impact:** Users may receive fewer rewards than expected, undermining fairness and trust in the system.\n",
+            "severity": "low",
+            "files": [
+                "xref-token/src/owner.rs"
+            ],
+            "location": [
+                "XRef.modify_reward_per_sec#20-22"
+            ]
+        }
+    ]
+}

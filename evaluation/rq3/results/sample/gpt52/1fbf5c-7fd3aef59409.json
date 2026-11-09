@@ -1,0 +1,90 @@
+{
+    "project": "blocksec_memefarming_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_memefarming_v1.0-signed.pdf.json/contracts/boost-farming/src/storage_impl.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-1288",
+        "CWE-1164",
+        "CWE-710",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-284",
+        "CWE-682",
+        "CWE-664"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Lack of Check in storage_unregister()",
+            "description": "1. **Description:** The function `storage_unregister()` allows users to unregister their accounts and withdraw the deposited storage fee. It checks that no staked tokens or rewards remain in the internal account before removal but fails to verify the `withdraws` field.\n2. **Cause:** The function does not include a validation step to ensure that the `withdraws` field of the account is empty before proceeding with account removal.\n3. **Exploitation:** An attacker could leave funds in the `withdraws` field, unregister the account, and permanently lose access to those funds due to the lack of validation.\n4. **Impact:** Users may lose funds that are left in the `withdraws` field upon account unregistration, leading to irreversible loss of assets.\n"
+        },
+        {
+            "title": "Redundant Check in storage_withdraw()",
+            "description": "1. **Description:** The function `storage_withdraw()` contains checks for `assert_one_yocto()` and `assert_contract_running()`, but the function immediately panics with `env::panic_str(E005_NOT_IMPLEMENTED)` after these checks.\n2. **Cause:** Since the function is effectively disabled, the preliminary checks serve no practical purpose and are never meaningfully executed.\n3. **Exploitation:** No direct exploit exists, but the redundant code may confuse auditors or developers into believing the function is partially functional.\n4. **Impact:** Code clarity and maintainability are reduced due to unnecessary and misleading assertions.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code implements NEP-145-style storage management, but several security-relevant issues exist around who controls deposited funds, how refunds are performed, and how storage cost/accounting is calculated and maintained over time.\n\n(1) The contract records a “sponsor_id” as the predecessor of `storage_deposit`, and `storage_unregister` refunds the storage deposit to this stored sponsor rather than to the unregistering account. This creates a non-standard and potentially surprising authority/beneficiary relationship where a third party can become the recipient of a refund triggered by the user, and the actual account being registered has no way to redirect that refund. This is an access-control/authorization problem around who is allowed to receive funds.\n\n(2) Refunds are executed via `Promise::transfer` after state changes (e.g., inserting/removing farmers, incrementing/decrementing counters). Promise failures are not handled (no callback / reconciliation). On NEAR, a failed transfer does not automatically roll back prior state updates, which can leave funds stuck in the contract while the farmer record has already been created/removed. This is both improper handling of exceptional conditions and improper resource lifecycle control.\n\n(3) Storage accounting uses a fixed constant `STORAGE_BALANCE_MIN_BOUND` and does not measure actual storage usage per account. If the `Farmer` structure grows over time (additional fields, variable-length collections, etc.), the contract may undercharge for storage and become insolvent (having to retain more state than it was paid for), or conversely overcharge. This is an incorrect calculation in a security-relevant resource-management context.\n\n(4) `farmer_count` is decremented with `-= 1` without checked arithmetic. While a farmer existence check precedes it, any invariant break/corrupted state (e.g., manual migration bug, earlier logic bug, or unexpected re-entrancy-like cross-call sequencing elsewhere in the contract) could cause underflow and permanently corrupt accounting. This is an exceptional-condition/control-of-lifetime issue and can also be viewed as an incorrect calculation.\n",
+            "findings": [
+                {
+                    "title": "Refund recipient is controlled by stored sponsor_id (non-standard authorization for storage refunds)",
+                    "description": "`storage_deposit` sets `sponsor_id = env::predecessor_account_id()` and stores it in `Farmer::new(...)`.\nLater, `storage_unregister` transfers `STORAGE_BALANCE_MIN_BOUND` to `farmer.sponsor_id` rather than to the unregistering account (`env::predecessor_account_id()`).\n\nThis means a third party who registers an account becomes the refund recipient, and the registered user cannot redirect the refund. It is an authorization decision about who may receive funds based on mutable/externally-influenced state (whoever sponsored registration), not based on the current caller.\n",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "State updates occur before refund transfers; Promise failures can strand funds",
+                    "description": "In `storage_deposit` (new registration), the farmer record is inserted and `farmer_count` incremented before issuing a refund transfer of the excess deposit.\nIn `storage_unregister`, the farmer record is removed and `farmer_count` decremented before transferring the storage deposit back to `sponsor_id`.\n\nOn NEAR, `Promise::transfer` is asynchronous and may fail (e.g., recipient account deleted, out-of-gas in chained logic, protocol edge cases). Failures are not checked via callbacks, so state will remain mutated even if the transfer fails, potentially leaving excess deposits or storage deposits trapped in the contract with no recovery path.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Improper lifetime control of deposits due to missing withdrawal path and reliance on another party to trigger refund",
+                    "description": "`storage_withdraw` is not implemented and always panics. For third-party deposits (`storage_deposit(Some(account_id), ...)`), the depositor/sponsor cannot later withdraw their deposit directly.\nThe only refund path is via `storage_unregister`, which can only be called by the registered account (predecessor), meaning the sponsor’s funds are effectively locked unless the other account cooperates and unregisters.\n\nThis is a resource lifetime/control issue: the entity that provided the resource (deposit) cannot reliably reclaim it, and there is no implemented mechanism to manage the deposit through its full lifecycle.\n",
+                    "category": "CWE-664",
+                    "severity": "low",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Fixed STORAGE_BALANCE_MIN_BOUND may undercharge/overcharge actual per-account storage",
+                    "description": "The contract charges a constant `STORAGE_BALANCE_MIN_BOUND` regardless of the actual serialized size of `Farmer` and its nested collections, and `storage_balance_of` always reports `total = MIN_BOUND` and `available = 0`.\n\nIf the `Farmer` state grows (e.g., more seeds/rewards entries, metadata, future upgrades), the actual storage cost can exceed the constant, causing the contract to subsidize storage and potentially become economically unsafe (insolvent) or DoS itself due to state bloat.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.77
+                },
+                {
+                    "title": "Unchecked decrement of farmer_count can underflow if invariants are broken",
+                    "description": "`storage_unregister` performs `self.data_mut().farmer_count -= 1;` without checked arithmetic.\nWhile removal only happens when `internal_get_farmer` returns `Some`, any prior inconsistency (migration bug, data corruption, or other logic paths modifying `farmer_count`) can cause underflow, corrupting global accounting and potentially impacting any logic that relies on `farmer_count`.\n",
+                    "category": "CWE-682",
+                    "severity": "low",
+                    "confidence": 0.58
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

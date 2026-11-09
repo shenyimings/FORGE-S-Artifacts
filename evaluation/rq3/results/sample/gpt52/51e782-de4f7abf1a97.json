@@ -1,0 +1,137 @@
+{
+    "project": "light_protocol_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/light_protocol_audit_final.pdf.json/programs/system/src/invoke/processor.rs",
+        "dataset/contracts/light_protocol_audit_final.pdf.json/programs/account-compression/src/lib.rs",
+        "dataset/contracts/light_protocol_audit_final.pdf.json/utils/src/prime.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.14285714285714285,
+        "recall": 0.25,
+        "f1": 0.18181818181818182
+    },
+    "cwe_ground_truth": [
+        "CWE-682",
+        "CWE-20",
+        "CWE-707",
+        "CWE-1287"
+    ],
+    "cwe_detected": [
+        "CWE-1339",
+        "CWE-190",
+        "CWE-682",
+        "CWE-284",
+        "CWE-710",
+        "CWE-703",
+        "CWE-369"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Missing Validation Logic",
+            "description": "Several functions lack proper input validation: `initialize_group_authority` takes authority as an unverified argument; `insert_nullifier` assumes uniform proof lengths; `insert_nullifiers` processes null leaf cells; and `utils::is_prime` uses `f64` for prime checking. Inadequate validation and inappropriate type usage result in potential logic flaws, runtime panics, or inefficient operations. An attacker could pass malformed proof arrays with varying lengths, trigger panics, or exploit misconfigured authority settings. Processing zero-byte leaf cells wastes resources, and using `f64` for primes introduces undefined behavior. These issues could lead to denial-of-service conditions, incorrect state transitions, or subtle bugs that undermine system reliability and security.\n"
+        },
+        {
+            "title": "Inconsistency in Prime Number Calculation",
+            "description": "The `find_next_prime` function fails to handle prime numbers of the form 6k + 1 correctly when finding the next prime greater than a given number. Specifically, it skips over primes that are of this form due to a flaw in the primality testing logic. An attacker could exploit this by influencing inputs that depend on prime number generation, leading to predictable or incorrect outputs. The impact includes weakened cryptographic assumptions and potential vulnerabilities in protocols relying on prime number sequences. The `find_next_prime` function incorrectly skips potential primes of the form 6k + 1 when adjusting `n` to the nearest 6k + 5 form. Although all primes greater than 3 are of the form 6k ± 1, the function only checks for 6k - 1 (i.e., 6k + 5) after adjustment and fails to explicitly verify 6k + 1 candidates. This causes the function to miss valid primes in the 6k + 1 form, leading to incorrect results. The root cause is a flawed logic path that assumes the next prime must follow the adjusted form without checking both valid forms. An attacker could exploit this by providing inputs that trigger the missed prime case, leading to incorrect cryptographic or algorithmic behavior, especially in contexts relying on accurate prime generation.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The reviewed code is a Solana/Anchor program entry/processor that performs proof verification, queue insertions, and (optionally) fee transfers using CPI. Several security-relevant behaviors depend on indices and data returned from helper routines (`insert_*`), and on untrusted instruction data (`inputs`). The code also contains pure Rust utilities (`prime.rs`) that rely on floating-point arithmetic in a way that can yield incorrect results (including NaN propagation) if used in security- or resource-sizing logic. The main issues found are: (1) unvalidated indices into `ctx.remaining_accounts` used for fee transfers (risking both unintended lamport transfers and panics), (2) explicit `unimplemented!()` and unchecked indexing that can panic (DoS), (3) incorrect deduplication logic (`dedup_by` without sorting) that can produce incorrect outputs, and (4) incorrect calculations in `prime.rs` due to use of `f64` (precision/NaN edge cases).\n",
+            "findings": [
+                {
+                    "title": "Unvalidated `remaining_accounts` index used for fee transfers (fee redirection + panic risk)",
+                    "description": "In `processor::process`, the program performs lamport transfers based on an index returned by helper routines:\n  - `insert_addresses_into_address_merkle_tree_queue` returns `(remaining_account_index, network_fee)`\n  - `insert_nullifiers` returns `(remaining_account_index, network_fee)`\nThe code then does:\n  `&ctx.remaining_accounts[remaining_account_index as usize]`\nwithout any explicit bounds check or verification that the selected account is the intended fee recipient.\n\nIf an attacker can influence the returned `remaining_account_index` (directly or indirectly via malformed inputs/accounts), this can lead to:\n  1) Panic / abort due to out-of-bounds indexing (transaction DoS), and/or\n  2) Unauthorized fee redirection: lamports are transferred from `ctx.accounts.get_fee_payer()` to an arbitrary account chosen by arranging `remaining_accounts`.\n\nEven if helper routines are intended to enforce the correct recipient, the lack of local validation makes this a fragile integration boundary: any bug/change in those helpers becomes a direct fund-loss vector here.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Out-of-bounds indexing into `ctx.remaining_accounts` can panic (DoS via exceptional condition)",
+                    "description": "The fee-transfer paths index `ctx.remaining_accounts` using a runtime-provided index:\n  `ctx.remaining_accounts[remaining_account_index as usize]`\nRust will panic on out-of-bounds access, aborting the instruction. This is an exceptional condition that is not handled gracefully (no `get()` + explicit error).\n\nWhile Solana transactions are atomic (no partial state commitment), repeated triggering can be used to reliably fail instructions (availability/DoS), and in CPI compositions it can break upstream flows.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "`unimplemented!()` on user-controlled input enables easy instruction abort (DoS)",
+                    "description": "At the top of `process`:\n  `if inputs.relay_fee.is_some() { unimplemented!(...) }`\n`relay_fee` is part of instruction data and therefore user-controlled. Calling `unimplemented!()` triggers a panic/abort rather than returning a structured program error, enabling trivial denial-of-service for any flow that might route through this processor with `relay_fee` set (including composed/CPI scenarios).\n\nBest practice is to return an explicit error (`err!(...)`) instead of panicking in on-chain programs.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Incorrect deduplication of `sequence_numbers` due to missing sort (dedup only removes adjacent duplicates)",
+                    "description": "The code attempts to handle \"multiple defined unordered output Merkle trees\" via:\n  `sequence_numbers.dedup_by(|a, b| a.pubkey == b.pubkey);`\nHowever, `Vec::dedup_by` only removes consecutive duplicates; it does not remove duplicates that are separated in the vector. Since the comment suggests the vector may be unordered, duplicates for the same `pubkey` may remain.\n\nThis can lead to incorrect or inconsistent emitted state transition events (and any downstream logic relying on uniqueness), which is a security-relevant correctness issue if consumers interpret the event as authoritative.\n",
+                    "category": "CWE-682",
+                    "severity": "low",
+                    "confidence": 0.83
+                },
+                {
+                    "title": "Floating-point prime utilities can return incorrect results (NaN/precision), potentially breaking resource sizing",
+                    "description": "In `prime.rs`, prime calculations are performed using `f64` (`find_next_prime`, `is_prime`). This introduces multiple correctness hazards:\n  - NaN handling: `is_prime(NaN)` returns `true` due to all comparisons/mod checks evaluating false and the loop condition `i*i <= n` being false with NaN. Consequently, `find_next_prime(NaN)` can return NaN as a \"prime\".\n  - Precision limits: for values > 2^53, `f64` cannot represent all integers exactly; `%` and equality checks become unreliable, and the primality test can produce incorrect results.\n  - Edge-case rounding: `find_next_prime` rounds `n` and then uses floating modulus arithmetic, which can misclassify candidates due to floating error.\n\nIf these utilities are used to derive on-chain capacities, bucket counts, or other security-/resource-critical sizes, incorrect results can cause misallocation, unexpected loops, or configuration bypasses.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Use of floating-point arithmetic in on-chain logic violates common Solana safety standards",
+                    "description": "Although `prime.rs` is not shown being invoked from the on-chain processor here, including and potentially using `f64`-based arithmetic in Solana programs is generally discouraged because it increases the risk of nondeterministic/edge-case behavior and makes reasoning about correctness harder.\n\nEven when deterministic in practice, floats create avoidable correctness risk compared to integer-based prime/sizing routines.\n",
+                    "category": "CWE-710",
+                    "severity": "info",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The reviewed code exhibits issues primarily around (1) floating-point arithmetic used for “integer” prime computations and (2) unchecked integer size arithmetic when deriving vector sizes/capacities.\n\nIn `prime.rs`, both `find_next_prime_with_load_factor` and `is_prime` operate on `f64`. This introduces two CWE-root causes from the candidate list:\n- A direct divide-by-zero possibility when `load_factor == 0.0`, producing `inf`/`NaN` and then propagating into `find_next_prime`/`is_prime` in surprising ways (including returning `NaN` as “prime”).\n- Insufficient precision/accuracy because `f64` cannot exactly represent all integers above 2^53, and floating modulo/rounding comparisons can misclassify primality or yield incorrect “next prime” results for large values.\n\nIn `processor.rs`, several vector lengths/capacities are computed with unchecked `usize` addition (e.g., `num_input + num_new`, `remaining_accounts.len() + 1 + num_output`). In Rust release builds, `usize` overflow wraps, which can lead to under-allocation and subsequent panics/logic faults (at minimum DoS) when downstream code assumes the computed sizes are correct.\n",
+            "findings": [
+                {
+                    "title": "Divide-by-zero in find_next_prime_with_load_factor when load_factor is 0.0",
+                    "description": "`find_next_prime_with_load_factor(n, load_factor)` computes `minimum = n / load_factor` without validating `load_factor`.\nIf `load_factor == 0.0`, this results in `inf`/`NaN` per IEEE-754. That value is then fed into `find_next_prime()` and `is_prime()`.\nNotably, `is_prime(NaN)` returns `true` due to all comparisons with `NaN` evaluating to false (e.g., the loop condition `i*i <= n` is false), so `find_next_prime()` can return `NaN` as the “next prime”.\nIf this output is later used to size data structures or drive other program logic, it can cause incorrect behavior or runtime failures.\n",
+                    "category": "CWE-369",
+                    "severity": "medium",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Floating-point prime computation can yield incorrect results for large inputs",
+                    "description": "The prime utilities (`find_next_prime`, `find_next_prime_with_load_factor`, `is_prime`) use `f64` for operations that conceptually require exact integer arithmetic (rounding, modulo, and equality checks).\nFor values above 2^53, `f64` cannot represent all integers exactly, so:\n- `n.round()` may not produce the intended integer.\n- `%` and `== 0.0` checks can behave unexpectedly due to representation error.\n- The loop condition `i * i <= n` can become inaccurate for large `n`.\nThis can cause composites to be treated as primes or skip the correct next prime, which is dangerous if these results affect on-chain sizing, resource allocation, or security-sensitive configuration.\n",
+                    "category": "CWE-1339",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Potential usize wraparound when computing vector sizes/capacities in processor",
+                    "description": "In `processor.rs`, multiple vector sizes/capacities are derived using unchecked `usize` addition, e.g.:\n- `vec![None; num_input_compressed_accounts + num_new_addresses]`\n- `let hashed_pubkeys_capacity = ctx.remaining_accounts.len() + 1 + num_output_compressed_accounts;`\nIn Rust release builds, integer overflow wraps rather than panics. If an attacker can cause any of these operands to be extremely large (e.g., via large serialized vectors in instruction data), the computed size may wrap to a smaller value, leading to under-allocation and subsequent out-of-bounds indexing/panics in downstream logic (at minimum, a denial of service).\nMitigation is to use `checked_add`/`checked_*` and fail gracefully on overflow before allocating or indexing.\n",
+                    "category": "CWE-190",
+                    "severity": "low",
+                    "confidence": 0.68
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-135",
+            "CWE-191",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-1339"
+        ]
+    ]
+}

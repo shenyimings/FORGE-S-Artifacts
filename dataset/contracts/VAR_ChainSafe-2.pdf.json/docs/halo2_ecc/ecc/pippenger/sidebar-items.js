@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["multi_exp_par","Multi-thread witness generation for multi-scalar multiplication."]]};

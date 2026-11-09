@@ -1,0 +1,67 @@
+{
+    "project": "REP-NATIX-Network---audit__final-20240919T151356Z.pdf.json",
+    "files": [
+        "dataset/contracts/REP-NATIX-Network---audit__final-20240919T151356Z.pdf.json/programs/stake_V1/src/cancel.rs",
+        "dataset/contracts/REP-NATIX-Network---audit__final-20240919T151356Z.pdf.json/programs/stake_V1/src/control_stake_amount.rs",
+        "dataset/contracts/REP-NATIX-Network---audit__final-20240919T151356Z.pdf.json/programs/stake_V1/src/give_stakes.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-1325",
+        "CWE-664",
+        "CWE-691",
+        "CWE-770",
+        "CWE-670",
+        "CWE-372",
+        "CWE-400"
+    ],
+    "cwe_detected": [
+        "CWE-682"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Concerns on Compute Unit and Account Size",
+            "description": "The program stores all stake information in a single account using a vector, which is constrained only by `maximum_stakers` (unique users), not total stake entries. A single user can create multiple stakes, potentially exhausting account size (10MB) or compute units (1.4M). Iterating over a large list increases compute cost and risks transaction failure. This design is inefficient and vulnerable to denial-of-service via resource exhaustion.\n"
+        },
+        {
+            "title": "Cancellation May Be Blocked Due to Stake Amount Limit Validation and Break `maximum_stakers` Limitation",
+            "description": "The `cancel` function calls `control_stake_amount`, which validates the total stake against `max_stake_amount`. If canceling unstake requests causes the user's total stake to exceed this limit, the cancellation is blocked. This creates a situation where users cannot cancel their unstake, trapping their funds. Additionally, the `maximum_stakers` limit can be violated if a new user joins during the unstake-cancel window, breaking the intended cap on unique stakers.\n"
+        },
+        {
+            "title": "Potential Missing Reward Handling While Gap Between `unstake` and `cancel`",
+            "description": "The `cancel` function does not reset or update the `stake_time` when an unstake request is canceled. This allows users to cancel their unstake and still earn rewards for the period they were in unstake status, effectively gaming the system. For example, a user can initiate unstake, wait for rewards to accrue, then cancel and retain full rewards as if they never unstaked. This creates an unfair advantage and distorts the reward mechanism.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The primary issue identified is in `control_stake_amount.rs`, where the function `control_stake_amount` fails to enforce the minimum stake requirement for the total active stake of an address. While it correctly validates new stake amounts and the maximum total, it omits checking if the total (existing stakes + new amount) meets the minimum threshold. This violates the staking pool's intended constraints and may lead to undercollateralization or protocol rule violations. Other files showed no security issues.\n",
+            "findings": [
+                {
+                    "title": "Incomplete Total Stake Validation in control_stake_amount",
+                    "description": "The `control_stake_amount` function does not enforce that the total active stake (existing stakes plus any new amount) meets the minimum stake requirement (`min_stake_amount`). \nIt only checks that: \n1. A new stake (if provided) is between `min_stake_amount` and `max_stake_amount`.\n2. The total active stake does not exceed `max_stake_amount`.\nThis allows a user's total active stake to fall below `min_stake_amount` (e.g., after partial unstaking), violating the staking protocol's rules as described in the function's documentation.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

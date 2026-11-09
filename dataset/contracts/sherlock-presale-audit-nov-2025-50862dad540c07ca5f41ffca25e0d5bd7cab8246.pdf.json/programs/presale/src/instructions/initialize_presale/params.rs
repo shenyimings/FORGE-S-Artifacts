@@ -1,0 +1,336 @@
+use anchor_spl::token_2022::spl_token_2022::extension::transfer_fee::MAX_FEE_BASIS_POINTS;
+
+use crate::*;
+
+fn validate_presale_registries(
+    presale_registries: &[PresaleRegistryArgs],
+    presale_params: &PresaleArgs,
+) -> Result<()> {
+    require!(
+        presale_registries.len() > 0 && presale_registries.len() <= MAX_PRESALE_REGISTRY_COUNT,
+        PresaleError::InvalidPresaleInfo
+    );
+
+    let mut presale_supply = 0u128;
+
+    for registry in presale_registries {
+        registry.validate(presale_params)?;
+        presale_supply = presale_supply.safe_add(u128::from(registry.presale_supply))?;
+    }
+
+    require!(
+        presale_supply <= u128::from(u64::MAX),
+        PresaleError::InvalidTokenSupply
+    );
+
+    // Must have at least 1 presale registry
+    require!(presale_supply > 0, PresaleError::InvalidTokenSupply);
+
+    // If presale have multiple registries. Whitelist mode must be Permissioned mode.
+    // Reason: It make no sense for a single user to deposit to multiple registries which might have different price when it's dynamic price mode.
+    // Note: Presale creator have to make sure user doesn't duplicate across registries.
+    if presale_registries.len() > 1 {
+        let whitelist_mode = WhitelistMode::from(presale_params.whitelist_mode);
+        require!(
+            whitelist_mode.is_permissioned(),
+            PresaleError::MultiplePresaleRegistriesNotAllowed
+        );
+    }
+
+    Ok(())
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Default)]
+pub struct InitializePresaleArgs {
+    pub presale_params: PresaleArgs,
+    pub locked_vesting_params: OptionalNonZeroLockedVestingArgs,
+    pub padding: [u8; 32],
+    pub presale_registries: Vec<PresaleRegistryArgs>,
+}
+
+impl InitializePresaleArgs {
+    pub fn validate(&self) -> Result<()> {
+        // Timings
+        //
+        //                                                                     | --> Immediate release portion of token (immediate_release_timestamp). Anytime between presale end and vest end timestamp
+        //                                                                     |
+        //                                                                     |
+        // Open --> Start (presale_start_time) --> End (presale_end_time) | ---|
+        //                                                                     |
+        //                                                                     |
+        //                                                                     | --> Lock start (lock_start_time) --> Lock end (lock_end_time) --> Vest start (vest_start_time) --> Vest end (vest_end_time)
+        //
+        //
+        let current_timestamp: u64 = Clock::get()?.unix_timestamp.safe_cast()?;
+        self.presale_params.validate(current_timestamp)?;
+
+        validate_presale_registries(&self.presale_registries, &self.presale_params)?;
+
+        let locked_vesting_params = self.locked_vesting_params.option();
+
+        if let Some(locked_vesting) = locked_vesting_params {
+            locked_vesting.validate(self.presale_params.presale_end_time)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Copy, Clone, Default, Debug)]
+pub struct PresaleRegistryArgs {
+    pub buyer_minimum_deposit_cap: u64,
+    pub buyer_maximum_deposit_cap: u64,
+    pub presale_supply: u64,
+    pub deposit_fee_bps: u16,
+    pub padding: [u8; 32],
+}
+
+impl PresaleRegistryArgs {
+    pub fn is_uninitialized(&self) -> bool {
+        self.buyer_minimum_deposit_cap == 0
+            && self.buyer_maximum_deposit_cap == 0
+            && self.presale_supply == 0
+            && self.deposit_fee_bps == 0
+    }
+
+    pub fn validate(&self, presale_args: &PresaleArgs) -> Result<()> {
+        require!(
+            self.buyer_maximum_deposit_cap >= self.buyer_minimum_deposit_cap,
+            PresaleError::InvalidPresaleInfo
+        );
+
+        require!(
+            self.buyer_maximum_deposit_cap > 0,
+            PresaleError::InvalidPresaleInfo
+        );
+
+        require!(
+            self.buyer_maximum_deposit_cap <= presale_args.presale_maximum_cap,
+            PresaleError::InvalidPresaleInfo
+        );
+
+        require!(self.presale_supply > 0, PresaleError::InvalidTokenSupply);
+
+        require!(
+            self.deposit_fee_bps <= MAX_DEPOSIT_FEE_BPS,
+            PresaleError::InvalidPresaleInfo
+        );
+
+        Ok(())
+    }
+}
+
+/// Presale parameters
+#[derive(AnchorSerialize, AnchorDeserialize, Copy, Clone, Default)]
+pub struct PresaleArgs {
+    pub presale_maximum_cap: u64,
+    pub presale_minimum_cap: u64,
+    pub presale_start_time: u64,
+    pub presale_end_time: u64,
+    pub whitelist_mode: u8,
+    pub presale_mode: u8,
+    pub unsold_token_action: u8,
+    // Only applicable to fcfs and fixed price
+    pub disable_earlier_presale_end_once_cap_reached: u8,
+    pub padding: [u8; 30],
+}
+
+impl PresaleArgs {
+    pub fn get_presale_start_time_without_going_backwards(&self, current_timestamp: u64) -> u64 {
+        self.presale_start_time.max(current_timestamp)
+    }
+
+    pub fn validate(&self, current_timestamp: u64) -> Result<()> {
+        require!(
+            self.presale_maximum_cap >= self.presale_minimum_cap,
+            PresaleError::InvalidPresaleInfo
+        );
+
+        require!(
+            self.presale_minimum_cap > 0,
+            PresaleError::InvalidPresaleInfo
+        );
+
+        let presale_start_time =
+            self.get_presale_start_time_without_going_backwards(current_timestamp);
+
+        require!(
+            self.presale_end_time > presale_start_time,
+            PresaleError::InvalidPresaleInfo
+        );
+
+        let presale_duration = self.presale_end_time.safe_sub(presale_start_time)?;
+
+        require!(
+            presale_duration >= MINIMUM_PRESALE_DURATION
+                && presale_duration <= MAXIMUM_PRESALE_DURATION,
+            PresaleError::InvalidPresaleInfo
+        );
+
+        let duration_until_presale = presale_start_time.safe_sub(current_timestamp)?;
+
+        require!(
+            duration_until_presale <= MAXIMUM_DURATION_UNTIL_PRESALE,
+            PresaleError::InvalidPresaleInfo
+        );
+
+        let maybe_whitelist_mode = WhitelistMode::try_from(self.whitelist_mode);
+        require!(
+            maybe_whitelist_mode.is_ok(),
+            PresaleError::InvalidPresaleInfo
+        );
+        let maybe_presale_mode = PresaleMode::try_from(self.presale_mode);
+        require!(maybe_presale_mode.is_ok(), PresaleError::InvalidPresaleInfo);
+
+        let maybe_unsold_token_action = UnsoldTokenAction::try_from(self.unsold_token_action);
+        require!(
+            maybe_unsold_token_action.is_ok(),
+            PresaleError::InvalidUnsoldTokenAction
+        );
+
+        let maybe_disable_earlier_presale_end_once_cap_reached =
+            Bool::try_from(self.disable_earlier_presale_end_once_cap_reached);
+        require!(
+            maybe_disable_earlier_presale_end_once_cap_reached.is_ok(),
+            PresaleError::InvalidType
+        );
+
+        Ok(())
+    }
+}
+
+/// Vest user bought token
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LockedVestingArgs {
+    /// How many % of the token supply is released immediately
+    pub immediately_release_bps: u16,
+    /// Lock duration until buyer can claim the token
+    pub lock_duration: u64,
+    /// Vesting duration until buyer can claim the token
+    pub vest_duration: u64,
+    /// Timestamp when the immediate release portion is released
+    pub immediate_release_timestamp: u64,
+    pub padding: [u8; 24],
+}
+
+impl LockedVestingArgs {
+    pub fn validate(&self, presale_end_time: u64) -> Result<()> {
+        let total_duration = self.vest_duration.safe_add(self.lock_duration)?;
+        require!(
+            total_duration < MAXIMUM_LOCK_AND_VEST_DURATION,
+            PresaleError::InvalidLockVestingInfo
+        );
+
+        require!(
+            self.immediately_release_bps <= MAX_FEE_BASIS_POINTS,
+            PresaleError::InvalidLockVestingInfo
+        );
+
+        // All tokens are immediately release, nothing to be vested
+        if self.immediately_release_bps == MAX_FEE_BASIS_POINTS {
+            require!(
+                self.lock_duration == 0 && self.vest_duration == 0,
+                PresaleError::InvalidLockVestingInfo
+            );
+
+            // Backward compatibility
+            if self.immediate_release_timestamp > 0 {
+                require!(
+                    self.immediate_release_timestamp == presale_end_time,
+                    PresaleError::InvalidLockVestingInfo
+                );
+            }
+        }
+        // Portion of token is immediately release, another part must be vested else it's have same effect as immediate release
+        else {
+            require!(
+                self.lock_duration > 0 || self.vest_duration > 0,
+                PresaleError::InvalidLockVestingInfo
+            );
+
+            let PresaleTimings {
+                vesting_end_time, ..
+            } = Presale::calculate_presale_vest_and_lock_timings(
+                presale_end_time,
+                self.lock_duration,
+                self.vest_duration,
+            )?;
+
+            // Backward compatibility
+            if self.immediate_release_timestamp > 0 {
+                if self.immediately_release_bps == 0 {
+                    require!(
+                        self.immediate_release_timestamp == presale_end_time,
+                        PresaleError::InvalidLockVestingInfo
+                    );
+                } else {
+                    require!(
+                        self.immediate_release_timestamp >= presale_end_time
+                            && self.immediate_release_timestamp <= vesting_end_time,
+                        PresaleError::InvalidLockVestingInfo
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub type OptionalNonZeroLockedVestingArgs = LockedVestingArgs;
+
+impl OptionalNonZeroLockedVestingArgs {
+    pub fn option(self) -> Option<LockedVestingArgs> {
+        if self == LockedVestingArgs::default() {
+            None
+        } else {
+            Some(self)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_optional_non_zero_locked_vesting_args_conversion() {
+        let args = OptionalNonZeroLockedVestingArgs::default();
+        assert!(args.option().is_none());
+
+        let args = OptionalNonZeroLockedVestingArgs {
+            immediately_release_bps: 1000,
+            lock_duration: 0,
+            vest_duration: 0,
+            immediate_release_timestamp: 0,
+            padding: [0u8; 24],
+        };
+        assert!(args.option().is_some());
+    }
+
+    // Tests to ensure no breaking change on ix data deserialize
+    #[test]
+    fn test_ensure_locked_vesting_args_size() {
+        let args = LockedVestingArgs::default();
+        assert_eq!(args.try_to_vec().unwrap().len(), 50);
+    }
+
+    #[test]
+    fn test_ensure_initialize_presale_args_size() {
+        let args = InitializePresaleArgs::default();
+        // The size is based on 0 registry
+        assert_eq!(args.try_to_vec().unwrap().len(), 152);
+    }
+
+    #[test]
+    fn test_ensure_presale_args_size() {
+        let args = PresaleArgs::default();
+        assert_eq!(args.try_to_vec().unwrap().len(), 66);
+    }
+
+    #[test]
+    fn test_ensure_presale_registry_args_size() {
+        let args = PresaleRegistryArgs::default();
+        assert_eq!(args.try_to_vec().unwrap().len(), 58);
+    }
+}

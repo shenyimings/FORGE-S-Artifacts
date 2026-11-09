@@ -1,0 +1,116 @@
+{
+    "project": "2024-11-orgaandmerk-securityreview.pdf.json",
+    "files": [
+        "dataset/contracts/2024-11-orgaandmerk-securityreview.pdf.json/src/merk/store.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2,
+        "recall": 0.5,
+        "f1": 0.28571428571428575
+    },
+    "cwe_ground_truth": [
+        "CWE-372",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-118",
+        "CWE-435",
+        "CWE-703",
+        "CWE-400"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Interrupted snapshots can lead to inconsistent state",
+            "description": "When Tendermint switches to a new snapshot during state sync, the Orga implementation fails to reset the existing sync state, leading to inconsistent on-disk state and panics. The root cause is the failure to clear the Restorer state upon receiving a new OfferSnapshot request. As a result, new chunks from honest peers are rejected due to verification failures against a partially constructed tree. A malicious node could serve old chunks under a new snapshot, making synchronization appear successful while resulting in a mismatch between block height and app hash. The impact is node crashes, indefinite hangs, and failure to synchronize, degrading network reliability.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "We identified three security issues. First, the MerkStore does not clear the in-memory snapshots (mem_snapshots) during state sync when replacing the database. This leads to dangling references to the old database. When dropping a snapshot, the new database handle is used with an old snapshot, causing undefined behavior (CWE-664). Second, the `read_u64` function panics if the input is not exactly 8 bytes. This can occur if the stored height is corrupted, causing a crash (CWE-703). Third, the store is not designed for concurrent operations, especially during state sync and block commit, which might lead to panics if ABCI calls are made concurrently (CWE-435). However, the ABCI specification requires sequential calls, so this might be a lower risk.\n",
+            "findings": [
+                {
+                    "title": "Dangling Snapshots After State Sync Leading to Undefined Behavior",
+                    "description": "During state sync, the store replaces the underlying database without clearing the `mem_snapshots` map. This map contains `StaticSnapshot` objects that are tied to the old database. Later, when a snapshot is evicted from the map, its `drop` method is called with the new database handle, which is incorrect and leads to undefined behavior because the snapshot was created with the old database.\n",
+                    "category": "CWE-664",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Panic on Corrupted Height Value",
+                    "description": "The function `read_u64` expects a byte slice of exactly 8 bytes. If the stored height value in the database is not 8 bytes (e.g., due to corruption), the function will panic, causing the node to crash.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Potential Concurrency Issues During State Sync",
+                    "description": "The store uses `Option` fields for the database and in-memory write buffer, and uses `take()` to temporarily move out these fields. If the ABCI methods are called concurrently (which the Tendermint specification does not allow) or if state sync and block commit happen concurrently (which may be disallowed but not enforced), the store may be left in an inconsistent state and subsequent operations could panic. Specifically, during state sync, the database is destroyed and replaced, and during this time, if a commit occurs, it would panic because the `merk` field is `None`.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The analysis reveals two main security issues:\n1. Uncontrolled memory consumption due to unbounded in-memory snapshots: The store retains up to 20 static snapshots without limiting individual snapshot size, potentially allowing memory exhaustion attacks if state size grows significantly.\n2. Slice length handling vulnerability: The read_u64 function assumes strict 8-byte inputs, risking panics from corrupted or malformed data, which could crash the node unexpectedly.\n\nOther CWEs were considered but no additional vulnerabilities were found. The code generally handles resources properly (e.g., snapshot cleanup, atomic operations), validates external inputs, and maintains state consistency.\n",
+            "findings": [
+                {
+                    "title": "Uncontrolled Memory Consumption via In-Memory Snapshots",
+                    "description": "The `MerkStore` retains up to 20 in-memory snapshots (`mem_snapshots`), each capturing the full application state. \nAs state size grows, these unbounded snapshots may consume excessive memory. An attacker could induce state growth \n(e.g., via large data writes) and trigger snapshot creation to exhaust node memory, causing denial-of-service.\n",
+                    "category": "CWE-400",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Slice Length Handling Vulnerability in read_u64",
+                    "description": "The `read_u64` function assumes input slices are exactly 8 bytes via `copy_from_slice`, but stores corrupted or \nmaliciously modified data (e.g., non-8-byte `height` values) will cause a panic. This could crash the node during \nheight retrieval if storage is compromised or data is corrupted.\n",
+                    "category": "CWE-118",
+                    "severity": "medium",
+                    "confidence": 0.9
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-665",
+            "CWE-911",
+            "CWE-673",
+            "CWE-669",
+            "CWE-668",
+            "CWE-704",
+            "CWE-610",
+            "CWE-1229",
+            "CWE-372",
+            "CWE-1329",
+            "CWE-706",
+            "CWE-495",
+            "CWE-496",
+            "CWE-487",
+            "CWE-922",
+            "CWE-221",
+            "CWE-662",
+            "CWE-913",
+            "CWE-666",
+            "CWE-501",
+            "CWE-580",
+            "CWE-400",
+            "CWE-404",
+            "CWE-118",
+            "CWE-410"
+        ]
+    ]
+}

@@ -1,0 +1,89 @@
+{
+    "path": "reports/zenith/GMX Solana Chainlink v11 Integration - Zenith Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/gmsol-labs/gmx-solana/"
+        ],
+        "commit_id": [
+            "3967d2e1e15852e659c225369f62a60fc5749090"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-05-01",
+        "project_path": "contracts/GMX Solana Chainlink v11 Integration - Zenith Audit Report.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-115"
+                ]
+            },
+            "title": "v11 bid and ask are used as fresh oracle min/max prices even though lastSeenTimestampNs only applies to mid",
+            "description": "1.  **Description:** The vulnerability arises because the code uses the `lastSeenTimestampNs` field from Chainlink's v11 report to validate the freshness of the mid price, but also uses stale bid and ask prices to set the oracle's min_price and max_price without independent staleness checks. According to Chainlink's documentation, `lastSeenTimestampNs` only applies to the mid price, not to bid or ask.\n2.  **Cause:** The root cause is the incorrect assumption that bid and ask prices are as fresh as the mid price, based solely on the `lastSeenTimestampNs`. The code does not implement separate validation or freshness checks for bid and ask values.\n3.  **Exploitation:** An attacker could exploit this by influencing or relying on stale bid/ask values during market transitions or periods of low liquidity, where bid and ask prices may not be updated in sync with the mid price. These stale bounds would then be accepted if the mid price is fresh.\n4.  **Impact:** The impact includes unfair trade executions, incorrect liquidation triggers, inaccurate PnL calculations, and skewed fee updates due to the use of stale min and max prices in critical execution paths such as `pick_price(false)` and `pick_price(true)`.\n",
+            "severity": "medium",
+            "location": [
+                "report.rs#292",
+                "gmsol.rs#85"
+            ],
+            "files": [
+                "gmx-solana/crates/chainlink-datastreams/src/report.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-636"
+                ]
+            },
+            "title": "marketStatus Unknown is rejected instead of persisting a non-open status",
+            "description": "1.  **Description:** The code rejects Chainlink reports with `marketStatus = 0` (Unknown), which violates Chainlink's guidance that consumers must treat Unknown as a valid state. This causes the system to retain outdated price data instead of transitioning to a known non-tradable state.\n2.  **Cause:** The root cause is the explicit rejection of `MarketStatus::Unknown` in `from_chainlink_report`, which prevents the price feed from being updated to reflect uncertainty in market status.\n3.  **Exploitation:** If a new verified report indicates an unknown market status, the system ignores it and continues using the previous open state until heartbeat expiration. During this window, trading and order execution proceed based on potentially invalid assumptions about market availability.\n4.  **Impact:** This can lead to continued trading during periods when market status is indeterminate, increasing the risk of unfair executions or losses due to outdated pricing, especially in regulated or time-sensitive markets like US equities.\n",
+            "severity": "low",
+            "location": [
+                "gmsol.rs#36",
+                "feed.rs#167"
+            ],
+            "files": [
+                "gmx-solana/crates/chainlink-datastreams/src/gmsol.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "decode_full_report can panic on malformed ABI offsets",
+            "description": "1.  **Description:** The `decode_full_report` function can panic when processing malformed ABI-encoded inputs due to unchecked arithmetic when calculating buffer offsets and lengths, instead of gracefully returning an error.\n2.  **Cause:** The function performs unsafe pointer arithmetic without sufficient validation of the final byte range (`offset + Report::WORD_SIZE + length`) before slicing, and does not use checked arithmetic to prevent integer overflow.\n3.  **Exploitation:** A malicious caller could craft a malformed input with specially crafted offsets and lengths that cause buffer overruns or arithmetic overflows, leading to a panic and potential denial-of-service in contexts that process untrusted reports.\n4.  **Impact:** The primary impact is a potential denial of service due to runtime panics during report decoding, which could disrupt oracle updates if untrusted inputs are processed without prior validation.\n",
+            "severity": "informational",
+            "location": [
+                "report.rs#413"
+            ],
+            "files": [
+                "gmx-solana/crates/chainlink-datastreams/src/report.rs"
+            ]
+        }
+    ]
+}

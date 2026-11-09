@@ -1,0 +1,123 @@
+{
+    "path": "reports/aurory_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/Aurory-Game/ocil",
+        "commit_id": "45e5e5bccb6c155db576bfdec5398a86c4d227e0",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-07-03",
+        "project_path": "contracts/aurory_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Incorrect Account And Bump",
+            "description": "1. **Description:** The `Withdraw_v2` function in the Solana program incorrectly uses `vault_ta` and `vault_bump` when `withdraw_from_burner_ta` is set to true, instead of using `burn_ta` and `burn_bump`. This leads to a potential runtime error or denial of service.\n2. **Cause:** The root cause is a logic error in account and bump usage within the CPI context, where the wrong token account and bump are passed during the withdrawal flow.\n3. **Exploitation:** An attacker could trigger a withdrawal with `withdraw_from_burner_ta` set to true, causing the program to reference an incorrect account or bump, resulting in a failed transaction and denial of service.\n4. **Impact:** Users may be unable to withdraw funds under certain conditions, leading to degraded functionality and potential loss of access to locked assets.\n",
+            "severity": "medium",
+            "files": [
+                "programs/casier/src/lib.rs"
+            ],
+            "location": [
+                "casier.Withdraw_v2#242"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-347"
+                ]
+            },
+            "title": "Signature Omits Remaining Amount",
+            "description": "1. **Description:** The `withdraw` function in the SyncSpace contract does not include the `finalAmount` parameter in the admin signature verification, allowing users to manipulate the remaining amount after withdrawal.\n2. **Cause:** The `requireAdminSignature` modifier omits `finalAmount` from the signed data, enabling arbitrary values to be passed without invalidating the signature.\n3. **Exploitation:** A malicious user could provide a valid admin signature but set a manipulated `finalAmount`, potentially leading to incorrect state updates or balance discrepancies.\n4. **Impact:** This could result in incorrect accounting within the system, potentially enabling balance inflation or unauthorized asset access if combined with other logic flaws.\n",
+            "severity": "medium",
+            "files": [
+                "programs/syncspace/src/lib.rs"
+            ],
+            "location": [
+                "SyncSpace.withdraw"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Centralization Risk",
+            "description": "1. **Description:** Multiple functions rely solely on off-chain admin signatures without sufficient on-chain validation, creating centralization risks and potential for abuse.\n2. **Cause:** Critical checks\u2014such as ensuring `final_amount <= locker.amount - withdraw_amount`, validating `vault_ta` via seed derivation, checking user balance before withdrawal, and using canonical bumps\u2014are missing.\n3. **Exploitation:** An attacker could exploit the lack of validation to manipulate locker balances, bypass ownership checks using fake token accounts, withdraw more than their balance, or scatter funds across multiple accounts using non-canonical bumps.\n4. **Impact:** These issues collectively increase the trust required in the admin, reduce system decentralization, and open vectors for fund manipulation or denial of service.\n",
+            "severity": "medium",
+            "files": [
+                "programs/casier/src/lib.rs",
+                "programs/syncspace/src/lib.rs"
+            ],
+            "location": [
+                "casier.withdraw_v2",
+                "casier.deposit",
+                "SyncSpace._withdrawERC20",
+                "SyncSpace._withdrawERC1155",
+                "casier.WithdrawV2"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Inaccurate Index Searching",
+            "description": "1. **Description:** The `_getTokenIndex` function in `ERC1155TokensByAccountUpgradeable` incorrectly treats token quantities as token IDs during iteration, leading to inaccurate index results.\n2. **Cause:** The function iterates through an array that stores both IDs and quantities contiguously, but fails to distinguish between them, resulting in logic errors when searching for a token index.\n3. **Exploitation:** An attacker could manipulate token transfers or balance queries by triggering edge cases where the index lookup returns incorrect values, potentially leading to double-spending or balance corruption.\n4. **Impact:** This could result in incorrect token tracking, broken balance reporting, or failed transfers, degrading the reliability of the token management system.\n",
+            "severity": "low",
+            "files": [
+                "programs/syncspace/src/lib.rs"
+            ],
+            "location": [
+                "ERC1155TokensByAccountUpgradeable._getTokenIndex"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-1265"
+                ]
+            },
+            "title": "Prevent Reentrancy",
+            "description": "1. **Description:** The `deposit` and `withdraw` functions in the SyncSpace contract lack reentrancy guards, making them vulnerable to reentrant calls if multiple valid admin signatures are available.\n2. **Cause:** The absence of the `nonReentrant` modifier allows recursive or external calls to re-enter the same function before the first execution completes.\n3. **Exploitation:** An attacker could use a malicious contract to re-enter `deposit` or `withdraw` during execution, potentially manipulating state or draining funds if combined with other vulnerabilities.\n4. **Impact:** This could lead to unexpected state changes, balance inconsistencies, or fund loss in the presence of other exploitable conditions.\n",
+            "severity": "low",
+            "files": [
+                "programs/syncspace/src/lib.rs"
+            ],
+            "location": [
+                "SyncSpace.deposit",
+                "SyncSpace.withdraw"
+            ]
+        }
+    ]
+}

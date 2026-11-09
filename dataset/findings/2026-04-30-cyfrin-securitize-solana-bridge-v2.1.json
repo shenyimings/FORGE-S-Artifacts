@@ -1,0 +1,949 @@
+{
+    "path": "reports/cyfrin/2026-04-30-cyfrin-securitize-solana-bridge-v2.1.md",
+    "project_info": {
+        "url": [
+            "https://github.com/securitize-io/rwa-rbac",
+            "https://github.com/tiago18c/rwa-token",
+            "https://github.com/securitize-io/bc-solana-bridge-sc"
+        ],
+        "commit_id": [
+            "9d3fecf36f2e9dc3953defc7d6bd9aaa383e95c8",
+            "971629592b57be4af83aa50f427fab1d11eff5c9",
+            "0ef3df46de5f3406be2fa2c42dcf641024fa0294",
+            "ffc12ff9f61bfd6683e5fea5df2e5aef37734e6c",
+            "8b0b098f66925f90fe6a0a225cd951da730feea8",
+            "9e4cce95e654fb6c48191e36479da16414d7b1f2",
+            "fac534095f93d05a229665b16aec950ec8bdb5e7",
+            "0c186bec7fadb451e3436517f5af45358475fc2a",
+            "ea893ebe4d213979259f9987fadc17bf9435f07a"
+        ],
+        "address": "n/a",
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-04-30",
+        "project_path": "contracts/2026-04-30-cyfrin-securitize-solana-bridge-v2.1.md-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-179"
+                ]
+            },
+            "title": "EVM-to-Solana Transfers Can Permanently Burn Tokens by Producing a VAA That Solana Cannot Decode",
+            "description": "The EVM bridge burns tokens and publishes a Wormhole message before verifying that the Solana bridge can decode the payload. The EVM encodes `_value`, attribute values, and expirations using full 256-bit types and allows long strings, but the Solana decoder narrows numeric fields to 64 bits and enforces a 1024-byte payload limit. This mismatch allows payloads that are valid on EVM but unprocessable on Solana.\n\nThe root cause is the lack of input validation on the EVM side against Solana's decoding constraints. The EVM bridge does not cap `_value` to `uint64`, does not restrict attribute values to `uint64`/`int64`, and does not enforce the 1024-byte payload size limit before burning tokens.\n\nAn attacker can exploit this by sending a transfer with a `_value > u64::MAX`, oversized attribute arrays, or long strings that cause the encoded payload to exceed 1024 bytes. The EVM will burn the tokens and publish the VAA, but Solana will reject it during decoding, causing the transaction to revert without minting tokens.\n\nThe impact is permanent loss of funds on the EVM side, as the burn is irreversible and no tokens are minted on Solana. The VAA is valid from Wormhole's perspective but structurally incompatible with Solana's decoder, making recovery impossible.\n",
+            "severity": "high",
+            "location": [
+                "SecuritizeBridge.sol::_bridgeDSTokensInternal",
+                "SecuritizeBridge.sol::_encodePayload",
+                "payload.rs::abi_decode_bridge_payload",
+                "execute_vaa_v1.rs::require_gte!(PAYLOAD_MAX_LENGTH, payload_bytes.len())"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-115"
+                ]
+            },
+            "title": "bridge `validate_locked_tokens` diverges from `PolicyEngine` lock semantics and ignores manual locks with `release_time == 0`",
+            "description": "The Solana bridge reimplements lock validation logic in `validate_locked_tokens` but fails to match the canonical `PolicyEngine` semantics. Specifically, it only considers manual locks as active if `release_time > current_timestamp`, whereas the `PolicyEngine` treats `release_time == 0` as a permanent lock.\n\nThe cause is a reimplementation drift in the bridge's lock-checking logic. The bridge's version omits the `release_time == 0` condition, leading to an undercount of locked amounts for users with indefinite locks.\n\nAn attacker with a manual lock where `release_time == 0` can trigger a bridge-out operation. The bridge will incorrectly validate the transfer as allowed, proceed to burn the tokens via CPI to the asset controller, and permanently revoke them, bypassing the intended compliance lock.\n\nThe impact is a policy and compliance bypass, allowing users to bridge out tokens that should be locked indefinitely. Since the bridge uses a direct burn instead of a transfer hook, the standard compliance checks are not triggered, making the bridge-side validation the sole enforcement point.\n",
+            "severity": "high",
+            "location": [
+                "securitize_bridge/src/utils/locked_tokens.rs::validate_locked_tokens",
+                "policy_engine/src/state/track.rs::get_transferable_balance",
+                "policy_engine/src/instructions/execute.rs::get_compliance_transferable_balance",
+                "rwa-rbac/src/instructions/cpi/asset_controller/revoke_tokens.rs::invoke_revoke_tokens_cpi",
+                "asset_controller/src/instructions/token/revoke.rs::burn_tokens"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-668"
+                ],
+                "3": [
+                    "CWE-488"
+                ]
+            },
+            "title": "Shared `ResolverConfig` PDA Allows Cross-Instance Route Hijacking and Deletion",
+            "description": "The `ResolverConfig` PDA is used to map inbound Wormhole messages to the correct bridge instance but is seeded only by `(emitter_chain, emitter_address)`, not including `asset_mint`. This allows multiple bridge instances to share and overwrite the same PDA.\n\nThe root cause is the insufficient PDA seeding, which enables any bridge instance owner to overwrite or delete the `ResolverConfig` for another instance by registering or removing the same emitter pair. The `set_emitter_address` instruction overwrites the `asset_mint` field without checking ownership, and `remove_emitter_address` closes the PDA without validating it belongs to the caller.\n\nAn attacker can exploit this by registering an emitter already used by another bridge, thereby hijacking its inbound routing to redirect VAAs to their own asset mint. Alternatively, they can remove the emitter to delete the PDA, breaking inbound resolution for all dependent instances.\n\nThe impact is denial of service for victim bridge instances and potential wrong-asset minting if the resolver derives accounts for the wrong mint. This undermines the integrity of cross-chain message routing and allows malicious actors to disrupt or manipulate token transfers.\n",
+            "severity": "medium",
+            "location": [
+                "set_emitter_address.rs::resolver_config",
+                "remove_emitter_address.rs::resolver_config",
+                "resolver.rs::ResolverConfig::try_deserialize"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Inbound Transfers Mint Against Stale Destination Identity State Bypassing Jurisdiction-Specific Lock Periods",
+            "description": "The bridge fails to synchronize investor compliance metadata (country, attributes, expirations) during cross-chain transfers, leading to the use of stale identity state on the destination chain. This occurs because the EVM-side _encodePayload function omits compliance data when source and destination wallets differ — which is always the case for EVM-to-Solana transfers due to incompatible address formats. On the Solana side, the execute_vaa_v1 handler ignores the incoming compliance fields and does not update the local IdentityAccount, relying instead on potentially outdated on-chain data. The root cause is the conditional omission of metadata in the payload and the failure to apply it upon receipt. An attacker can exploit this by changing their jurisdiction (e.g., to US with stricter lock-up rules) on the source chain and then bridging tokens to the destination chain where the older, more permissive identity state still applies. This allows them to bypass jurisdiction-specific lock periods, such as the US lock-up requirement, enabling premature withdrawal of tokens. The impact includes regulatory non-compliance, erosion of investor protections, and potential financial loss or manipulation through lock period evasion.\n",
+            "severity": "high",
+            "location": [
+                "SecuritizeBridge.sol::_encodePayload",
+                "execute_vaa_v1.rs::execute_vaa_v1",
+                "bridge_ds_tokens.rs::validate_locked_tokens",
+                "SecuritizeBridge.sol::executeVAAv1"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "Outbound `bridge_ds_tokens` shares a single writable Wormhole sequence per mint, enabling contention-based denial of service and low-volume griefing against stale client builds",
+            "description": "The outbound bridge instruction uses a single mutable Wormhole sequence account per asset mint, creating a global contention point that serializes all outbound transactions for that mint. The wormhole_sequence account is marked mutable and is advanced by every successful post_message CPI, forcing all concurrent transactions to be processed sequentially by Solana's runtime. The handler derives the expected wormhole_message PDA from the current sequence, rejecting any transaction with a precomputed but now-stale message account. This design causes honest users to experience contention, retries, and increased latency under load. An attacker can exploit this by submitting a small number of transactions to increment the sequence just before a victim's submission, causing the victim's transaction to fail with an InvalidMessage error. This enables a low-cost griefing attack where the attacker can repeatedly disrupt specific users or degrade service by forcing re-signing and re-quoting. The impact includes denial of service, reduced throughput, increased transaction failure rates, and degraded user experience, especially under burst traffic or targeted attacks.\n",
+            "severity": "medium",
+            "location": [
+                "bridge_ds_tokens.rs::wormhole_sequence",
+                "bridge_ds_tokens.rs::post_message",
+                "bridge_ds_tokens.rs::expected_wormhole_message"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-115"
+                ]
+            },
+            "title": "Cross-Chain Decimal Mismatch Causes Silent Value Corruption on Mint",
+            "description": "The bridge transfers raw token amounts without accounting for or validating decimal precision differences between the source and destination chains, resulting in silent and catastrophic value distortion. The system encodes and decodes the value field as a raw integer with no rescaling, and the BridgeConfig does not store or enforce decimal consistency. If the Solana and EVM DS tokens have different decimals (e.g., 6 vs 18), the same raw amount represents vastly different economic values on each chain. For example, bridging 1 token from Solana (6 decimals) results in only 1e-12 tokens on EVM (18 decimals), destroying nearly all value. Conversely, bridging 1 token from EVM (18 decimals) results in 1 trillion tokens on Solana (6 decimals), causing massive inflation. The root cause is the absence of decimal metadata in the configuration and the lack of normalization logic during transfer. Any user performing a standard bridge operation across a misconfigured pair will trigger this corruption, requiring no special privileges. The impact includes irreversible loss of user funds, token supply inflation, economic imbalance, and potential collapse of token value in the event of undetected misconfiguration.\n",
+            "severity": "critical",
+            "location": [
+                "bridge_ds_tokens.rs::abi_encode_bridge_payload",
+                "SecuritizeBridge.sol::executeVAAv1",
+                "execute_vaa_v1.rs::invoke_issue_tokens_cpi",
+                "config.rs::BridgeConfig"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-1325"
+                ]
+            },
+            "title": "Unbounded `TrackerAccount.issuances` Growth Enables Relayer Rent Griefing and Eventual Bridge DoS",
+            "description": "The `TrackerAccount` structure in the Policy Engine maintains an unbounded vector of historical issuances that grows monotonically with each inbound bridge operation, as burns do not prune past issuance records. This design flaw stems from the unconditional appending of issuance entries without any compaction or expiration mechanism. An attacker can exploit this by repeatedly bridging small amounts in and out, recycling the same capital while forcing the relayer—designated as the payer during inbound execution—to fund increasing rent costs for account reallocation. The impact includes escalating rent expenses for relayers (rent griefing) and, over time, potential denial of service as the account size and compute requirements exceed Solana's transaction limits, rendering both inbound and outbound bridging infeasible for affected accounts.\n",
+            "severity": "high",
+            "location": [
+                "rbac-utils/src/external_accounts/tracker_account.rs::TrackerAccount",
+                "Policy Engine issue.rs::enforce_policy_issuance",
+                "Policy Engine track.rs::new_issuance",
+                "Policy Engine track.rs::update_balance_burn",
+                "locked_tokens.rs::validate_locked_tokens",
+                "execute_vaa_v1.rs::execute_vaa_v1"
+            ],
+            "files": [
+                "9d3fecf36f2e9dc3953defc7d6bd9aaa383e95c8/rwa-token/programs/policy_engine/src/state/track.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Source-Chain Transfer-Hook Policies Are Bypassed by the Bridge Burn/Remint Path",
+            "description": "The bridge bypasses Token-2022 transfer hooks by using a direct burn-and-mint mechanism instead of standard transfers. While normal transfers trigger the Policy Engine's transfer hook to enforce compliance policies such as `TransferPause`, `TransactionAmountLimit`, and `BlockFlowbackEndTime`, the bridge's outbound path only validates lock periods and burns tokens via the Asset Controller's delegate authority, which does not invoke the transfer hook. This occurs because the burn CPI is called directly without going through `transfer_checked`. As a result, tokens can be bridged out even when source-chain transfer restrictions are active. Although the destination enforces identity binding, this undermines the intended compliance model by allowing value movement that would otherwise be blocked on-chain, weakening emergency controls and regulatory enforcement assumptions.\n",
+            "severity": "medium",
+            "location": [
+                "asset_controller/src/instructions/create.rs::create",
+                "policy_engine/src/instructions/execute.rs::execute",
+                "policy_engine/src/state/engine.rs::enforce_policy",
+                "bridge_ds_tokens.rs::bridge_ds_tokens",
+                "locked_tokens.rs::validate_locked_tokens",
+                "asset_controller/src/instructions/revoke.rs::burn_tokens",
+                "execute_vaa_v1.rs::execute_vaa_v1"
+            ],
+            "files": [
+                "9d3fecf36f2e9dc3953defc7d6bd9aaa383e95c8/rwa-token/programs/asset_controller/src/instructions/create.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "`send_usdc_cross_chain_deposit` hard-couples caller and payer roles, blocking OnRamp CPI integration",
+            "description": "The `send_usdc_cross_chain_deposit` instruction enforces a strict coupling between the `payer`, the `caller` (authorized BridgeCaller), and the owner of the USDC token account, requiring all roles to be fulfilled by a single signer. This design prevents integration scenarios where responsibilities are separated, such as in the planned OnRamp architecture where a PDA controls the USDC account (caller) while a user wallet pays SOL fees (payer). The account validation fails at the constraint level before any business logic is executed, rejecting otherwise valid cross-program invocations. This limits extensibility and blocks key integration paths, particularly for automated or custodial onboarding flows that rely on role separation.\n",
+            "severity": "low",
+            "location": [
+                "bridge_ds_tokens.rs::send_usdc_cross_chain_deposit",
+                "execute_vaa_v1.rs::execute_vaa_v1"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "`PartialPolicyEngine::deserialize_checked` version auto-detection heuristic can misidentify account layout, corrupting lock period data",
+            "description": "The `PartialPolicyEngine::deserialize_checked` function uses a heuristic based on byte values to distinguish between v1 and v2 account layouts, rather than deterministic version checks. If a v1 account is reallocated to a size >= 395 bytes, the presence of a zero byte at a specific offset can cause the deserializer to incorrectly interpret the account as v2, leading to misaligned field reads. This results in incorrect parsing of the country-to-region mapping and lock periods. When combined with an unchecked `u64` to `i64` cast in `validate_locked_tokens`, a corrupted lock period exceeding 2^63 wraps to a negative value, making unlock times appear in the past. Consequently, regulatory lock periods (e.g., Reg D 12-month holds) are bypassed, allowing US investors to bridge tokens immediately after issuance.\n",
+            "severity": "low",
+            "location": [
+                "policy_engine.rs::PartialPolicyEngine::deserialize_checked",
+                "locked_tokens.rs::validate_locked_tokens"
+            ],
+            "files": [
+                "9d3fecf36f2e9dc3953defc7d6bd9aaa383e95c8/rwa-rbac/rbac-utils/src/external_accounts/policy_engine.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Permissionless `initialize` combined with no ownership transfer and zero-value acceptance enables permanent bridge hijacking",
+            "description": "The `initialize` function in the bridge program allows any signer to become the owner without restriction, and it does not validate that critical parameters like `authorized_user_role` and `executor_program_id` are non-zero. This creates a race condition where an attacker can front-run the legitimate deployment by initializing the bridge with zeroed-out values and claiming ownership. The root cause is the lack of access control on initialization, absence of zero-value checks, and no ownership transfer mechanism. An attacker can exploit this by monitoring for initialization transactions and submitting a competing transaction with higher fees, setting themselves as owner and zeroing out key configuration fields. The impact is a permanent denial-of-service for that bridge instance, as the legitimate team cannot reinitialize (due to one-shot PDA creation) or reclaim ownership, forcing a full redeployment with a new program ID and reintegration with Wormhole and EVM-side contracts.\n",
+            "severity": "high",
+            "location": [
+                "bridge_ds_tokens::initialize",
+                "execute_vaa_v1::initialize",
+                "config.authorized_user_role != ZERO_PUBKEY (line 43)"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-182"
+                ]
+            },
+            "title": "`UsdcBridgeConfig::max_executor_fee` defaults to zero, disabling the executor fee cap",
+            "description": "The `max_executor_fee` field in `UsdcBridgeConfig` is initialized to zero, and the fee validation logic in `SendUsdcCrossChainDeposit::handler` skips the cap check when this value is zero. This means that any authorized bridge caller can set an arbitrarily high `exec_amount`, potentially draining the SOL balance of the config PDA. The cause is the conditional bypass of the fee cap check when `max_executor_fee` is zero, combined with a zero default initialization. An attacker with authorized access could exploit this by setting a high `exec_amount` in a cross-chain deposit call, leading to excessive fee deductions. The impact is a defense-in-depth gap that allows trusted but malicious actors to extract excess SOL from the bridge, though the risk is partially mitigated by the trust model around authorized callers.\n",
+            "severity": "medium",
+            "location": [
+                "UsdcBridgeConfig::max_executor_fee (initialize.rs:38)",
+                "SendUsdcCrossChainDeposit::handler (line 186)"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-544"
+                ]
+            },
+            "title": "Outbound Payload Encoding Uses `panic!` Instead of Anchor Error Codes",
+            "description": "The `abi_encode_bridge_payload` function uses `panic!` for validation errors instead of returning structured `PayloadError` types, resulting in opaque program errors without meaningful error codes. This occurs even though proper error types and validation functions already exist and are used in the decode path. The root cause is the misuse of `panic!` in validation logic, particularly for externally influenced inputs like `investor_id`, which can exceed length limits. An attacker or legitimate user with a long `investor_id` can trigger a panic, blocking their ability to use the bridge with no clear error message. The impact is poor observability and user experience, with potential for permanent blocking of valid users due to uninformative failures. This also hinders debugging and monitoring.\n",
+            "severity": "low",
+            "location": [
+                "payload.rs::abi_encode_bridge_payload (lines 174-209)",
+                "payload.rs::panic_for_invalid_bridge_payload (lines 128-145)",
+                "bridge_ds_tokens.rs::bridge_ds_tokens (line 325)"
+            ],
+            "files": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Pause blocks inbound VAA execution, stranding in-flight cross-chain transfers",
+            "description": "The bridge uses a single pause flag that disables both outbound and inbound operations, including processing of Wormhole VAAs for already-burned tokens. While this is an intentional design for safety during incidents, it means that pausing the bridge also halts the redemption of in-flight transfers on the destination chain. The cause is the shared `config.paused` constraint used in both `BridgeDsTokens::handler` and `ExecuteVaaV1::handler`. An attacker or system failure that triggers a pause could lead to temporary stranding of funds. The impact is temporary fund immobilization until the bridge is unpaused; funds are not permanently lost unless the owner key is also lost during the pause. This represents a trade-off between safety and availability.\n",
+            "severity": "medium",
+            "location": [
+                "ExecuteVaaV1::handler",
+                "BridgeDsTokens::handler",
+                "constraint = !config.paused"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-1293"
+                ]
+            },
+            "title": "Country source inconsistency between lock validation and cross-chain payload in `bridge_ds_tokens`",
+            "description": "The `bridge_ds_tokens` handler uses `identity.country` from the `IdentityAccount` for lock validation but uses `ctx.accounts.investor.country` from `ImrInvestor` for the cross-chain payload. These values come from different programs and could diverge, leading to inconsistent country-based logic. The root cause is the use of two different data sources for what should be the same attribute. If the values differ, the wrong lock period could be applied or an incorrect country could be sent cross-chain. The impact is potential regulatory or compliance issues due to incorrect lock enforcement or data transmission. Although both sources are expected to be synchronized, the lack of validation introduces risk.\n",
+            "severity": "medium",
+            "location": [
+                "BridgeDsTokens::handler (line 303 and line 331)"
+            ],
+            "files": []
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Stale `ResolverConfig` PDA persists when emitter address is updated in-place",
+            "description": "When updating the emitter address via `SetEmitterAddress::handler`, a new `ResolverConfig` PDA is created with new seeds, but the old one is not closed. This results in orphaned PDAs that continue to hold rent-exempt SOL. The cause is the lack of cleanup logic for the previous `ResolverConfig` PDA when the address changes. Although there is no functional impact—since the resolver uses the active emitter address—the orphaned accounts accumulate and waste resources. The impact is economic inefficiency due to rent leakage (~0.002 SOL per orphaned PDA), which could become significant over many updates.\n",
+            "severity": "low",
+            "location": [
+                "SetEmitterAddress::handler",
+                "ResolverConfig PDA (seeds based on emitter address)"
+            ],
+            "files": []
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Bridge initializes Wormhole outbound messages with `Confirmed` finality by default, weakening reorg safety",
+            "description": "New bridge instances default to `wormhole::Finality::Confirmed` for outbound messages, which provides weaker reorg resistance than `Finalized`. This means Wormhole guardians may attest to messages before the Solana transaction is finalized, increasing the risk that a burn transaction could be reverted in a reorg while the VAA is already redeemed on the destination chain. The cause is the hardcoded default in the `initialize` function. An attacker could exploit network instability or perform a reorg to double-spend or create supply inconsistencies. The impact is a temporary or permanent cross-chain supply imbalance, undermining the integrity of the bridge.\n",
+            "severity": "high",
+            "location": [
+                "initialize.rs (config.finality = wormhole::Finality::Confirmed as u8)",
+                "bridge_ds_tokens::post_message"
+            ],
+            "files": []
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Global resolver result PDA can be closed by any BridgeConfig owner",
+            "description": "The resolver result PDA is a global account derived from a fixed seed, shared across all bridge instances. However, the `close_resolver_result_account` instruction allows any `BridgeConfig` owner to close this PDA and redirect its rent to an arbitrary account. The cause is the lack of a centralized authority check; closure is authorized only by ownership of any bridge instance, not a program-wide admin. A malicious or compromised bridge owner could disrupt other bridge instances by closing the shared buffer. The impact is temporary disruption of oversized resolution results for other bridges, though the risk is limited to admin-level actors and not unprivileged users.\n",
+            "severity": "medium",
+            "location": [
+                "init_resolver_result_account.rs (lines 34-41)",
+                "close_resolver_result_account.rs (lines 28-38)"
+            ],
+            "files": []
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Emitter rotation can strand old VAAs and collide with new-emitter sequence numbers",
+            "description": "The trusted foreign emitter for a source chain is stored in a single EmitterAddress PDA keyed only by (asset_mint, emitter_chain). When the emitter is rotated via set_emitter_address, the previous emitter is immediately invalidated, rendering any in-flight VAAs from the old emitter unexecutable. Additionally, the Received PDA, which tracks executed VAAs, is seeded only by sequence number and does not include the emitter address. If the new emitter reuses sequence numbers that were previously used by the old emitter, attempts to execute new VAAs will fail due to PDA collision, even if the VAA content is valid.\n\nThe root cause is the lack of emitter context in the Received PDA's seed and the overwrite semantics of emitter rotation. This design assumes sequence numbers are globally unique across emitter rotations, which may not hold in practice.\n\nAn attacker or misconfigured relayer could exploit this by reusing low sequence numbers on a new emitter, causing legitimate VAAs to fail execution. Alternatively, legitimate operations from the old emitter could be stranded if not processed before rotation.\n\nThe impact includes denial of service for both old and new VAAs, potentially leading to loss of user funds or failed cross-chain operations if messages cannot be retried or recovered.\n",
+            "severity": "high",
+            "location": [
+                "programs/securitize_bridge/src/instructions/bridge/execute_vaa_v1.rs",
+                "programs/securitize_bridge/src/instructions/admin/set_emitter_address.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Inbound `execute_vaa_v1` does not validate posted VAA finality",
+            "description": "The execute_vaa_v1 instruction processes inbound VAAs without validating their finality level. While it checks the emitter chain, sequence number, and emitter address, it omits a check on posted.finality(), allowing non-finalized VAAs to be accepted and processed (e.g., token minting). This is inconsistent with the outbound side, which uses BridgeConfig.finality when posting messages.\n\nThe root cause is the absence of an explicit finality check in the inbound validation logic, despite the protocol having a configured finality parameter. This creates a security gap where less-secure remote attestations could be accepted.\n\nAn attacker could exploit this by submitting a VAA that has not reached finality on the source chain (e.g., during a reorg window), leading to premature execution on Solana. If the source chain later reverts, the Solana-side state would be inconsistent, resulting in potential double-minting or loss of funds.\n\nThe impact is a weakened trust model for cross-chain message delivery, increasing the risk of accepting invalid or reversible state changes from the source chain.\n",
+            "severity": "high",
+            "location": [
+                "programs/securitize_bridge/src/instructions/bridge/execute_vaa_v1.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ]
+            },
+            "title": "Bridge flows do not implement on-chain rate limiting or cumulative volume caps",
+            "description": "The bridge lacks on-chain rate limiting or volume caps. The only emergency control is a binary pause flag, which requires manual intervention. There are no rolling counters, per-window limits, or per-signer quotas enforced by the protocol. While there is an allowlist for outbound USDC deposits, it does not impose transaction frequency or volume restrictions.\n\nThe root cause is the absence of any time-windowed or cumulative tracking mechanisms in the BridgeConfig or associated PDAs. The design relies entirely on off-chain monitoring and manual pausing for risk mitigation.\n\nIf a trusted signer or execution path is compromised, an attacker could rapidly drain liquidity by submitting a high volume of valid transactions before the owner can react. The speed of exploitation is limited only by Solana's throughput and available funds.\n\nThe impact is unbounded financial loss in the event of a compromise, as there are no automatic throttling mechanisms to slow down or halt excessive usage, even from authorized actors.\n",
+            "severity": "high",
+            "location": [
+                "programs/securitize_bridge/src/instructions/bridge/bridge_ds_tokens.rs",
+                "programs/securitize_usdc_bridge/src/instructions/bridge/send_usdc_cross_chain_deposit.rs",
+                "programs/securitize_bridge/src/instructions/bridge/execute_vaa_v1.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "Concurrent or pipelined resolves last-write-wins",
+            "description": "Large resolver results are written to a global PDA that is shared across all resolve operations. The PDA is derived from a single seed and does not include any context such as VAA hash, sequence number, or asset mint. Each write overwrites the entire buffer, and there is no on-chain mechanism to correlate a result with a specific VAA.\n\nThe root cause is the use of a singleton global buffer without request-specific identifiers. While small results use per-transaction return data, large results fall back to this shared state, creating a race condition.\n\nIf multiple resolve operations occur concurrently or in close succession, a consumer reading from the PDA may observe the result of a different VAA than intended. This could happen due to transaction reordering, retries, or parallel processing by relayers.\n\nThe impact is incorrect execution of downstream instructions, as off-chain systems may build transaction payloads based on stale or mismatched resolver outputs, potentially leading to fund loss or invalid state transitions.\n",
+            "severity": "medium",
+            "location": [
+                "programs/securitize_bridge/src/resolver.rs",
+                "programs/securitize_bridge/src/instructions/admin/init_resolver_result_account.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ]
+            },
+            "title": "No ownership transfer mechanism for bridge config in either program",
+            "description": "The bridge configuration lacks an on-chain ownership transfer mechanism. The owner field is set at initialization and used in all admin guards, but there is no way to transfer ownership. If the owner key is lost or needs rotation (e.g., to a multisig), admin functions become permanently inaccessible.\n\nThe root cause is the absence of a two-step ownership transfer pattern (propose/accept) in the design. This creates a single point of failure for governance.\n\nAn attacker who compromises the owner key can permanently lock out legitimate administrators by refusing to transfer or by losing the key. Alternatively, accidental key loss results in permanent loss of control.\n\nThe impact is permanent loss of administrative capabilities, including the inability to pause the bridge, update configurations, or respond to emergencies, undermining the protocol's resilience and upgradability.\n",
+            "severity": "medium",
+            "location": [
+                "programs/securitize_bridge/src/instructions/admin/initialize.rs",
+                "programs/securitize_usdc_bridge/src/instructions/admin/initialize.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "DS bridge `initialize` accepts zero-value parameters that update instructions reject",
+            "description": "The DS bridge initialize handler does not validate that authorized_user_role and executor_program_id are non-zero, unlike the corresponding update handlers which explicitly reject zero values. This allows the bridge to be initialized in a non-functional state.\n\nThe root cause is inconsistent validation logic between initialization and update paths. This defense parity gap increases the risk of misconfiguration.\n\nAn attacker or negligent deployer could initialize the bridge with zero values, rendering RBAC or executor functionality inoperative. This would require subsequent corrective transactions, increasing operational risk.\n\nThe impact is potential denial of service due to misconfiguration, especially when combined with the lack of ownership transfer, as recovery may depend on external coordination or upgrade mechanisms.\n",
+            "severity": "medium",
+            "location": [
+                "programs/securitize_bridge/src/instructions/admin/initialize.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "`ResolverConfig` PDA uses big-endian chain seed while other chain-seeded PDAs use little-endian",
+            "description": "The ResolverConfig PDA uses chain.to_be_bytes() for its seed, while other PDAs like EmitterAddress and BridgeAddress use chain.to_le_bytes(). Although internally consistent, this inconsistency creates a maintainability hazard.\n\nThe root cause is a lack of standardization in byte order for chain ID encoding across PDA derivations. This increases the likelihood of developer error during future modifications.\n\nA developer copying the little-endian pattern from adjacent code may incorrectly apply it to ResolverConfig, leading to PDA derivation mismatches and potential security vulnerabilities.\n\nThe impact is not currently exploitable, but it increases the risk of introducing bugs in future updates, potentially leading to privilege escalation or denial of service if PDA checks are bypassed.\n",
+            "severity": "informational",
+            "location": [
+                "programs/securitize_bridge/src/instructions/admin/set_emitter_address.rs",
+                "programs/securitize_bridge/src/resolver.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "Dead Code Where `country_string_to_u8` and `CctpDomainNotConfigured` Are Not Used",
+            "description": "The function country_string_to_u8 in utils/country.rs and the error variant UsdcBridgeError::CctpDomainNotConfigured are unused in the codebase. This constitutes dead code.\n\nThe root cause is incomplete cleanup during development or refactoring. Unused code increases audit surface and maintenance burden.\n\nWhile not directly exploitable, an attacker could attempt to find ways to invoke dead code paths if they were mistakenly exposed. More importantly, dead code distracts auditors and increases the risk of confusion.\n\nThe impact is reduced code clarity and increased maintenance cost, with a minor security risk if dead code is later accidentally exposed through incorrect refactoring.\n",
+            "severity": "informational",
+            "location": [
+                "programs/securitize_bridge/src/utils/country.rs",
+                "programs/securitize_usdc_bridge/src/error.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "Missing events for `initialize` instructions in both programs",
+            "description": "The initialize handlers in both the DS and USDC bridges do not emit events, making the initial configuration unobservable to off-chain indexers. All other admin actions emit events, creating an inconsistency.\n\nThe root cause is the omission of event emission in the initialization logic, despite the presence of event infrastructure elsewhere.\n\nWithout initialization events, external systems cannot reliably track when a bridge is deployed or configured, hindering monitoring, compliance, and integration efforts.\n\nThe impact is reduced observability and transparency, potentially delaying incident response or complicating integration with third-party services.\n",
+            "severity": "informational",
+            "location": [
+                "programs/securitize_bridge/src/instructions/admin/initialize.rs",
+                "programs/securitize_usdc_bridge/src/instructions/admin/initialize.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1106"
+                ]
+            },
+            "title": "Magic numbers in `securitize_usdc_bridge::initialize` for default config values",
+            "description": "The USDC bridge initialize handler hardcodes default values for executor_gas_limit and min_finality_threshold without using named constants. This reduces code readability and maintainability.\n\nThe root cause is the direct use of numeric literals instead of symbolic constants with descriptive names.\n\nDevelopers or auditors may not immediately understand the significance of values like 2_000_000 or 2000, increasing the risk of incorrect modifications.\n\nThe impact is reduced code clarity and increased risk of configuration errors during future updates, though no direct security vulnerability exists.\n",
+            "severity": "informational",
+            "location": [
+                "programs/securitize_usdc_bridge/src/instructions/admin/initialize.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1093"
+                ]
+            },
+            "title": "`GasLimitUpdate` event in DS bridge uses `u128` fields unnecessarily",
+            "description": "The GasLimitUpdate event in the DS bridge uses u128 for old_gas_limit and new_gas_limit fields, despite the underlying storage type being u64. This wastes 16 bytes per field in event data.\n\nThe root cause is a mismatch between event schema and storage type, likely due to oversight during event definition.\n\nWhile not exploitable, this inefficiency increases event parsing costs and storage overhead for indexers.\n\nThe impact is increased resource consumption for off-chain services parsing events, with no direct security consequence.\n",
+            "severity": "informational",
+            "location": [
+                "programs/securitize_bridge/src/events.rs",
+                "programs/securitize_bridge/src/instructions/admin/update_gas_limit.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ]
+            },
+            "title": "`format!` used where `.to_string()` suffices for country conversion",
+            "description": "The bridge_ds_tokens handler uses format!(\"{}\", ...) to convert a country value to a string, when .to_string() would be more idiomatic and efficient.\n\nThe root cause is the use of a general-purpose formatting macro for a simple type conversion.\n\nThis has no security impact but reflects suboptimal coding practices.\n\nThe impact is negligible performance overhead and reduced code clarity, falling under best practice recommendations.\n",
+            "severity": "informational",
+            "location": [
+                "programs/securitize_bridge/src/instructions/bridge/bridge_ds_tokens.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 30,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing zero-value validation for `gas_limit` parameter in both bridges",
+            "description": "The update_gas_limit and initialize handlers in both bridges accept a gas_limit of 0 without validation. A zero gas limit would cause executor failures on the destination chain.\n\nThe root cause is the absence of require_gt!(gas_limit, 0) checks in these functions.\n\nA misconfigured or malicious owner could set gas_limit to zero, breaking outbound message execution.\n\nThe impact is denial of service for cross-chain operations, as messages would fail to execute on the destination chain due to insufficient gas.\n",
+            "severity": "medium",
+            "location": [
+                "programs/securitize_bridge/src/instructions/admin/update_gas_limit.rs",
+                "programs/securitize_usdc_bridge/src/instructions/admin/update_gas_limit.rs",
+                "programs/securitize_bridge/src/instructions/admin/initialize.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 31,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "`set_cctp_domain` uses bump value of 0 as sentinel for new account detection",
+            "description": "The set_cctp_domain handler uses cctp_domain.bump == 0 as a condition to detect new accounts, but a valid PDA can legitimately have a bump of 0, making this check unreliable.\n\nThe root cause is the use of a probabilistic bump value as a state indicator, which is not guaranteed to be unique.\n\nAn attacker could exploit this by crafting a PDA with bump=0 to bypass the unchanged check, potentially forcing an update that should be rejected.\n\nThe impact is potential configuration inconsistency or bypass of validation logic, though the risk is low due to the randomness of bump seeds.\n",
+            "severity": "medium",
+            "location": [
+                "programs/securitize_usdc_bridge/src/instructions/admin/set_cctp_domain.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 32,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "update_wormhole_accounts is for recovery, or for migration after a bridge upgrade, not for routine reconfiguration",
+            "description": "The `update_wormhole_accounts` instruction is designed as a constrained recovery mechanism, not a general-purpose reconfiguration tool. It enforces that the provided Wormhole-related accounts (bridge, fee collector, sequence) must be the canonical PDAs derived from the current `wormhole_program` and `wormhole_emitter`. This prevents arbitrary updates but limits flexibility.\n\nThe root cause is the use of Anchor constraints that tie account validation to PDA derivation logic, ensuring only canonical addresses are accepted. While this prevents misuse, it also means the function cannot be used for dynamic reconfiguration without a Wormhole program upgrade.\n\nAn attacker cannot exploit this directly due to the strict PDA checks, but if misused by an admin under incorrect assumptions, it could lead to failed transactions or confusion about intended functionality.\n\nThe impact is limited to operational correctness: the function may fail if used outside of recovery or migration scenarios, potentially disrupting administrative workflows. However, it does not lead to fund loss or unauthorized access.\n",
+            "severity": "informational",
+            "location": [
+                "update_wormhole_accounts.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 33,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "bridge_ds_tokens lamport pre-check excludes additional rent costs",
+            "description": "The `bridge_ds_tokens` handler performs a pre-check requiring the payer to have at least `wormhole_bridge.fee() + exec_amount` lamports. However, this does not account for additional lamports needed during the `post_message` CPI, which may require funding for message account creation and rent.\n\nThe cause is an incomplete validation that only considers direct fees and execution amount, omitting downstream CPI costs such as rent for newly created Wormhole message accounts. The payer is marked as mutable in the CPI, indicating it can be charged further.\n\nAn attacker could exploit this by triggering a bridge operation with minimal SOL balance that passes the pre-check but fails during `post_message`, causing a transaction failure and potential user confusion or failed UX flows.\n\nThe impact is transaction failure due to insufficient lamports during CPI execution, leading to a poor user experience and potential loss of transaction fees. It does not result in fund theft but undermines reliability.\n",
+            "severity": "medium",
+            "location": [
+                "bridge_ds_tokens.rs::bridge_ds_tokens#"
+            ],
+            "files": []
+        },
+        {
+            "id": 34,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ]
+            },
+            "title": "read_current_sequence uses ANCHOR_DISCRIMINATOR_LEN for raw Wormhole u64 data",
+            "description": "The `read_current_sequence` function uses `ANCHOR_DISCRIMINATOR_LEN` (8 bytes) to read the first 8 bytes of the Wormhole sequence tracker account as a `u64`. While functionally correct because `u64` is 8 bytes, the constant name implies Anchor-specific layout, which is misleading since the account contains raw Wormhole data.\n\nThe root cause is the reuse of an Anchor-specific constant for a non-Anchor purpose, which may confuse developers into assuming the account has an Anchor discriminator prefix when it does not.\n\nThere is no direct exploitation path, but a future developer might incorrectly modify the logic based on the misleading constant name, potentially breaking sequence reading.\n\nThe impact is limited to code maintainability and clarity. A misunderstanding could lead to bugs during future refactoring, but no immediate security risk exists.\n",
+            "severity": "informational",
+            "location": [
+                "bridge_ds_tokens.rs::read_current_sequence#"
+            ],
+            "files": []
+        },
+        {
+            "id": 35,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "initialize does not pin usdc_mint to the canonical Solana USDC mint",
+            "description": "The `initialize` instruction accepts any SPL mint as `usdc_mint`, relying on operators to provide the correct cluster-specific USDC mint. It does not enforce that the mint is the canonical one (e.g., EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyKZ6t for mainnet).\n\nThe cause is a design decision to support multiple clusters via a per-mint deployment model, shifting responsibility to deployment tooling and operators.\n\nIf an admin initializes with the wrong mint, a separate, unused `UsdcBridgeConfig` PDA is created. This could lead to a non-functional bridge instance, but funds are not at risk due to PDA uniqueness.\n\nThe impact is operational: incorrect initialization results in an unusable bridge for the intended mint, requiring redeployment. No funds are lost, but user trust may be affected.\n",
+            "severity": "low",
+            "location": [
+                "initialize.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 36,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "USDCBridgeSend does not expose a direct CCTP correlation identifier",
+            "description": "The `USDCBridgeSend` event emits only bridge-level fields and does not include Circle CCTP identifiers like `nonce` or `message_hash`, making end-to-end tracing difficult for off-chain indexers.\n\nThe cause is a deliberate design choice to avoid coupling with Circle's internal message format, relying instead on shared transaction signatures and external events for correlation.\n\nWhile not exploitable, this increases complexity for third-party systems trying to correlate Solana bridge events with destination chain mints.\n\nThe impact is reduced observability and increased burden on off-chain indexers, which must parse additional accounts or events to achieve full traceability.\n",
+            "severity": "informational",
+            "location": [
+                "send_usdc_cross_chain_deposit.rs::USDCBridgeSend#"
+            ],
+            "files": []
+        },
+        {
+            "id": 37,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Executor quotes must use the same gas limit as on-chain executor_gas_limit",
+            "description": "The bridge uses `config.executor_gas_limit` in on-chain `request_for_execution`, but does not validate that the caller-supplied signed quote was generated using the same gas limit. This can lead to mismatches between quoted and executed gas.\n\nThe root cause is the lack of an on-chain check to enforce consistency between the off-chain quoted gas limit and the on-chain configured limit.\n\nAn attacker cannot steal funds, but integrators may quote with one gas limit and execute with another, leading to failed relay transactions or inaccurate fee estimates.\n\nThe impact is transaction failure or incorrect fee estimation, reducing reliability and user experience. It does not lead to fund loss.\n",
+            "severity": "medium",
+            "location": [
+                "initialize.rs",
+                "request_for_execution.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 38,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "PauseStatusChanged is not mint-self-describing for off-chain consumers",
+            "description": "The `PauseStatusChanged` event includes `bridge_instance` and `paused` but omits the `asset_mint`, requiring off-chain systems to perform an additional account lookup to determine which token was paused.\n\nThe cause is incomplete event data design, despite the mint being available in the context at emission time.\n\nThere is no direct exploit, but it reduces the usability of the event stream for monitoring and analytics tools.\n\nThe impact is degraded off-chain observability, increasing the complexity of building reliable monitoring systems.\n",
+            "severity": "informational",
+            "location": [
+                "set_paused.rs::PauseStatusChanged#"
+            ],
+            "files": []
+        },
+        {
+            "id": 39,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-405"
+                ],
+                "4": [
+                    "CWE-1176"
+                ],
+                "5": [
+                    "CWE-1067"
+                ]
+            },
+            "title": "Instruction Handlers Use find_program_address Where Cheaper Derivation Is Available",
+            "description": "Several instruction handlers use `Pubkey::find_program_address`, which performs a loop to find a valid PDA, costing ~1,500 CU per call. In cases where the bump is known or can be passed, `Pubkey::create_program_address` would be cheaper (~200 CU).\n\nThe root cause is inefficient PDA derivation patterns, such as recomputing PDAs that could be derived via Anchor constraints or passed as instruction arguments.\n\nThis increases compute unit usage unnecessarily, leading to higher transaction costs and potential budget exhaustion in complex calls.\n\nThe impact is increased gas consumption and reduced efficiency, which can affect scalability and user fees.\n",
+            "severity": "medium",
+            "location": [
+                "initialize.rs",
+                "bridge_ds_tokens.rs",
+                "execute_vaa_v1.rs",
+                "resolver.rs"
+            ],
+            "files": [
+                "9d3fecf36f2e9dc3953defc7d6bd9aaa383e95c8/rwa-token/programs/asset_controller/src/instructions/create.rs",
+                "9d3fecf36f2e9dc3953defc7d6bd9aaa383e95c8/rwa-token/programs/asset_controller/src/state/registry.rs",
+                "9d3fecf36f2e9dc3953defc7d6bd9aaa383e95c8/rwa-token/programs/policy_engine/src/instructions/engine/create.rs",
+                "9d3fecf36f2e9dc3953defc7d6bd9aaa383e95c8/rwa-token/programs/policy_engine/src/state/engine.rs",
+                "9d3fecf36f2e9dc3953defc7d6bd9aaa383e95c8/rwa-token/programs/policy_engine/src/utils.rs",
+                "9d3fecf36f2e9dc3953defc7d6bd9aaa383e95c8/rwa-token/programs/identity_registry/src/instructions/registry/create.rs",
+                "9d3fecf36f2e9dc3953defc7d6bd9aaa383e95c8/rwa-token/programs/identity_registry/src/utils.rs"
+            ]
+        },
+        {
+            "id": 40,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ]
+            },
+            "title": "Unnecessary Heap Clones of posted.payload and WormholeAddresses in Instruction Handlers",
+            "description": "The `execute_vaa_v1` handler clones the entire `posted.payload` (up to 1024 bytes) to heap memory before decoding, when a reference would suffice. Similarly, `update_wormhole_accounts` clones the `WormholeAddresses` struct (96 bytes) when individual field reads would be sufficient.\n\nThe cause is inefficient memory usage patterns, where full clones are made unnecessarily, increasing heap allocation and copy costs.\n\nWhile the `WormholeAddresses` clone is a stack memcpy (not heap), the `payload` clone was previously a heap allocation, increasing memory pressure.\n\nThe impact is increased compute and memory usage, potentially affecting transaction success under tight CU limits.\n",
+            "severity": "medium",
+            "location": [
+                "execute_vaa_v1.rs::posted.payload.clone()",
+                "update_wormhole_accounts.rs::ctx.accounts.config.wormhole.clone()"
+            ],
+            "files": []
+        },
+        {
+            "id": 41,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ]
+            },
+            "title": "Resolver Re-derives PDAs Already Computed by Caller, Wasting ~4,500+ CU per Resolution",
+            "description": "The `derive_execute_vaa_accounts` function re-derives three PDAs (`config_key`, `identity_registry`, `investor`) that were already computed in `build_resolved`, resulting in redundant `find_program_address` calls and wasted compute units (~4,500+ CU).\n\nThe root cause is poor parameter design, where derived keys are not passed down, forcing recomputation.\n\nAdditionally, static-seed PDAs like `bridge_event_authority` are derived at runtime instead of being precomputed as constants.\n\nThe impact is unnecessary gas consumption, reducing efficiency and increasing transaction costs.\n",
+            "severity": "medium",
+            "location": [
+                "resolver.rs::derive_execute_vaa_accounts#",
+                "resolver.rs::build_resolved#"
+            ],
+            "files": []
+        },
+        {
+            "id": 42,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Redundant immutable borrow in set_bridge_address and set_emitter_address",
+            "description": "In `set_bridge_address` and `set_emitter_address`, an immutable reference is taken to perform a check, then immediately replaced by a mutable reference to the same account. This results in two borrows where one mutable borrow would suffice.\n\nThe cause is suboptimal borrowing pattern, increasing code complexity and potentially affecting borrow checker behavior in more complex functions.\n\nThere is no direct security impact, but it represents inefficient Rust code that could be simplified.\n\nThe impact is minor code inefficiency and reduced readability, with negligible runtime cost.\n",
+            "severity": "informational",
+            "location": [
+                "set_bridge_address.rs",
+                "set_emitter_address.rs"
+            ],
+            "files": []
+        }
+    ]
+}

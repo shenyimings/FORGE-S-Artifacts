@@ -1,0 +1,108 @@
+{
+    "path": "reports/raydium-cp-swap-v-1.0.0.pdf",
+    "project_info": {
+        "url": "https://github.com/raydium-io/raydium-cp-swap",
+        "commit_id": "0d56d2cbde2e6215fdfefdbfb13fb92b32479a55",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-03-25",
+        "project_path": "contracts/raydium-cp-swap-v-1.0.0.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "MAD_T22_01 - Calculating inverse fee doesn’t account for mints with ONE_IN_BASIS_POINT fee-rate and max_fee for SPL-Token-22",
+            "description": "The vulnerability lies in the SPL-Token-22 program's `calculate_inverse_fee_amount` utility function, which incorrectly returns zero for mints with a fee rate of ONE_IN_BASIS_POINTS, even when a max_fee is defined. This causes the system to fail to transfer the correct amount of tokens, as it does not fall back to using the max_fee when applicable. The root cause is an incorrect edge case handling in the fee calculation logic for Token-22 mints with the TransferFeeConfig extension. An attacker could potentially exploit this by creating or using such a token to manipulate fee calculations during swaps, leading to incorrect token transfers. The impact is critical as it could result in irreparable financial harm due to miscalculated fees and failed or unfair trades, especially in programs relying on accurate inverse fee calculations.\n",
+            "severity": "critical",
+            "location": [],
+            "files": [
+                "programs/cp-swap/src/utils/token.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ]
+            },
+            "title": "MAD_RAY_02 - The pool account could not be initialized due to the stack limits of the Solana runtime",
+            "description": "The initialize instruction in the cp_swap program uses five `init` constraints in its account context, exceeding the Solana runtime's 4 KB stack size limit. This causes the instruction to fail during execution, preventing the creation of new pool accounts. The root cause is improper account initialization design that does not account for Solana's stack constraints. An attacker or user attempting to initialize a pool would encounter a runtime error, leading to a denial of service for pool creation. The impact is critical as it halts core functionality of the AMM, preventing new liquidity pools from being deployed, thereby disrupting the entire ecosystem's growth and usability.\n",
+            "severity": "critical",
+            "location": [
+                "initialize#"
+            ],
+            "files": [
+                "programs/cp-swap/src/instructions/initialize.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "MAD_RAY_03 - Wrong evaluation of pool vaults dyadic relationship with input token accounts in swap instructions",
+            "description": "The swap instruction incorrectly swaps the order of token amounts based on trade direction logic, rather than only setting the direction. It assumes that reordering the vaults affects the input/output flow, but in reality, the input_vault always provides the input_amount and the output_vault the output_amount. The root cause is flawed logic in the trade direction determination block. This leads to incorrect computation of token amounts during swaps, violating the constant product invariant and causing swaps to fail unpredictably. The impact is critical as it results in failed transactions, loss of user confidence, and potential financial loss due to inconsistent or reverted trades.\n",
+            "severity": "critical",
+            "location": [],
+            "files": [
+                "programs/cp-swap/src/instructions/swap.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "MAD_RAY_04 - Misplaced rounding for division computation in the swap calculation",
+            "description": "The swap_amount_input instruction uses the `checked_ceil_div` function incorrectly, rounding down both swap_src and swap_dest amounts. This results in suboptimal trades where users receive fewer output tokens than expected while also transferring fewer input tokens, breaking the expected economic model. The root cause is improper application of rounding logic depending on the swap type (input vs output based). While this does not lead to invariant violations, it creates inefficiencies and unfair pricing. The impact is high, as it leads to recoverable financial harm for users due to consistently worse trade execution, undermining trust and economic fairness in the AMM.\n",
+            "severity": "high",
+            "location": [
+                "swap_amount_input#"
+            ],
+            "files": [
+                "programs/cp-swap/src/instructions/swap.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "MAD_RAY_IMPR_01 - Emitting the wrong token amount in the swap event results in logging incorrect swap data",
+            "description": "The swap instruction emits an event where both input_vault_before and output_vault_before are incorrectly set to the same value, leading to inaccurate internal monitoring data. The root cause is a bug in the event emission logic where the correct vault balances are not assigned properly before logging. While this does not affect on-chain state or fund security, it compromises the integrity of analytics and operational monitoring used by the Raydium team. The impact is non-financial but significant for operational transparency and data reliability, classified as an improvement rather than a vulnerability.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "programs/cp-swap/src/instructions/swap.rs"
+            ]
+        }
+    ]
+}

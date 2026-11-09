@@ -1,0 +1,83 @@
+{
+    "project": "2025-01-pump-science.md.json",
+    "files": [
+        "dataset/contracts/2025-01-pump-science.md.json/programs/pump-science/src/instructions/curve/swap.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-693",
+        "CWE-1284",
+        "CWE-360",
+        "CWE-20",
+        "CWE-345"
+    ],
+    "cwe_detected": [
+        "CWE-284",
+        "CWE-682",
+        "CWE-691"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Trade Event Emission Uses Redundant Clock Calls and Lacks Block Time Validation",
+            "description": "The swap handler emits `TradeEvent` and `CompleteEvent` using separate `Clock::get()` calls, leading to redundant syscalls and potential timestamp inconsistency within the same transaction. The timestamp is fetched multiple times instead of being cached, and no validation is performed to ensure the block time is reasonable or unmanipulated. A validator could manipulate clock values slightly between calls, or natural timing differences could result in inconsistent timestamps across events from the same transaction. Indexing systems may record inconsistent or inaccurate event timelines, and redundant syscalls increase computational overhead, affecting efficiency and data reliability.\n"
+        },
+        {
+            "title": "Lack of Maximum Input Amount Validation in Swap Function Could Lead to Unnecessary Transaction Failures",
+            "description": "The swap function in the Pump Science protocol validates the minimum input amount but does not enforce an upper limit on the input amount. This omission allows users to submit swap transactions with amounts that exceed available liquidity or their token balance. The `validate()` function only checks that `exact_in_amount > 0` but does not validate maximum bounds based on either the user's token balance (for token sales) or the bonding curve’s `real_sol_reserves` (for token purchases). An attacker or misinformed user could submit a swap transaction with an amount exceeding available reserves or their own balance. The transaction will proceed until it fails during execution (e.g., during token transfer or within `apply_buy()`), after which the gas has already been consumed. Users experience unnecessary transaction failures and waste gas fees due to late-stage reverts, leading to a poor user experience and increased cost of interaction with the protocol.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code implements a swap function for a bonding curve-based token exchange on Solana using Anchor. After analyzing the code with respect to the specified CWEs, several issues were identified.\n\nFirst, in the `complete_buy` and `complete_sell` functions, the fee transfer instructions use `invoke_signed` with an empty list of signer seeds (`&[]`). This is a critical mistake because `invoke_signed` is intended to forward a program-derived signer (PDA) signature, and if the signing PDA is not included in the seeds, the invocation lacks proper authorization. In both cases, the fee transfers are initiated from the user or bonding curve SOL escrow, but the signing constraints are missing. Specifically:\n- In `complete_buy`, the fee is transferred from the user to the fee receiver, but no signature delegation or PDA signing is used. Since the user is the signer and this is a direct system transfer, it may be valid, but the use of `invoke_signed` with empty seeds is incorrect and could be a logic error.\n- In `complete_sell`, the fee is transferred from the bonding curve's SOL escrow PDA. This account can only be used as a signer if the correct PDA seeds are passed to `invoke_signed`. However, the code passes an empty seed array (`&[]`) instead of `sol_escrow_signer_seeds`, which breaks the authorization model. This leads to a failed signature verification at runtime, making the fee transfer fail and potentially reverting the transaction. This is a clear instance of improper access control because the program fails to properly assert ownership or signing rights over the PDA.\n\nSecond, in `complete_buy`, the SOL transfer from the user to the bonding curve's SOL escrow uses `invoke_signed` with an empty list of signer seeds. However, this transfer comes from the user (a wallet), which is a signer in the transaction. A plain `invoke` would suffice, or if `invoke_signed` is used unnecessarily, it should not require seeds. But passing `&[]` as seeds when the user is already a signer is redundant and potentially misleading, though not immediately exploitable. However, this reflects insufficient control flow management and incorrect use of Solana's program invocation model.\n\nThird, the calculation of `sell_amount_minus_fee` in `complete_sell` performs a subtraction without checking for underflow. If `sell_result.sol_amount < fee_lamports`, this would cause a panic due to arithmetic overflow. While `fee_lamports` is derived from `calculate_fee`, which is based on a percentage of the trade, there is no explicit guarantee that the fee is less than or equal to the output amount. This could be exploited in edge cases to cause transaction failure or potentially lead to denial of service. This constitutes an incorrect calculation (CWE-682) because the arithmetic operation is not safe.\n\nFinally, the validation in `validate()` checks that the `fee_receiver` account key matches the one stored in `global`, but the `fee_receiver` account is marked with `/// CHECK:` and is not constrained in the Anchor account validation macro. This means a malicious caller could pass any account as `fee_receiver`, and the only check is inside `validate()`. While this is currently enforced, it's fragile and deviates from Anchor best practices. It increases the risk of logic errors if the validation is bypassed or reordered, representing improper access control.\n",
+            "findings": [
+                {
+                    "title": "Improper Access Control in Fee Transfer via invoke_signed",
+                    "description": "The `complete_sell` function attempts to transfer fees from the bonding curve's SOL escrow PDA to the fee receiver using `invoke_signed`, but it passes an empty list of seeds instead of the required `sol_escrow_signer_seeds`. This causes the PDA signature to fail verification, preventing the fee transfer and potentially leading to loss of fees or transaction failure. The program does not properly control access to the PDA-owned SOL funds.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Incorrect Calculation Due to Unsigned Integer Underflow Risk",
+                    "description": "In the `complete_sell` function, the expression `sell_result.sol_amount - fee_lamports` is performed without checking that `sell_result.sol_amount >= fee_lamports`. Since these values are derived from user input and dynamic fee calculations, this subtraction could underflow, causing a runtime panic. This represents an incorrect calculation that could be exploited to disrupt service.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient Control Flow Management in System Instruction Invocation",
+                    "description": "The `complete_buy` function uses `invoke_signed` with an empty seed array to transfer SOL from the user to the bonding curve's escrow. While the user is a signer, using `invoke_signed` in this context with `&[]` is incorrect and misleading. It reflects a misunderstanding of Solana's invocation model and could lead to errors if the control flow is modified. Proper use of `invoke` or correct signing should be applied.",
+                    "category": "CWE-691",
+                    "severity": "low",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Fragile Fee Receiver Account Validation",
+                    "description": "The `fee_receiver` account is marked with `/// CHECK:` and only validated in the `validate()` function via a manual check against `global.fee_receiver`. This is not enforced by Anchor's account constraints, making it vulnerable to logic errors if validation is skipped or reordered. It represents improper access control due to reliance on runtime checks instead of declarative constraints.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.88
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

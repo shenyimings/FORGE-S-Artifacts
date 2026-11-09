@@ -1,0 +1,68 @@
+{
+    "project": "07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json",
+    "files": [
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd4_denormalize_nt.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-1164",
+        "CWE-710"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-682",
+        "CWE-435"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Unused command imports in DenormalizeNT module",
+            "description": "The DenormalizeNT module imports ClaimUnstakedSOL and UndelegateVST commands but does not use them. The root cause is leftover imports from refactoring. While Rust optimizes these away, they create confusion about dependencies and module responsibilities. The impact is reduced code clarity and potential misdirection during maintenance or security reviews.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "We identified three vulnerabilities: \n1. State changes between command steps (New → Execute) may invalidate precomputed token allocations, causing failures or incorrect transfers (CWE-435).\n2. An incorrect comparison between a token count and token amount constant may abort execution unnecessarily (CWE-682). Additionally, stale pricing data during validation may lead to financial inaccuracies (CWE-682).\n3. Inadequate handling of unsupported TokenPricingSource variants results in opaque errors, hindering debugging and error recovery (CWE-703).\n",
+            "findings": [
+                {
+                    "title": "State Change Vulnerability Between Command Steps",
+                    "description": "The command computes token allocation amounts in the 'New' state and uses them in the 'Execute' state without revalidating against the current normalized token pool state.\nIf locked token amounts change between these states (e.g., due to concurrent operations), denormalization may fail or transfer incorrect amounts.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Incorrect Token Amount/Count Comparison and Stale Pricing Validation",
+                    "description": "- Incorrect Comparison: `require_gte!(FUND_ACCOUNT_MAX_SUPPORTED_TOKENS as u64, remains)` compares a token count (constant) with a token amount (`remains`), causing logical mismatch.\n- Stale Pricing: Validation in `execute_execute` uses a pricing service initialized without cache refresh (`new_pricing_service(..., false)`), risking stale price data and incorrect denormalization checks.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Inadequate Handling of TokenPricingSource Variants",
+                    "description": "The `execute_execute` function throws a generic exception (`FundOperationCommandExecutionFailedException`) for unsupported `TokenPricingSource` variants (e.g., SPLStakePool, MarinadeStakePool) instead of handling or logging the error. This obscures root causes and disrupts error recovery.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

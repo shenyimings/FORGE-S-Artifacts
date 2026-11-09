@@ -1,0 +1,288 @@
+{
+    "path": "reports/zenith-damm-v2-audit-june-2025-1.pdf",
+    "project_info": {
+        "url": "https://github.com/MeteoraAg/cp-amm",
+        "commit_id": "4f969508da67142265cafde1e2a14792b9000253",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-05-26",
+        "project_path": "contracts/zenith-damm-v2-audit-june-2025-1.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Transfer fee is not considered on liquidity withdrawals",
+            "description": "The vulnerability arises because the slippage check in the handle_remove_liquidity function does not account for transfer fees that may be imposed by Token2022 tokens. While other parts of the codebase correctly consider potential fees when checking slippage, this function uses pre-transfer amounts, which can lead to discrepancies. An attacker could exploit this by using a Token2022 token with a transfer fee, causing the actual received amount to be lower than expected after the fee is deducted. This undermines the slippage protection mechanism, potentially leading to users receiving less liquidity than anticipated, which impacts user trust and economic security.\n",
+            "severity": "medium",
+            "location": [
+                "cp-amm/src/instructions/ix_remove_liquidity.rs#118-126"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/ix_remove_liquidity.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "SOL/USDC fee can't be claimed if token account was frozen",
+            "description": "The issue occurs in the fee claiming functions (handle_claim_partner_fee and handle_claim_protocol_fee), where both quote and non-quote token transfers are executed in a single atomic operation. If the token vault for the non-quote token is frozen by its freeze authority, the entire transaction will fail, preventing the withdrawal of fees even for the unfrozen quote token. This creates a denial-of-service vector where a malicious owner or compromised authority can freeze the vault and block fee collection indefinitely. The root cause is the lack of error isolation between the two transfer operations. An attacker could exploit this by freezing the vault to disrupt protocol and partner revenue streams, leading to financial loss for stakeholders.\n",
+            "severity": "low",
+            "location": [
+                "cp-amm/src/instructions/partner/ix_claim_partner_fee.rs#67-85",
+                "cp-amm/src/instructions/admin/ix_claim_protocol_fee.rs#74-92"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/partner/ix_claim_partner_fee.rs",
+                "programs/cp-amm/src/instructions/admin/ix_claim_protocol_fee.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Total Positions metric is incorrect",
+            "description": "The Total Positions metric in the PoolMetrics state is incremented when a new position is created but is never decremented when a position is closed. This leads to an inflated count of active positions over time, as the inc_position function is called during initialization but the corresponding dec_position (or similar) function is not invoked upon closing a position. The root cause is a missing state update in the ix_close_position instruction handler. Although this does not directly impact fund security or protocol functionality, it results in inaccurate on-chain metrics that could mislead users, analytics platforms, or governance systems relying on this data for decision-making.\n",
+            "severity": "low",
+            "location": [
+                "cp-amm/src/state/pool.rs#168-171"
+            ],
+            "files": [
+                "programs/cp-amm/src/state/pool.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Exponential fee will be rounded down",
+            "description": "The calculation of the base fee numerator for exponential fees involves a multiplication followed by a right bit shift (overflowing_shr), which inherently truncates any fractional part, effectively rounding down the result. This occurs in the fee_math module when computing dynamic fees based on the cliffFeeNumerator and reduction factor over time periods. The root cause is the use of truncating arithmetic without any rounding adjustment. While the impact is minimal per calculation, repeated applications could accumulate a small loss in fee precision. This may lead to slightly lower-than-expected fees being collected over time, potentially affecting revenue distribution accuracy, though not in a critical manner.\n",
+            "severity": "low",
+            "location": [
+                "cp-amm/src/math/fee_math.rs#28-33"
+            ],
+            "files": [
+                "programs/cp-amm/src/math/fee_math.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Users can be tricked to provide liquidity for high APY farm that cannot be claimed when frozen",
+            "description": "The initialize_rewards function allows the use of any whitelisted mint as a reward token, including those with freeze authority. A malicious pool owner could initialize a high-APY farm using such a token and later freeze the associated vault, preventing users from claiming their rewards. This breaks the expected functionality of the reward campaign and could be used to manipulate token prices by attracting liquidity under false pretenses. The root cause is the absence of a check to ensure reward tokens either lack freeze authority or are otherwise secured against such abuse. While the likelihood is low due to expected due diligence, it presents a potential deception vector.\n",
+            "severity": "informational",
+            "location": [
+                "ix_initialize_reward.rs#51-66"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/admin/ix_initialize_reward.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing check to prevent both reward indices from using the same reward mint",
+            "description": "The initialize_reward function does not validate that the two reward indices (0 and 1) in a pool use different reward token mints. This allows a pool to be configured with identical mints for both reward slots, which could lead to confusion or unintended behavior in reward distribution logic. Although the system allows flexibility for future permissionless features, the lack of a safety check increases the risk of misconfiguration. The root cause is the absence of a comparison between existing and new reward mints during initialization. This could result in overlapping reward accounting or user confusion about distinct reward streams.\n",
+            "severity": "informational",
+            "location": [
+                "ix_initialize_reward.rs#51-66"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/admin/ix_initialize_reward.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "0 Vesting is possible by not passing a cliff point",
+            "description": "A vesting can be created with cliff_unlock_liquidity > 0 and all other vesting parameters set to zero. If no cliff_point is provided, it defaults to the current timestamp, allowing the entire vesting to be unlocked immediately. This bypasses the intended vesting mechanism despite passing the non-zero total lock amount check. The root cause is the lack of validation ensuring that either the number_of_period is greater than zero or a future cliff_point is specified. This allows users to circumvent vesting restrictions, potentially undermining incentive structures designed to promote long-term participation.\n",
+            "severity": "informational",
+            "location": [
+                "cp-amm/src/instructions/ix_lock_position.rs#116"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/ix_lock_position.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "Consider removing un-used codes",
+            "description": "Multiple functions and constants are present in the codebase but are not referenced anywhere, including accrue_partner_fees, claim_fees, validate_remove_balanced_liquidity, get_last_buying_point, validate_swap, validate_update_activation_point, to_bootstrapping_config, and the MEME_MIN_FEE_UPDATE_WINDOW_DURATION constant. These unused elements increase code complexity, reduce readability, and create maintenance overhead without providing functional value. The root cause is incomplete cleanup after refactoring or feature changes. While they do not introduce direct security risks, they can mislead auditors and developers, increasing the likelihood of errors during future modifications.\n",
+            "severity": "informational",
+            "location": [
+                "fee_parameters.rs#317-347",
+                "activation_handler.rs#104-110",
+                "activation_handler.rs#83-86",
+                "constants.rs#103",
+                "config.rs#306",
+                "activation_handler.rs#129-156"
+            ],
+            "files": [
+                "programs/cp-amm/src/params/fee_parameters.rs",
+                "programs/cp-amm/src/utils/activation_handler.rs",
+                "programs/cp-amm/src/constants.rs",
+                "programs/cp-amm/src/state/config.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1116"
+                ]
+            },
+            "title": "Typo in comments",
+            "description": "A typo exists in a code comment where \"onwership\" is incorrectly spelled instead of \"ownership\". The comment reads: \"// require at least 1 lamport to prove onwership of token mints\". While this does not affect code functionality, it reduces code quality and professionalism. The root cause is a simple typographical error during code writing. Although the impact is negligible, such errors can hinder understanding for new developers or auditors reading the code, especially non-native English speakers relying on accurate terminology.\n",
+            "severity": "informational",
+            "location": [
+                "cp-amm/src/instructions/initialize_pool/ix_initialize_customizable_pool.rs#347"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/initialize_pool/ix_initialize_customizable_pool.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "Whitelisted tokens can never be removed",
+            "description": "Once a token is whitelisted via the TokenBadge account, there is no mechanism to remove or close the badge, meaning the token remains permanently whitelisted. This poses a risk if a previously benign token later becomes malicious or non-compliant (e.g., through activation of a transfer hook). The root cause is the absence of a function to close or revoke a TokenBadge. This creates a permanent trust assumption on initially safe tokens, potentially exposing the system to future exploits if token behavior changes post-whitelisting.\n",
+            "severity": "informational",
+            "location": [
+                "cp-amm/src/instructions/admin/ix_create_token_badge.rs#11"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/admin/ix_create_token_badge.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "total_claimed_reward could silently overflow",
+            "description": "The accumulate_total_claimed_rewards function uses wrapping_add to update the total_claimed_rewards field in the position state, which silently overflows on arithmetic overflow instead of panicking or returning an error. This could result in incorrect accounting of claimed rewards if the value exceeds u64::MAX. The root cause is the use of unchecked arithmetic in a state mutation function. While the likelihood of reaching such a high value is low, the lack of safe arithmetic checks violates best practices and could lead to inconsistent reward tracking or potential exploitation in edge cases involving extremely large reward claims.\n",
+            "severity": "informational",
+            "location": [
+                "cp-amm/src/state/position.rs#233"
+            ],
+            "files": [
+                "programs/cp-amm/src/state/position.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Users can recover part of fee by referring themselves",
+            "description": "The swap instruction allows users to specify a referral token account without validating whether it belongs to a trusted referrer. This enables a user to pass their own token account as the referral, thereby receiving a portion of the referral fee back. The root cause is the lack of a whitelist or ownership check on the referral account. An attacker could exploit this to reduce the net fee paid during swaps, effectively gaming the referral system for personal gain. This undermines the intended economic model and could lead to revenue leakage from the protocol.\n",
+            "severity": "informational",
+            "location": [
+                "cp-amm/src/instructions/ix_swap.rs#176-199"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/ix_swap.rs"
+            ]
+        }
+    ]
+}

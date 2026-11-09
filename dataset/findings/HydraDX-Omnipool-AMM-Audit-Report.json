@@ -1,0 +1,780 @@
+{
+    "path": "reports/HydraDX-Omnipool-AMM-Audit-Report.pdf",
+    "project_info": {
+        "url": "https://github.com/galacticcouncil/HydraDX-node",
+        "commit_id": "8de6222f967cc1bfe120207a775e8f0dc8eb92a5",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-09-02",
+        "project_path": "contracts/HydraDX-Omnipool-AMM-Audit-Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Vulnerabilities found when performing dependency linting",
+            "description": "1. **Description:** The audit identified vulnerabilities arising from outdated or insecure dependencies used in the project.\n2. **Cause:** Use of third-party libraries or crates with known security flaws or without proper version pinning.\n3. **Exploitation:** An attacker could exploit known vulnerabilities in a dependency to compromise the system, potentially leading to fund loss or unauthorized access.\n4. **Impact:** Compromise of contract integrity, potential loss of funds, or escalation of privileges due to weak dependency management.\n",
+            "severity": "high",
+            "files": [
+                "Cargo.toml"
+            ],
+            "location": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-1293"
+                ]
+            },
+            "title": "Adding liquidity could be disabled using a relatively small amount of assets by manipulating the pool price of the stable coin",
+            "description": "The TVL calculation for adding liquidity uses the spot price of the stablecoin in the Omnipool, which is manipulatable. Since the stablecoin is a tradable asset in the pool, an attacker can artificially lower its price and trigger early hitting of the TVL cap by depositing a relatively small amount of assets. This is caused by relying on an on-chain, unshielded price feed for critical economic logic. The attacker can exploit this by manipulating the price via trades or observing state, leading to the denial of service for legitimate liquidity providers. The impact is that the liquidity addition mechanism can be disabled at low cost.\n",
+            "severity": "high",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.add_liquidity"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Rounding error could cause loss to the pool",
+            "description": "Due to the integer-based arithmetic in the AMM state machine, rounding errors occur during state transitions such as removing liquidity or buying assets. These errors stem from truncation or imprecise rounding in critical calculations like ∆Balance, ∆Value, and imbalance updates. An attacker can exploit these by performing large-volume operations where rounding differences are significant, leading to excess asset payouts or incorrect state updates. The impact is direct financial loss to the pool due to accumulated rounding discrepancies.\n",
+            "severity": "high",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.remove_liquidity#delta_reserve",
+                "Omnipool.remove_liquidity#imbalance",
+                "Omnipool.buy_asset_for_hub_asset"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Too much hub asset burned when removing liquidity",
+            "description": "During the remove liquidity operation, the hub asset (LRNA) is incorrectly burned by ∆Value + ∆Balance, violating the LIQUIDITY_EQUIVALENCE invariant. The root cause is an incorrect subtraction in the balance update logic, where ∆Value is burned even though only ∆Balance should be. An attacker could exploit this by repeatedly removing liquidity to force excess burning of LRNA, leading to permanent imbalance in the pool's asset backing. The impact is a violation of economic invariants and potential de-pegging or loss of trust in the system.\n",
+            "severity": "high",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.remove_liquidity"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Hub asset can be withdrawn from the pool account via refund_refused_asset() call",
+            "description": "The `refund_refused_asset()` function allows withdrawal of any asset not in the Assets set, including the hub asset LRNA, if the caller has AddTokenOrigin privileges. This is a critical access control flaw because the hub asset should never be removable via this function. An attacker with AddTokenOrigin could withdraw LRNA from the pool at will, leading to direct theft of the core reserve asset. The impact is catastrophic loss of funds and collapse of the pool's economic model.\n",
+            "severity": "high",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.refund_refused_asset"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Incorrect asset state update when the native currency is one of the assets being traded to Omnipool",
+            "description": "When the native currency (HDX) is traded, the protocol fee adjustment to the hub reserve is overwritten by a subsequent `set_asset_state()` call. This is caused by incorrect ordering of state updates, where the manually computed hub reserve change is lost. As a result, the HDX subpool's hub reserve is lower than it should be, leading to an artificially low price. The impact is a financial loss to the Omnipool and distortion of market prices.\n",
+            "severity": "high",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.buy_asset_for_hub_asset",
+                "Omnipool.sell_asset_for_hub_asset"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Assets allowed to be equal when selling",
+            "description": "The sell function does not validate that the input and output assets are different. This allows a user to perform a self-swap, which causes the asset state to be updated twice—first as an input and then as an output—resulting in an incorrect final state. The root cause is missing input validation. An attacker can exploit this to manipulate asset prices indefinitely by repeatedly swapping an asset with itself, paying only fees. The impact includes state corruption and unlimited price inflation.\n",
+            "severity": "high",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.sell"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect sell limit checking when buying asset_out using LRNA",
+            "description": "The `buy_asset_for_hub_asset()` function checks the wrong condition against the max_sell_limit: it checks the amount of asset_out requested instead of the actual LRNA amount required. This is a logic error in post-condition validation. An attacker could exploit this by requesting a small amount of a high-value asset, which requires a large amount of LRNA, bypassing the sell limit. The impact is potential over-extraction of LRNA from the pool beyond intended limits.\n",
+            "severity": "medium",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.buy_asset_for_hub_asset#1440"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Zero value for SimpleBalance does not have a consistent sign",
+            "description": "The `SimpleBalance` and `SimpleImbalance` types assign inconsistent signs to zero: `add` sets it to negative, while `sub` sets it to positive. Although currently not exploitable due to all balances being negative, this creates a latent bug. The root cause is inconsistent implementation of sign logic for zero values. If positive balances are ever introduced, this could break equality checks and sign-based logic. The impact is potential logic errors in balance comparisons and state validation in future upgrades.\n",
+            "severity": "medium",
+            "files": [
+                "pallets/omnipool/src/types.rs"
+            ],
+            "location": [
+                "SimpleBalance.add",
+                "SimpleImbalance.sub"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Missing overflow checking for account balance (ORML tokens)",
+            "description": "The `do_deposit` function in the ORML tokens pallet may lack sufficient overflow protection when minting LRNA tokens. This is due to potential use of unsafe arithmetic operations. An attacker could exploit this by causing an integer overflow in the balance, resulting in an abnormally high balance or wraparound. The impact is unauthorized minting of LRNA, leading to inflation and loss of asset integrity.\n",
+            "severity": "high",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "ORML.tokens.do_deposit"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "add_liquidity does not fully follow the math model when computing the imbalance",
+            "description": "The `add_liquidity` function uses updated reserve values (Qi+, Ri+) in `calculate_delta_imbalance`, whereas the mathematical model specifies the use of pre-update values (Qi, Ri). Although the impact is minimal due to rounding effects, this divergence introduces a discrepancy between specification and implementation. The root cause is a mismatch in timing of state usage. While not currently exploitable, it reduces confidence in the correctness of the system. The impact is reduced auditability and potential future bugs if the math model is updated.\n",
+            "severity": "low",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "HydraDX-math.calculate_delta_imbalance#419-421",
+                "Omnipool.add_liquidity#698"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Incorrect imbalance update in pool initialization",
+            "description": "During pool initialization, the result of `recalculate_imbalance` is ignored, and `update_imbalance` is called with an incorrect delta. This is a code clarity and correctness issue. Although the delta is zero and thus harmless, the code is confusing and suggests a potential logic error. The root cause is redundant or dead code. The impact is reduced maintainability and risk of future bugs if similar patterns are copied.\n",
+            "severity": "low",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.initialize_pool"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Locked asset - unregistered asset cannot be refunded",
+            "description": "Unregistered assets have an ExistentialDeposit of u128::MAX, making them non-refundable. While the team assumes users cannot hold unregistered assets, this is not enforced in code. The root cause is reliance on an undocumented assumption. If a user somehow acquires an unregistered asset, it becomes permanently locked. The impact is potential loss of funds, though the likelihood is low under current assumptions.\n",
+            "severity": "informational",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Assumption not checked: LRNA imbalance is negative",
+            "description": "The code assumes the LRNA imbalance is always negative but does not validate this. It passes the absolute value to `calculate_sell_state_changes` without checking the sign. The root cause is missing runtime assertion. While currently safe, this reduces code safety. The impact is potential logic errors if the assumption is violated in the future.\n",
+            "severity": "informational",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.sell#951"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Updating HubAssetTradability could cause problems",
+            "description": "The `SetAssetTradability` function allows changes to HubAssetTradability without sufficient restrictions. This is a design-level issue. Changing tradability settings could break preconditions (e.g., `Assets.contains_key(HubAssetId)`) or create state inconsistency between HubAssetTradability and Assets map. The impact is potential failure of core functions or economic loss due to inconsistent state.\n",
+            "severity": "medium",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.set_asset_tradability"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1061"
+                ]
+            },
+            "title": "Storage access in one place",
+            "description": "The `update_imbalance` function takes `HubAssetImbalance<T>::get()` as a parameter instead of reading it inside the function. This reduces code clarity and分散s storage access logic. The root cause is poor function design. The impact is reduced readability and maintainability, increasing the risk of bugs during future modifications.\n",
+            "severity": "low",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.update_imbalance"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "Incorrect error type in the buy action when there is not enough reserve value for asset_in in the pool",
+            "description": "When there is insufficient reserve for an asset, the function returns `ArithmeticError::Overflow` instead of `Error::NotEnoughAsset(asset_in)`. This is a misleading error reporting issue. The root cause is incorrect error mapping. The impact is confusion for frontends and users, making debugging and error handling more difficult.\n",
+            "severity": "low",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.buy#1052",
+                "HydraDX-math#173"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect checking for sufficient balance",
+            "description": "The pre-check for sufficient balance in the buy function only validates against free balance, not considering frozen funds. This is caused by using `free_balance >= amount` instead of `can_withdraw`. An attacker could trigger a failure after the check by freezing funds in a reentrant call or via external logic. The impact is premature transaction failure or incorrect assumption of liquidity availability.\n",
+            "severity": "low",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.buy#1068"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Duplicate computation of protocol_fee_amount when selling non-LRNA assets to the pool",
+            "description": "The `protocol_fee_amount` is computed twice: once in `amount_without_fee` and again later in the logic. This is caused by not reusing the already computed value. The root cause is inefficient code structure. The impact is unnecessary gas or computational cost, reducing efficiency.\n",
+            "severity": "n/a",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "HydraDX-math.calculate_sell_state_changes#53",
+                "HydraDX-math#38"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Majority of the liquidity will be owned by the pool if the withdrawal happens when the price drop significantly",
+            "description": "The protocol share of an asset increases monotonically. When liquidity is withdrawn after a significant price drop, the pool retains most of the shares. This is a design characteristic, not a bug. The impact is economic: early LPs or the protocol benefit disproportionately, potentially discouraging late withdrawals or affecting fairness.\n",
+            "severity": "n/a",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Some condition checking in the specification is not implemented",
+            "description": "Several specification requirements are missing in code: (1) checking if StableCoinAssetId is registered in AssetRegistry during pool initialization, (2) ensuring amount > 0 in add_liquidity, and (3) ensuring shares > 0 in remove_liquidity. These are input validation omissions. The root cause is incomplete implementation of spec. The impact is potential processing of invalid inputs, leading to edge-case failures or incorrect state.\n",
+            "severity": "n/a",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.initialize_pool#364",
+                "Omnipool.add_liquidity#601",
+                "Omnipool.remove_liquidity#734"
+            ]
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Invariant 4 (HubAsset_Accounting) Violation",
+            "description": "1. **Description:** The HubAsset_Accounting invariant is violated in the implementation. This invariant requires that the balance of the hub asset (LRNA) should equal the sum of the values of all assets in the pool. However, after a liquidity removal operation, this equality does not hold.\n\n2. **Cause:** During the withdrawal of liquidity, the hub asset balance is decreased by both ∆Value and ∆Balance, but the total value of assets is only reduced by ∆Value. This discrepancy causes the hub asset balance to be less than the sum of asset values, breaking the accounting invariant.\n\n3. **Exploitation:** An attacker could potentially exploit this inconsistency to manipulate accounting checks or induce incorrect state assumptions in dependent systems, especially if external protocols rely on the correctness of this invariant for valuation or risk assessment.\n\n4. **Impact:** The violation undermines the financial integrity of the system's accounting model, which could lead to incorrect economic decisions, mispricing of positions, or compromise of solvency verification mechanisms.\n",
+            "severity": "high",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "remove_liquidity"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Specification 5 Not Explicitly Checked in Code",
+            "description": "1. **Description:** Specification 5, which should define a critical safety or correctness property, is not explicitly enforced or validated in the implementation. The absence of a runtime check or assertion means the system may operate under invalid assumptions.\n\n2. **Cause:** The code does not include any condition, require statement, or invariant check corresponding to Specification 5, leaving it unenforced at execution time.\n\n3. **Exploitation:** If Specification 5 governs a security-critical property (e.g., non-dilution, price validity, or share consistency), its absence could allow malicious or erroneous state transitions that violate intended protocol behavior.\n\n4. **Impact:** The impact depends on the nature of Specification 5, but in general, missing specification enforcement can lead to state corruption, economic imbalance, or vulnerability to manipulation. However, the full impact cannot be assessed due to the incomplete context in this document chunk.\n",
+            "severity": "n/a",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Rounding Error Analysis for Imbalance Change",
+            "description": "1. **Description:** The analysis of the change in imbalance during liquidity removal is incomplete in the document chunk. It begins discussing the case when the pool price of the asset drops, indicating a potential rounding-related discrepancy in the computed imbalance.\n\n2. **Cause:** The calculation involves division or multiplication operations that are subject to integer truncation, particularly when ∆Balance and LRNA balance are used in ratio computations.\n\n3. **Exploitation:** If not properly bounded, such rounding errors could be exploited cumulatively over multiple transactions to skew the imbalance state, potentially affecting fee calculations or triggering incorrect rebalancing actions.\n\n4. **Impact:** The impact could range from minor economic leakage to significant deviation in protocol-controlled variables, depending on the magnitude and direction of the rounding bias. However, the analysis is cut off before concluding, so the full implications are not available in this chunk.\n",
+            "severity": "n/a",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing Validation for LRNA as asset_out",
+            "description": "1. **Description:** The specification states that LRNA cannot be bought from the Omnipool (i.e., it cannot be asset_out), but the implementation lacks an explicit condition to enforce this rule.\n2. **Cause:** The precondition list does not include a check to ensure that asset_out ≠ LRNA, despite this being a critical business rule.\n3. **Exploitation:** An attacker could potentially craft a transaction where asset_out is set to LRNA, bypassing intended restrictions and possibly triggering undefined or insecure behavior in the swap logic.\n4. **Impact:** This could lead to violation of economic invariants, unintended minting or burning of LRNA, or disruption of pool balance integrity if not properly handled downstream.\n",
+            "severity": "n/a",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.buy"
+            ]
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing Validation for asset_in ≠ asset_out",
+            "description": "1. **Description:** The operation allows swapping asset_in for asset_out without enforcing that the two assets must be different, which could result in nonsensical or exploitable self-swaps.\n2. **Cause:** There is no precondition check to prevent asset_in and asset_out from being the same asset, despite this being a logical requirement for any meaningful swap.\n3. **Exploitation:** An attacker could perform a zero-effect swap with fees, effectively extracting protocol fees without providing value, or triggering edge-case behaviors in fee accounting or balance updates.\n4. **Impact:** This could lead to unnecessary consumption of user funds via fees, potential manipulation of fee collection metrics, or exploitation in combination with other systems that assume swaps involve distinct assets.\n",
+            "severity": "n/a",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.buy"
+            ]
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing Hub Asset Check in Swap Operation",
+            "description": "1. **Description:** The swap operation does not validate that the output asset (asset_out) is not the hub asset (LRNA). This omission allows a user to attempt a swap where asset_out equals LRNA, which violates the intended design and could lead to incorrect state transitions or reserve manipulation.\n\n2. **Cause:** The precondition list explicitly states \"Missing condition checking: HubAsset ≠ asset_out\", indicating that this validation is absent in the implementation.\n\n3. **Exploitation:** An attacker could potentially exploit this by initiating a swap with LRNA as asset_out, possibly triggering undefined behavior or manipulating internal balances due to incorrect assumptions in downstream logic.\n\n4. **Impact:** This could result in incorrect accounting, imbalance in hub asset reserves, or potential loss of funds due to miscalculations in reserve updates.\n",
+            "severity": "n/a",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.swap#"
+            ]
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing Asset Registry and Hub Asset Validation in Refund Operation",
+            "description": "1. **Description:** The refund_refused_asset function lacks validation that the asset being refunded is both registered in the AssetRegistry and is not the hub asset (LRNA). This could allow the refund of unregistered or critical system assets.\n\n2. **Cause:** The specification notes two missing conditions: (1) asset_id must be in AssetRegistry::Assets to ensure valid ExistentialDeposit handling, and (2) asset_id must not be HubAssetID, as LRNA should never leave the pool.\n\n3. **Exploitation:** An attacker with access to the AddTokenOrigin could trigger a refund of LRNA (hub asset) or an unregistered token, potentially draining the pool or corrupting accounting invariants.\n\n4. **Impact:** This could lead to loss of protocol-controlled assets, especially the hub asset LRNA, undermining the entire economic model and stability of the Omnipool.\n",
+            "severity": "n/a",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.refund_refused_asset#"
+            ]
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Significant Rounding Error in ∆Value Calculation",
+            "description": "1. **Description:** The calculation of ∆Value_asset_out involves integer division and rounding down (∆Value = ⌊∆Value_0⌋), which introduces a rounding error. When large amounts are swapped, this error can result in the LRNA balance increasing by significantly less than expected.\n\n2. **Cause:** The formula for ∆Value_asset_out depends on hub_denominator, which is derived from balance minus fees and amount. The floor operation discards fractional units, and the error scales with the size of the swap.\n\n3. **Exploitation:** An attacker could perform a series of large swaps to accumulate rounding losses, effectively extracting value from the system through dust accumulation or causing imbalance in the LRNA reserve.\n\n4. **Impact:** Over time, this could degrade the accuracy of the AMM's internal state, lead to unfair user outcomes, and potentially destabilize the peg of LRNA due to incorrect reserve accounting.\n",
+            "severity": "high",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.swap#"
+            ]
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant computation when calculate remove liquidity state change",
+            "description": "1. **Description:** The function responsible for calculating state changes during liquidity removal performs redundant computations, recalculating values that could be reused or simplified.\n2. **Cause:** The implementation lacks optimization in the calculation logic, leading to unnecessary repetition of arithmetic operations.\n3. **Exploitation:** An attacker could potentially exploit this inefficiency by repeatedly calling the function to increase transaction costs and contribute to network congestion, though no direct financial gain is implied.\n4. **Impact:** The primary impact is increased computational overhead and higher gas costs per transaction, which may affect user experience and scalability.\n",
+            "severity": "low",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.remove_liquidity"
+            ]
+        },
+        {
+            "id": 30,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Rounding error exploit when removing liquidity",
+            "description": "1. **Description:** During the removal of liquidity, rounding errors in the calculation of token amounts can be manipulated by an attacker to extract more value than expected over multiple transactions.\n2. **Cause:** The use of floor operations in arithmetic without sufficient safeguards allows for small rounding discrepancies that accumulate.\n3. **Exploitation:** An attacker could perform a series of small, strategically timed liquidity removals to exploit favorable rounding, gradually draining value from the pool.\n4. **Impact:** This could lead to a gradual loss of funds from the pool, especially affecting long-term liquidity providers and undermining economic fairness.\n",
+            "severity": "medium",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.remove_liquidity"
+            ]
+        },
+        {
+            "id": 31,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Consistency: ImbalanceLRNA.negative is not a precondition in most exchange types",
+            "description": "1. **Description:** The invariant that ImbalanceLRNA.negative must be true is not consistently enforced as a precondition across all exchange operations, creating a potential state inconsistency.\n2. **Cause:** Some exchange functions do not validate the sign of the LRNA imbalance before proceeding with state changes.\n3. **Exploitation:** If a scenario arises where the imbalance becomes positive due to a bug or unexpected state transition, operations may proceed incorrectly, leading to invalid state updates.\n4. **Impact:** This could result in violation of core invariants, potentially leading to incorrect accounting and loss of funds.\n",
+            "severity": "high",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.sell_asset_in",
+                "Omnipool.buy_asset_out"
+            ]
+        },
+        {
+            "id": 32,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Possibly large error in the imbalance when buying with LRNA",
+            "description": "1. **Description:** When buying an asset using LRNA, the calculation of the resulting imbalance may suffer from significant rounding errors due to the order of operations and lack of precision safeguards.\n2. **Cause:** The formula used to compute the imbalance change involves division and multiplication steps that are sensitive to rounding, especially when dealing with small or large values.\n3. **Exploitation:** An attacker could exploit this by choosing specific trade sizes that maximize rounding discrepancies, leading to an unfairly adjusted imbalance in their favor.\n4. **Impact:** This could distort the internal state of the pool, affect future pricing, and potentially allow for value extraction over time.\n",
+            "severity": "medium",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Omnipool.buy_asset_out_using_LRNA"
+            ]
+        },
+        {
+            "id": 33,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "Use after free in unmaintained serde_cbor crate",
+            "description": "The project depends on the unmaintained `serde_cbor` crate, which has known memory safety issues such as use after free. This vulnerability arises from the use of an abandoned dependency that is no longer receiving security updates. An attacker could potentially exploit memory corruption vulnerabilities in the CBOR deserialization process, leading to arbitrary code execution or denial of service. The impact includes memory leakage and potential compromise of node integrity, especially if untrusted CBOR data is processed.\n",
+            "severity": "high",
+            "files": [
+                "Cargo.toml"
+            ],
+            "location": [
+                "HydraDX math repo"
+            ]
+        },
+        {
+            "id": 34,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Unfavorable Rounding in Asset Output Calculation",
+            "description": "1. **Description:** The calculation of the amount of asset_out paid to the trader involves multiple rounding steps that may result in the trader receiving more than the fair amount, which is unfavorable to the liquidity pool.\n2. **Cause:** The issue arises from the nested floor operations in the computation of ∆Balance_asset_out, specifically ⌊(1 - AssetFee) * ⌊∆Balance_1⌋⌋, where intermediate rounding can compound to favor the trader.\n3. **Exploitation:** An attacker could repeatedly execute swap transactions under conditions where rounding errors are maximized, leading to systematic extraction of excess assets from the pool over time.\n4. **Impact:** The cumulative effect of unfavorable rounding could lead to a gradual loss of funds from the pool, undermining economic fairness and potentially affecting pool solvency under high-volume attack scenarios.\n",
+            "severity": "n/a",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 35,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant computation when calculate remove liquidity state change",
+            "description": "1. **Description:** The code calculates the current pool price and the change in hub reserve separately, even though the latter could reuse the former's computation result. This leads to redundant operations.\n2. **Cause:** The implementation does not reuse the computed `current_price` when calculating `delta_hub_reserve_hp`, likely due to limitations in the U256 type not supporting rounded rational multiplication.\n3. **Exploitation:** This is not exploitable by an attacker, as it does not introduce a security vulnerability but rather inefficiency.\n4. **Impact:** The impact is limited to code maintainability and efficiency; there is no direct financial or security impact on users or the protocol.\n",
+            "severity": "informational",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "calculate remove liquidity state change"
+            ]
+        },
+        {
+            "id": 36,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Rounding error exploit when removing liquidity",
+            "description": "1. **Description:** The implementation uses two rounded intermediate values (`p_x_r` and `div1`) when calculating `hub_transferred`, introducing a rounding error that could be exploited under specific conditions.\n2. **Cause:** Intermediate rounding steps allow for imprecision that benefits the user slightly, due to truncation or rounding in multiple stages instead of a single final rounding.\n3. **Exploitation:** An attacker could exploit this by removing nearly all shares of an asset while manipulating the asset price significantly upward, requiring substantial capital and fee payments.\n4. **Impact:** The exploit could cause the pool to pay out slightly more than intended, leading to minor fund leakage. However, the high cost and difficulty make it unlikely to be profitable.\n",
+            "severity": "low",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "Remove Liquidity#Rounding Error Analysis"
+            ]
+        },
+        {
+            "id": 37,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Consistency: Imbalance.negative is not a precondition in most exchange types",
+            "description": "1. **Description:** The invariant `Imbalance.negative` is inconsistently checked across functions—used as both precondition and postcondition in liquidity operations, but only as a postcondition in most exchanges (except when selling LRNA).\n2. **Cause:** Lack of uniform validation logic across different operation types leads to inconsistent state checks.\n3. **Exploitation:** This inconsistency does not open a direct attack vector, as no invalid state can be reached.\n4. **Impact:** No user-visible impact, but it reduces code clarity and increases the risk of future bugs if assumptions about invariants are violated.\n",
+            "severity": "informational",
+            "files": [
+                "pallets/omnipool/src/types.rs"
+            ],
+            "location": [
+                "omnipool/math.rs#L127"
+            ]
+        },
+        {
+            "id": 38,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Possibly large error in the imbalance when buying with LRNA",
+            "description": "1. **Description:** The imbalance computation error can become large when `hub_denominator` is small (e.g., 2), due to the mathematical approximation used.\n2. **Cause:** The formula involves division by `(hub_denominator - 1)`, which becomes significant when the denominator is small, amplifying the error term.\n3. **Exploitation:** An attacker cannot directly exploit this, but over time, the accumulated error may reduce HDX fee profits.\n4. **Impact:** The main consequence is a potential decrease in protocol revenue from fees, although the effect on LRNA valuation may be negligible.\n",
+            "severity": "low",
+            "files": [
+                "pallets/omnipool/src/lib.rs"
+            ],
+            "location": [
+                "buying with LRNA"
+            ]
+        }
+    ]
+}

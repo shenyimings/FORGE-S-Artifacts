@@ -1,0 +1,178 @@
+{
+    "path": "reports/offside-labs-dbc-audit-apr-2025.pdf",
+    "project_info": {
+        "url": "https://github.com/MeteoraAg/dynamic-bonding-curve",
+        "commit_id": "11483e02250fa6686e1f9d7b092aff3c1dce1251",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-03-25",
+        "project_path": "contracts/offside-labs-dbc-audit-apr-2025.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "Unclaimed Fees May Be Burned in migrate_meteora_damm",
+            "description": "The migrate_meteora_damm instruction burns any excess base_mint in the base_vault after migration to the dynamic AMM. However, it fails to account for unclaimed protocol and partner fees before performing the burn. This occurs because the calculation of left_base_token does not exclude the portion of tokens allocated for fees. As a result, these unclaimed fees are inadvertently burned along with the excess base tokens. This leads to a direct financial loss for fee claimers, as the required tokens are destroyed. Additionally, any subsequent attempts to claim protocol or trading fees will fail due to insufficient balance in the base_vault, rendering the claim functions unusable post-migration.\n",
+            "severity": "critical",
+            "location": [
+                "migrate_meteora_damm_initialize_pool.rs#260-268"
+            ],
+            "files": [
+                "programs/virtual-curve/src/instructions/migration/meteora_damm/migrate_meteora_damm_initialize_pool.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "Large Final Swap May Prevent base_mint from Graduating",
+            "description": "During the final swap before curve completion, a user can withdraw a large amount of base_mint, potentially leaving the remaining balance in the base_vault below the PoolConfig.migration_base_threshold. While the curve can still complete, the migrate_meteora_damm instruction will fail when attempting to create the dynamic AMM pool due to insufficient base tokens. The root cause is the lack of a restriction on the maximum allowable swap amount in the final phase of the curve. An attacker could exploit this by executing a large final swap to block graduation. The impact is that the token cannot graduate to the target AMM, preventing liquidity migration and potentially stranding user funds or delaying project progression.\n",
+            "severity": "medium",
+            "location": [],
+            "files": [
+                "programs/virtual-curve/src/instructions/ix_swap.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing Length Check on curve Parameter in create_config",
+            "description": "The create_config instruction accepts a curve parameter without validating its length against MAX_CURVE_POINT (20). Although PoolConfig::init caps the stored curve at 20 points, other fields like swap_base_amount and migration_base_amount are derived directly from the input curve. If more than 20 points are provided, the excess are ignored, but the derived values may be based on invalid or truncated data. This can lead to incorrect configuration where the pool never reaches completion due to miscalculated thresholds. The cause is the absence of input validation on the curve array length. The impact is that a malicious or erroneous configuration could permanently prevent the base_mint from graduating, resulting in a denial of service for the pool owner.\n",
+            "severity": "medium",
+            "location": [
+                "config.rs#282-292"
+            ],
+            "files": [
+                "programs/virtual-curve/src/instructions/partner/ix_create_config.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Volatility Could Be Largely Affected by Absolute Price Changes",
+            "description": "The get_delta_bin_id function calculates bin ID differences using linear approximation (Px - Py) instead of a logarithmic ratio (Px / Py), which incorrectly measures volatility based on absolute price differences rather than relative percentage changes. This mathematical flaw causes volatility to be inflated at high prices and suppressed at low prices, with volatility becoming zero when sqrt_price is less than bin_step. The root cause is the use of an inaccurate approximation that does not reflect exponential price movement in bonding curves. The impact is a distorted dynamic fee mechanism that fails to accurately reflect market conditions, potentially leading to suboptimal fee adjustments and reduced economic security for the pool.\n",
+            "severity": "medium",
+            "location": [
+                "fee.rs#211-227"
+            ],
+            "files": [
+                "programs/virtual-curve/src/state/fee.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Possible DoS on Migration or Claim Fee When Migrating to DAMM v2",
+            "description": "The migration_damm_v2 instruction performs two liquidity additions (for creator and partner) using rounding up for both token amounts. This double rounding can cause the total base and quote amounts used to exceed the migration thresholds (migration_base_threshold and migration_quote_threshold). If the quote vault holds exactly the threshold amount after fees are claimed, the migration may fail due to insufficient funds. Even if migration succeeds, future fee claims may fail because the vault lacks enough tokens to cover recorded fees. The root cause is the use of upward rounding in both steps without compensating for precision loss. The impact is a potential denial of service for migration or fee claiming, disrupting the intended workflow and potentially locking funds.\n",
+            "severity": "medium",
+            "location": [],
+            "files": [
+                "programs/virtual-curve/src/instructions/migration/meteora_damm/migrate_meteora_damm_initialize_pool.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "create_config IX Fails When BaseFeeConfig.period_frequency > 0",
+            "description": "The BaseFeeConfig.get_base_fee_numerator function assumes that current_point > activation_point, but this assumption does not hold in all cases, such as when get_min_base_fee_numerator is called with current_point < activation_point. In such cases, a safe_sub operation underflows and causes the instruction to fail. This issue was introduced in PR-40 when logic comparing current_point and activation_point was removed. The root cause is the removal of a necessary bounds check, leading to arithmetic errors. The impact is that create_config will fail whenever BaseFeeParameters.period_frequency > 0, preventing the creation of valid configurations and resulting in a denial of service for users attempting to use non-zero period frequencies.\n",
+            "severity": "medium",
+            "location": [
+                "config.rs#153-156"
+            ],
+            "files": [
+                "programs/virtual-curve/src/instructions/partner/ix_create_config.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-439"
+                ]
+            },
+            "title": "Reduced MAX_CURVE_POINT May Prevent Migration for Existing Virtual Pools",
+            "description": "The MAX_CURVE_POINT constant was reduced from 20 to 16 in PR-52. However, older virtual pools were initialized with the original limit of 20 curve points. The swap functions get_swap_amount_from_quote_to_base and get_swap_amount_from_base_to_quote now use MAX_CURVE_POINT (16) as the loop bound, preventing access to curve points at indices 16–19. If a pool's price movement requires accessing these higher-index points to reach its migration threshold, it will be unable to do so. The root cause is a breaking change in a hardcoded constant without ensuring backward compatibility. The impact is that previously functional pools may become permanently un-migratable, leading to a denial of service for existing deployments.\n",
+            "severity": "low",
+            "location": [],
+            "files": [
+                "programs/virtual-curve/src/state/virtual_pool.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ]
+            },
+            "title": "Impact of Fee Collection Mode",
+            "description": "The virtual curve supports two fee collection modes: OnlyB and BothToken. In OnlyB mode, fees are deducted from the input quote before swapping, while in BothToken mode, fees are taken from the output base after the swap. These modes produce different economic outcomes even with the same fee rate. For example, under identical conditions, OnlyB yields more output base tokens than BothToken due to differences in average swap price and fee handling. The root cause is the structural difference in when and how fees are applied during the swap. The impact is inconsistent user experience and potential confusion about fee behavior, which could affect trading efficiency and fee revenue predictability. While not exploitable, it represents a design consideration that should be clearly documented.\n",
+            "severity": "low",
+            "location": [],
+            "files": [
+                "programs/virtual-curve/src/state/fee.rs"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,94 @@
+{
+    "path": "reports/blocksec_burrowland_pyth_v1.0-signed.pdf",
+    "project_info": {
+        "url": "https://github.com/burrowHQ/burrowland/tree/pyth",
+        "commit_id": "a1b9f4581dc4b80d0c85998455f38aa193b6afc1",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-01-30",
+        "project_path": "contracts/blocksec_burrowland_pyth_v1.0-signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Potential Unfairness Due to Inconsistent Prices from Different Oracles",
+            "description": "The smart contract allows users to adjust their positions using price feeds from two different oracles: the existing oracle via oracle_on_call() and the newly integrated Pyth oracle. This dual-oracle mechanism introduces a vulnerability where users can selectively use the more favorable price feed, leading to inconsistent pricing across user actions. The root cause is the lack of enforcement for a single, canonical price source. An attacker could exploit this by monitoring both oracles and triggering transactions only when the most advantageous price is available, thereby gaining unfair economic benefits over other users. The impact is a loss of fairness in the system, potentially undermining user trust and creating arbitrage opportunities that were not intended by the protocol design.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/contract/src/price_receiver.rs"
+            ],
+            "location": [
+                "price_receiver.rs.execute_with_pyth#108-113"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "Lack of Check in remove_token_pyth_info()",
+            "description": "The function remove_token_pyth_info() is responsible for removing Pyth oracle information for a given token ID but fails to verify whether the token is still in use by active user positions. The root cause is the absence of a pre-check to ensure that no user accounts are currently relying on the price data for that token. An attacker with administrative privileges (or a malicious admin) could remove the Pyth info for a token that is still actively used, rendering users unable to adjust or manage their positions involving that token. This could lead to a partial denial-of-service for affected users, preventing them from performing critical operations like liquidation or withdrawal, thus negatively impacting user experience and protocol reliability.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs.remove_token_pyth_info#149-153"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Lack of Check in add_token_pyth_info()",
+            "description": "The function add_token_pyth_info() allows the admin to register or overwrite Pyth oracle information for a token ID without verifying whether the token was previously registered. The root cause is the direct insertion into the token_pyth_info map without a prior existence check. This could allow an admin to accidentally or maliciously overwrite existing configurations, potentially leading to incorrect price handling or unexpected behavior in financial calculations. An attacker with admin access could exploit this to silently change token configurations, introducing subtle bugs or manipulation vectors. The impact includes potential configuration drift, loss of data integrity, and increased risk of operational errors, especially if updates are not logged or monitored.\n",
+            "severity": "n/a",
+            "files": [
+                "contracts/contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs.add_token_pyth_info#142-145"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Lack of Gas Check in internal_execute_with_pyth()",
+            "description": "The function internal_execute_with_pyth() creates multiple promises to query prices from the Pyth oracle but does not validate whether sufficient gas is available to cover all the promise executions and the subsequent callback. The root cause is the lack of a gas requirement check before initiating the promise chain. If the provided gas is insufficient, the transaction may fail during the callback phase, resulting in wasted gas and failed user operations. An attacker could exploit this by submitting actions with minimal attached gas, causing predictable failures and degrading system usability. The impact is inefficient gas usage, poor user experience, and potential denial-of-service through repeated low-gas calls.\n",
+            "severity": "n/a",
+            "files": [
+                "contracts/contract/src/pyth.rs"
+            ],
+            "location": [
+                "pyth.rs.internal_execute_with_pyth#156-176"
+            ]
+        }
+    ]
+}

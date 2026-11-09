@@ -1,0 +1,60 @@
+{
+    "project": "blocksec_burrow_margin_trade_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrow_margin_trade_v1.0-signed.pdf.json/contracts/contract/src/margin_pyth.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-670",
+        "CWE-691"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-682"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect enumeration of tokens requiring price feeds",
+            "description": "The function `margin_involved_tokens()` is responsible for identifying which tokens need price feeds for margin operations. It includes `token_c_id` and `token_d_id`, but fails to include `token_p_id` when `token_c_id` equals `token_d_id`. Since `token_p_id` is required for slippage protection calculations, its omission can result in missing price data during critical operations. When the callback `callback_margin_execute_with_pyth()` is invoked, it may fail due to unavailable price feeds for `token_p_id`, causing the entire transaction to revert. This disrupts legitimate margin trading activities and can lead to denial of service for users attempting to open or modify positions.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "We identified two potential issues. First, the contract may panic during liquidation or force close actions when the target margin account or position is missing, which can be exploited to cause denial of service for liquidators (CWE-703). Second, a timestamp conversion from i64 to u32 might truncate high values and cause incorrect freshness checks for oracle prices in the far future (CWE-682). Additionally, we note other potential issues but they are either low risk or mitigated by the contract's design.\n",
+            "findings": [
+                {
+                    "title": "Unhandled Account State Change During Liquidation",
+                    "description": "During the processing of liquidation and force close actions, the contract accesses other margin accounts and positions without handling the case where they might not exist. If an account or position is missing (e.g., due to concurrent state changes), the contract panics, causing the transaction to fail. This can be exploited by attackers to cause liquidators to waste gas by front-running with account/position closure.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Potential Timestamp Truncation",
+                    "description": "The contract converts a 64-bit timestamp to 32-bit for calculating the expiration time of a price. This truncation could cause the contract to incorrectly validate prices after the year 2106. Also, the addition of the validity duration to the truncated timestamp might overflow, leading to incorrect freshness checks.",
+                    "category": "CWE-682",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

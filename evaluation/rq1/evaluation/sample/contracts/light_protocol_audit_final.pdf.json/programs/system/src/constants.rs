@@ -1,0 +1,1 @@
+pub const CPI_AUTHORITY_PDA_BUMP: u8 = 255;

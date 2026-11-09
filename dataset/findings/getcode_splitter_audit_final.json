@@ -1,0 +1,118 @@
+{
+    "path": "reports/getcode_splitter_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/code-wallet/code-program-library/tree/main/splitter",
+        "commit_id": "3fa2ce1ad9613e738d4736cb1219ad25f0598cbc",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-05-26",
+        "project_path": "contracts/getcode_splitter_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Insufficient Input Validation",
+            "description": "1. **Description:** The InitializePool function lacks proper input validation for the `levels` parameter and the `name` string length. Specifically, setting `levels` to zero causes the `calc_zeros` function to return an empty vector, leading to a runtime panic when attempting to unwrap the last element. Additionally, the `name` field has no length check, allowing it to exceed the defined NAME_DEFAULT_SIZE of 32 bytes.\n2. **Cause:** The absence of boundary checks on user-provided inputs in the `MerkleTree::new` function and the `InitializePool` instruction.\n3. **Exploitation:** An attacker could initialize a pool with `levels = 0`, causing subsequent operations that access `filled_subtrees` or `zero_values` to panic and halt execution. Similarly, providing a long `name` string could lead to serialization issues or memory inefficiencies.\n4. **Impact:** This could result in denial of service by making the program unusable for certain pools or lead to unexpected transaction failures, degrading user experience and reliability.\n",
+            "severity": "informational",
+            "files": [
+                "splitter/programs/splitter/src/lib.rs"
+            ],
+            "location": [
+                "MerkleTree.new#src/state.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ]
+            },
+            "title": "Compute Budget Limit",
+            "description": "1. **Description:** The `MerkleTree::verify` function uses a loop to process a Merkle proof, which may consume excessive compute units if the proof is large, leading to transaction failure due to exceeding Solana's compute budget.\n2. **Cause:** The loop iterates over the entire proof in a single transaction without chunking or offloading computation, making it vulnerable to compute limit exhaustion.\n3. **Exploitation:** An attacker could craft a very long Merkle proof, forcing the verification to exceed the compute budget and causing the transaction to fail, potentially leading to denial of service.\n4. **Impact:** Users may be unable to verify valid proofs if they are too long, reducing the reliability and usability of the system.\n",
+            "severity": "informational",
+            "files": [
+                "splitter/programs/splitter/src/lib.rs"
+            ],
+            "location": [
+                "MerkleTree.verify#src/state.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Unnecessary Use Of Payer Account",
+            "description": "1. **Description:** Several instructions, such as `SaveRecentRoot`, require a mutable payer account even when no account creation or rent payment is performed, unnecessarily increasing transaction costs.\n2. **Cause:** The instruction context includes a `payer` signer in all cases, regardless of whether a new account is being initialized.\n3. **Exploitation:** While not directly exploitable for fund theft, this pattern increases the cost of interaction for all users, potentially discouraging usage or increasing financial burden.\n4. **Impact:** Higher transaction fees than necessary, leading to suboptimal user experience and economic inefficiency.\n",
+            "severity": "informational",
+            "files": [
+                "splitter/programs/splitter/src/context.rs"
+            ],
+            "location": [
+                "SaveRecentRoot#src/context.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Inconsistency Between Accounts",
+            "description": "1. **Description:** The code conflates the roles of `authority` and `payer` accounts, even though they serve different purposes. For example, the `InitializeProof` instruction uses `payer` to fund the account, but `CloseProof` closes it to the `authority`, creating confusion and potential for misuse.\n2. **Cause:** Lack of clear separation between account ownership, funding, and control logic in the program design.\n3. **Exploitation:** If logic were added that depends on the payer being the recipient of closed account lamports, this inconsistency could lead to funds being sent to an unintended party.\n4. **Impact:** Increases risk of future bugs or misconfigurations, especially during account cleanup or rent recovery, potentially leading to loss of funds or unexpected behavior.\n",
+            "severity": "informational",
+            "files": [
+                "splitter/programs/splitter/src/context.rs"
+            ],
+            "location": [
+                "InitializeProof#src/context.rs",
+                "CloseProof#src/context.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-908"
+                ]
+            },
+            "title": "Double Spending",
+            "description": "1. **Description:** The `TransferWithCommitment` instruction does not verify that the commitment account has been initialized, meaning the same transfer could potentially be executed multiple times with the same inputs.\n2. **Cause:** The commitment account is passed as an `UncheckedAccount`, and there is no check to ensure it hasn't already been used, relying instead on off-chain enforcement.\n3. **Exploitation:** An attacker could replay the same transaction multiple times, causing multiple transfers to be executed, leading to double-spending of funds.\n4. **Impact:** Loss of funds due to repeated execution of the same transfer instruction, undermining the integrity of the splitting mechanism.\n",
+            "severity": "informational",
+            "files": [
+                "splitter/programs/splitter/src/context.rs"
+            ],
+            "location": [
+                "TransferWithCommitment#src/context.rs"
+            ]
+        }
+    ]
+}

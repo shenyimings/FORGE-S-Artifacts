@@ -1,0 +1,105 @@
+{
+    "project": "rengo-labs.pdf.json",
+    "files": [
+        "dataset/contracts/rengo-labs.pdf.json/CasperLabs-UniswapV2-Router/uniswap_v2_library/uniswap_v2_library/src/uniswap_v2_library.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2,
+        "recall": 1.0,
+        "f1": 0.33333333333333337
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-190",
+        "CWE-682",
+        "CWE-703",
+        "CWE-369",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "pair_for() Does Not Sort The Tokens Before Fetching a Pair",
+            "description": "1. **Description:** The `pair_for()` function does not sort token addresses before computing the pair address, which may result in inconsistent or incorrect pair lookups.\n2. **Cause:** Lack of deterministic ordering in token pair computation.\n3. **Exploitation:** Users might interact with non-existent or wrong pairs, leading to failed transactions or loss of funds.\n4. **Impact:** User confusion, failed trades, and potential loss of liquidity due to mismatched expectations.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract contains vulnerabilities related to arithmetic overflows, missing input validation, and unsafe type conversions. \n- The functions `quote`, `get_amount_out`, and `get_amount_in` perform multiplications without overflow checks. Given the use of U256, products can exceed 256 bits, leading to wrapped values and incorrect token calculations.\n- The `get_amount_in` function lacks validation ensuring `amount_out < reserve_out`. Without this, underflows (if `amount_out > reserve_out`) or division by zero (if `amount_out = reserve_out`) occur.\n- The `pair_for` function converts a Key to ContractHash using `unwrap_or_default()`, defaulting to the zero contract hash on failure, enabling unintended calls to the zero contract.\n",
+            "findings": [
+                {
+                    "title": "Arithmetic Overflows in Token Calculations",
+                    "description": "Functions `quote`, `get_amount_out`, and `get_amount_in` perform multiplication operations without overflow checks. \nIn `quote`, `amount_a * reserve_b` can overflow if the product exceeds 2^256-1. \nIn `get_amount_out`, `amount_in * 997`, `amount_in_with_fee * reserve_out`, and `reserve_in * 1000` may overflow. \nIn `get_amount_in`, `reserve_in * amount_out * 1000` and `(reserve_out - amount_out) * 997` risk overflow. \nThis can result in incorrect token amounts and financial loss.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Missing Output Amount Validation in get_amount_in",
+                    "description": "The function `get_amount_in` lacks a check to ensure `amount_out < reserve_out`. This allows:\n1. Underflow in `reserve_out - amount_out` if `amount_out > reserve_out`, leading to an incorrect denominator and input amount.\n2. Division by zero if `amount_out = reserve_out` (denominator becomes zero), causing a runtime revert. \nBoth scenarios violate core protocol safety requirements.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unsafe Key Conversion in pair_for Function",
+                    "description": "The `pair_for` function converts a `Key` to `ContractHash` via `into_hash().unwrap_or_default()`. \nIf `factory` is not a hash (e.g., an account or URef), this defaults to the zero contract hash. \nSubsequent calls to `get_pair` on the zero contract may enable unintended behavior or attacks.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract exhibits three vulnerabilities:\n1. Integer underflow in `get_amount_in` due to unchecked subtraction when `amount_out > reserve_out`.\n2. Division by zero in `get_amount_in` when `amount_out == reserve_out`.\n3. Integer overflows in multiple arithmetic operations (`quote`, `get_amount_out`, `get_amount_in`) because unchecked U256 arithmetic wraps on overflow.\n",
+            "findings": [
+                {
+                    "title": "Integer Underflow in get_amount_in Function",
+                    "description": "The function `get_amount_in` subtracts `amount_out` from `reserve_out` without verifying `amount_out < reserve_out`.\nIf `amount_out > reserve_out`, this operation underflows, wrapping to a large positive value and corrupting the denominator calculation.\nThis breaks pricing logic and may enable exploitation.\n",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 1.0
+                },
+                {
+                    "title": "Division by Zero in get_amount_in Function",
+                    "description": "When `amount_out == reserve_out`, the expression `(reserve_out - amount_out)` evaluates to zero.\nThis results in a denominator of `(0 * 997) = 0` in the calculation, causing a division-by-zero runtime revert.\nThis halts contract execution and disrupts core functionality.\n",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 1.0
+                },
+                {
+                    "title": "Unchecked Arithmetic Leading to Integer Overflow",
+                    "description": "Multiple functions (`quote`, `get_amount_out`, `get_amount_in`) perform arithmetic operations (multiplications/additions)\non `U256` values without overflow checks. The underlying `U256` implementation uses wrapping arithmetic, which silently\noverflows (e.g., `amount_in * 997` in `get_amount_out`). This corrupts financial calculations and enables potential manipulation.\n",
+                    "category": "CWE-190",
+                    "severity": "critical",
+                    "confidence": 0.95
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-1335",
+            "CWE-1339",
+            "CWE-190",
+            "CWE-191",
+            "CWE-128",
+            "CWE-135",
+            "CWE-369",
+            "CWE-193"
+        ]
+    ]
+}

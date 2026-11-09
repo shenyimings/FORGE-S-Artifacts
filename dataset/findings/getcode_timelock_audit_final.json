@@ -1,0 +1,48 @@
+{
+    "path": "reports/getcode_timelock_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/code-wallet/code-program-library",
+        "commit_id": "b9194e6",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-03-27",
+        "project_path": "contracts/getcode_timelock_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Misleading Instruction Implementation",
+            "description": "1. **Description:** The BurnDustWithAuthority instruction is documented to allow burning of tokens only if the vault's amount is below a specified max_amount. However, the actual implementation does not enforce this condition correctly, leading to potentially misleading behavior.\n\n2. **Cause:** The vulnerability arises from a discrepancy between documentation and code. The implementation computes `amount = ctx.accounts.vault.amount % max_amount` and checks if `amount > max_amount`, which is logically flawed because the modulo result will always be less than max_amount, making the check ineffective.\n\n3. **Exploitation:** An attacker or misinformed user could invoke the instruction with a vault balance exceeding max_amount, expecting the burn to be blocked, but the instruction may still proceed due to the incorrect condition, allowing unintended burning of non-dust amounts.\n\n4. **Impact:** This could result in loss of funds if users or integrating systems rely on the documented behavior, leading to accidental burning of more tokens than intended, especially in automated or off-chain logic that assumes strict dust-only burning.\n",
+            "severity": "low",
+            "files": [
+                "timelock/programs/timelock/src/lib.rs"
+            ],
+            "location": [
+                "BurnDustWithAuthority#-"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Restrictive TimeLockAccount PDA",
+            "description": "1. **Description:** The TimeLockAccount PDA is currently derived using seeds that include mint, time_authority, vault_owner, and num_days_locked. This design restricts a vault_owner from creating more than one timelock with the same time_authority.\n\n2. **Cause:** The PDA derivation lacks a nonce or counter, making the combination of inputs unique per vault_owner-time_authority pair, thus preventing multiple timelocks even if desired.\n\n3. **Exploitation:** While not directly exploitable, this limitation could be leveraged in social engineering or integration flaws where a user expects to create multiple timelocks but cannot, leading to usability issues or workarounds that may introduce security risks.\n\n4. **Impact:** The impact is primarily on flexibility and future extensibility. It may force users or developers to adopt insecure patterns (e.g., using different vault_owner keys as nonces) to bypass the restriction, potentially leading to key management issues or confusion.\n",
+            "severity": "informational",
+            "files": [
+                "timelock/programs/timelock/src/state.rs"
+            ],
+            "location": [
+                "TimeLockAccount#-"
+            ]
+        }
+    ]
+}

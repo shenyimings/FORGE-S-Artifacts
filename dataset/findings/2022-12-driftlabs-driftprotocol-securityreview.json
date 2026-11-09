@@ -1,0 +1,467 @@
+{
+    "path": "reports/2022-12-driftlabs-driftprotocol-securityreview.pdf",
+    "project_info": {
+        "url": "https://github.com/drift-labs/protocol-v2",
+        "commit_id": "57dd5c647253d6e4d9c12b75e17ce603eeb60315",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-02-15",
+        "project_path": "contracts/2022-12-driftlabs-driftprotocol-securityreview.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "Race condition in Drift SDK",
+            "description": "A race condition exists in the Drift SDK that can cause client programs to operate on non-existent or stale data. The root cause is a lack of proper synchronization or state validation in the SDK when accessing or updating data, leading to timing-dependent behavior. An attacker or misbehaving client could exploit this race condition to read outdated market data or submit transactions based on stale state, potentially gaining an unfair advantage. The impact includes unreliable test results, potential for incorrect client behavior, and possible front-running or manipulation in production environments if not mitigated.\n",
+            "severity": "informational",
+            "files": [
+                "sdk/src/user.ts",
+                "sdk/src/accounts/webSocketUserAccountSubscriber.ts",
+                "sdk/src/accounts/webSocketAccountSubscriber.ts"
+            ],
+            "location": [
+                "sdk/src/user.ts#121-123",
+                "sdk/src/accounts/webSocketUserAccountSubscriber.ts#72-75",
+                "sdk/src/accounts/webSocketAccountSubscriber.ts#55-95",
+                "sdk/src/accounts/webSocketAccountSubscriber.ts#46-53"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ]
+            },
+            "title": "Inconsistent and incomplete exchange status checks",
+            "description": "The exchange status is managed via an enum that only allows one operation to be paused at a time, and status checks are implemented inconsistently across the codebase—some in function annotations, others in function bodies. The root cause is a lack of centralized, standardized access control logic for exchange status, combined with the use of an enum that cannot represent multiple paused states simultaneously. An attacker could exploit inconsistent checks by invoking functions that do not properly validate the exchange status, potentially executing operations (e.g., trading, liquidations) during intended downtime. This could lead to unauthorized operations during maintenance or emergency pauses, undermining system integrity and availability.\n",
+            "severity": "medium",
+            "files": [
+                "programs/drift/src/state/state.rs",
+                "programs/drift/src/instructions/admin.rs",
+                "programs/drift/src/instructions/keeper.rs",
+                "programs/drift/src/instructions/user.rs"
+            ],
+            "location": [
+                "programs/drift/src/state/state.rs#36-44",
+                "programs/drift/src/instructions/admin.rs",
+                "programs/drift/src/instructions/keeper.rs",
+                "programs/drift/src/instructions/user.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Spot market access controls are incomplete",
+            "description": "Access controls for spot markets are only partially implemented, meaning certain functions may not fully validate permissions before execution. The cause is missing or incomplete checks for authority accounts or user permissions in specific instruction handlers related to spot markets. An attacker could invoke unprotected functions or bypass intended restrictions, potentially manipulating market state or accessing privileged operations. This could result in unauthorized modifications to spot markets, leading to financial loss or manipulation of market data. Additionally, some spot market instructions lack proper `access_control` annotations (e.g., `exchange_not_paused`), while equivalent perpetual market functions have them, allowing attackers to invoke spot market functions during paused exchange states and perform unauthorized actions like placing orders or withdrawing funds.\n",
+            "severity": "high",
+            "files": [
+                "programs/drift/src/instructions/admin.rs",
+                "programs/drift/src/instructions/user.rs"
+            ],
+            "location": [
+                "Admin.handle_update_spot_market_expiry#656-660",
+                "User.handle_place_spot_order#1022-1023",
+                "handle_place_spot_order#L1023-L1024"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Inconsistent use of integer types",
+            "description": "The codebase uses integer types inconsistently, with similar data represented using different sizes or signedness, leading to a high number of casts (nearly 700). The root cause is lack of a standardized type convention and frequent manual casting between types without proper validation. Integer casts can fail at runtime or cause arithmetic errors (e.g., truncation, sign extension), especially in critical calculations like margin or pricing. An attacker could manipulate state to force a cast from u128 to u32 to fail (e.g., with a value > 2^32), causing instruction failure and denial of service. This increases the risk of runtime panics, incorrect calculations, and potential loss of funds due to miscalculated values in financial operations.\n",
+            "severity": "medium",
+            "files": [
+                "programs/drift/src/math/insurance.rs",
+                "programs/drift/src/state/spot_market.rs",
+                "programs/drift/src/state/insurance_fund_stake.rs"
+            ],
+            "location": [
+                "Insurance.rebase_divisor#154-157",
+                "SpotMarket.InsuranceFund#352-365",
+                "InsuranceFundStake#10-24"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ],
+                "3": [
+                    "CWE-1112"
+                ]
+            },
+            "title": "Lack of build instructions",
+            "description": "The Drift Protocol repository does not provide instructions for building, compiling, testing, or running the project, which increases the barrier to entry for developers and auditors. The root cause is the absence of clear documentation in the README.md, despite complex build steps being required, including submodule initialization and specific Anchor build commands. An attacker could exploit this by deploying a misconfigured version of the protocol, leading to incorrect behavior or financial loss for users who rely on such deployments. The impact includes potential loss of funds due to incorrect deployment and reduced auditability of the codebase.\n",
+            "severity": "informational",
+            "files": [
+                "README.md"
+            ],
+            "location": [
+                "README.md"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Inadequate testing",
+            "description": "The Anchor tests are not integrated into the project's CI/CD pipeline, and the script responsible for running them (run-anchor-tests.sh) omits several test files, including ksolver.ts and tokenFaucet.ts. This is caused by a manually maintained list of test files that does not include all available tests. As a result, new or existing tests may not be executed during development, allowing bugs to go undetected. An attacker could exploit undetected bugs introduced into the codebase, especially if those bugs are in functionality not covered by the current test run configuration. The impact is reduced code reliability and increased risk of deploying vulnerable code.\n",
+            "severity": "informational",
+            "files": [
+                ".github/workflows/main.yml",
+                "test-scripts/run-anchor-tests.sh"
+            ],
+            "location": [
+                ".github/workflows/main.yml#52-53",
+                "test-scripts/run-anchor-tests.sh#7-53"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Invalid audit.toml prevents cargo audit from being run",
+            "description": "The project's .cargo/audit.toml file contains an invalid key `packages`, which is not recognized by cargo-audit, causing the tool to fail with a parse error. This prevents automated detection of known vulnerabilities in Rust dependencies (via RUSTSEC advisories). The root cause is misconfiguration of the audit.toml file. If a vulnerability is introduced in a dependency, it will go unnoticed due to the inability to run cargo-audit, increasing the risk of supply chain attacks. The impact could be financial loss if a known vulnerable dependency is exploited on-chain.\n",
+            "severity": "informational",
+            "files": [
+                ".cargo/audit.toml"
+            ],
+            "location": [
+                ".cargo/audit.toml#27-28"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Loose size coupling between function invocation and requirement",
+            "description": "The `emit_stack` function relies on the caller to provide a sufficiently large buffer (via const generic parameter N) to hold serialized event data and its Base64-encoded form. If the buffer is too small, it leads to out-of-bounds writes during serialization or base64 encoding. The root cause is the implicit size requirement not being enforced or calculated automatically. A developer may unknowingly pass an insufficient buffer size when adding new events or modifying existing ones, causing the program to panic during execution. The impact is transaction failure and potential disruption of critical operations due to unhandled panics.\n",
+            "severity": "informational",
+            "files": [
+                "programs/drift/src/controller/orders.rs",
+                "programs/drift/src/state/events.rs"
+            ],
+            "location": [
+                "programs/drift/src/controller/orders.rs#545",
+                "programs/drift/src/state/events.rs#482-511"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1357"
+                ]
+            },
+            "title": "The zero-copy feature in Anchor is experimental",
+            "description": "The project uses Anchor's `#[account(zero_copy)]` attribute on several state structs, which is documented as experimental and intended only for cases where Borsh serialization exceeds stack or heap limits. The root cause is reliance on unstable framework features. If the Anchor team introduces breaking changes or security flaws in the zero-copy implementation, it could compromise the integrity of account deserialization, allowing attackers to manipulate state. The impact could be severe, including loss of funds or unauthorized state modifications, especially if the feature has undefined behavior under certain conditions.\n",
+            "severity": "medium",
+            "files": [
+                "programs/drift/src/state/user.rs"
+            ],
+            "location": [
+                "State structs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-188"
+                ]
+            },
+            "title": "Hard-coded indices into account data",
+            "description": "The `PerpMarketMap` and `SpotMarketMap` implementations use hard-coded byte offsets (e.g., 1160, 684) to extract the `market_index` field from raw account data without full deserialization. The root cause is manual memory layout assumptions that are not enforced by the type system. If the struct layout changes and the indices are not updated, the read will return incorrect or corrupted data. An attacker could exploit this by triggering operations that depend on incorrect market indices, potentially leading to fund misdirection or unauthorized access. The impact includes state corruption and potential financial loss.\n",
+            "severity": "informational",
+            "files": [
+                "programs/drift/src/state/perp_market_map.rs",
+                "programs/drift/src/state/spot_market_map.rs"
+            ],
+            "location": [
+                "programs/drift/src/state/perp_market_map.rs#110-111",
+                "programs/drift/src/state/spot_market_map.rs#174"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Missing verification of maker and maker_stats accounts",
+            "description": "The `handle_place_and_take_perp_order` and `handle_place_and_take_spot_order` functions accept `maker` and `maker_stats` accounts but do not verify that they belong to the same authority. The root cause is missing cross-account consistency checks. An attacker could pass two unrelated accounts with valid types but different authorities, causing the protocol to update inconsistent state. Due to time constraints, the full impact was undetermined, but it could lead to incorrect reward distribution, stats manipulation, or privilege escalation. The impact is potential state inconsistency and exploitation via mismatched account pairs.\n",
+            "severity": "informational",
+            "files": [
+                "programs/drift/src/instructions/optional_accounts.rs"
+            ],
+            "location": [
+                "programs/drift/src/instructions/optional_accounts.rs#47-74"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ]
+            },
+            "title": "Panics used for error handling",
+            "description": "The codebase uses `unwrap()` and similar panicking methods for handling arithmetic operations, even in cases where user input could cause overflow or underflow. The root cause is improper error handling strategy—panics should be reserved for programmer errors, not user-facing failures. This dilutes the meaning of panics and makes debugging harder. An attacker could trigger a panic with malicious input, causing transaction failure or masking real bugs. The impact includes reduced observability, increased risk of silent failures, and potential DoS via crafted inputs.\n",
+            "severity": "informational",
+            "files": [
+                "programs/drift/src/math/repeg.rs"
+            ],
+            "location": [
+                "programs/drift/src/math/repeg.rs#349-369"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Testing code used in production",
+            "description": "Testing-only functions and fields (e.g., `quote_asset_price_data`, `default_test`) are present in production code without being gated by `#[cfg(test)]`. The root cause is mixing test and production logic without proper compilation guards. This increases the risk of accidentally invoking test-only code in production, which may not be secure or correct. For example, `default_test` could create invalid AMM states if called in live code. The impact includes potential introduction of bugs, incorrect state initialization, and reduced code clarity, especially since some fields like `quote_asset_price_data` lack clear production use justification. Additionally, the `quote_asset_price_data` field is used in production without a mechanism to set its value, potentially leading to reliance on invalid price data and protocol instability.\n",
+            "severity": "high",
+            "files": [
+                "programs/drift/src/state/oracle_map.rs",
+                "programs/drift/src/state/perp_market.rs"
+            ],
+            "location": [
+                "programs/drift/src/state/oracle_map.rs#22-47",
+                "programs/drift/src/state/perp_market.rs#490-494",
+                "default_test#cfg(test)"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Inconsistent use of checked arithmetic",
+            "description": "The codebase inconsistently uses checked and unchecked arithmetic operations. For example, `num_perp_liabilities` is incremented with unchecked addition (`+= 1`) but later used in a `safe_add`. The root cause is lack of a uniform safety policy for arithmetic. This increases the risk of integer overflows or underflows going undetected. An attacker could exploit such bugs by providing inputs that trigger overflow, leading to incorrect margin calculations or collateral valuations. This could result in financial loss due to incorrect risk assessment or liquidation logic.\n",
+            "severity": "high",
+            "files": [
+                "programs/drift/src/math/margin.rs"
+            ],
+            "location": [
+                "programs/drift/src/math/margin.rs#499-515"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Exchange status pausing mechanisms can lead to unintended unpausing",
+            "description": "The exchange's pausing mechanism uses a single status field that controls multiple operations, leading to potential unintended consequences. The root cause is the lack of independent flags for different operations (e.g., withdrawals, funding), which means pausing one operation can inadvertently affect another. An attacker could trick an administrator into pausing funding after withdrawals are already paused, which could unintentionally unpause withdrawals due to overlapping status logic. This could allow malicious actors to withdraw funds during a critical incident, increasing the damage from an ongoing exploit.\n",
+            "severity": "informational",
+            "files": [
+                "programs/drift/src/instructions/admin.rs"
+            ],
+            "location": [
+                "State.handle_update_exchange_status#8-33",
+                "Keeper.handle_update_funding_rate#1027-1078"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Oracles can be invalid in at most one way",
+            "description": "Oracle validity is represented using an enum that only allows one invalid state at a time, creating a fragile hierarchy where certain invalid conditions mask others. The cause is the use of a non-extensible enum with conditional priority logic, meaning an oracle that is both \"too volatile\" and \"too uncertain\" will only be labeled as \"TooVolatile\". An attacker or developer unaware of this hierarchy could write logic that checks for one invalid state while missing others, leading to incorrect assumptions about oracle reliability. This could result in incorrect price calculations and potential financial loss.\n",
+            "severity": "high",
+            "files": [
+                "programs/drift/src/math/oracle.rs"
+            ],
+            "location": [
+                "Oracle.oracle_validity#163-230"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Code duplication increases risk of incomplete fixes",
+            "description": "Multiple functions such as liquidate_perp, liquidate_spot, and others contain nearly identical code blocks, particularly around margin calculation and user state updates. The root cause is a lack of shared abstractions or helper functions to encapsulate common logic. If a bug is fixed in one function but not others due to oversight, attackers could exploit the unfixed versions. This increases the attack surface and reduces code maintainability, potentially leading to inconsistent behavior across similar operations.\n",
+            "severity": "low",
+            "files": [
+                "programs/drift/src/controller/liquidation.rs"
+            ],
+            "location": [
+                "Liquidation.liquidate_perp#201-246",
+                "Liquidation.liquidate_spot#201-246",
+                "Position.update_market_open_interest#162-175",
+                "Position.update_position_and_market#537-547"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ]
+            },
+            "title": "Use of opaque constants in tests",
+            "description": "Several test cases use hardcoded numeric constants without explanation (e.g., 45558159000), making it difficult to verify correctness. The cause is a lack of documentation or formulaic derivation in test assertions. If a constant is incorrect due to miscalculation or typo, tests may pass while validating wrong behavior. An attacker could exploit such a flaw if it relates to margin, collateral, or liquidation logic, potentially draining funds without detection.\n",
+            "severity": "informational",
+            "files": [
+                "programs/drift/src/controller/liquidation/tests.rs"
+            ],
+            "location": [
+                "LiquidationTests#1618-1687"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unused accounts in instruction contexts",
+            "description": "Some instruction contexts include accounts that are not used in the handler logic, such as drift_signer in initialize and spot_market/user_stats/state in initialize_insurance_fund_stake. The cause is likely outdated or refactored code where account definitions were not cleaned up. This can mislead developers into thinking these accounts are required or used, potentially leading to incorrect assumptions or integration errors. While not directly exploitable, it increases cognitive load and risk of misuse.\n",
+            "severity": "medium",
+            "files": [
+                "programs/drift/src/instructions/admin.rs"
+            ],
+            "location": [
+                "Admin.Initialize#1989-2007"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Unaligned references are allowed",
+            "description": "The program uses `#![allow(unaligned_references)]`, which disables compiler warnings for unaligned memory access. The cause is an explicit attribute in lib.rs to suppress this check. This could mask memory safety issues, especially if the data layout changes in future updates. If unaligned references are dereferenced, it could lead to undefined behavior, crashes, or inconsistent state interpretation, potentially resulting in loss of funds or denial of service.\n",
+            "severity": "informational",
+            "files": [
+                "programs/drift/src/lib.rs"
+            ],
+            "location": [
+                "Lib.rs#1-4"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-188"
+                ]
+            },
+            "title": "Size of created accounts derived from in-memory representation",
+            "description": "Account sizes are calculated using std::mem::size_of::<T>() + 8, relying on the in-memory layout of structs rather than a fixed serialized size. The cause is the use of repr(C) and padding to align sizes, but this ties account size to memory layout assumptions. If a struct is modified such that its in-memory size is smaller than needed for serialization, account initialization will fail. This creates a fragility where code changes can break account creation without obvious intent, leading to denial of service.\n",
+            "severity": "informational",
+            "files": [
+                "programs/drift/src/state/state.rs",
+                "programs/drift/src/state/user.rs"
+            ],
+            "location": [
+                "State#std::mem::size_of::<State>() + 8",
+                "UserStats#std::mem::size_of::<UserStats>() + 8"
+            ]
+        }
+    ]
+}

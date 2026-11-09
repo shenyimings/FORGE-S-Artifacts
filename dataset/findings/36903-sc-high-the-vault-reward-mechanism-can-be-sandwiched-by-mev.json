@@ -1,0 +1,40 @@
+{
+    "path": "reports/immunefi/36903-sc-high-the-vault-reward-mechanism-can-be-sandwiched-by-mev.md",
+    "project_info": {
+        "url": [
+            "https://github.com/jito-foundation/restaking/tree/master/vault_program"
+        ],
+        "commit_id": [
+            "4c37d76102496edd784bb25436cb9c4340f0df01"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-11-19",
+        "project_path": "contracts/36903-sc-high-the-vault-reward-mechanism-can-be-sandwiched-by-mev.md-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "The vault reward mechanism can be sandwiched by MEV",
+            "description": "The vulnerability arises in the vault's reward mechanism when SPL token rewards are deposited. During the `process_update_vault_balance` function execution, the vault first deducts the reward fee in ST (staked token) and updates the deposited amount, then calculates and mints the corresponding VRT (vault receipt token) reward. However, the sequence of state updates results in a temporary imbalance between the total deposited ST and the VRT supply, which increases the exchange rate (total_deposited / VRT) before it stabilizes.\n\nThe root cause is the inconsistent timing of state updates: the deposited amount is updated before the VRT supply is incremented, creating a window where the exchange rate is artificially inflated. This allows an attacker to sandwich the reward transaction by depositing and minting VRT just before the reward is processed, then withdrawing ST immediately afterward at the higher exchange rate.\n\nAn attacker can exploit this by monitoring the mempool for incoming reward transactions, front-running them with a deposit and mint of VRT, and then back-running with a withdrawal after the reward has been applied and the exchange rate has increased. This enables the attacker to withdraw more ST than they originally deposited.\n\nThe impact is that attackers can profit at the expense of other users by capturing unclaimed yield, effectively stealing value from honest participants in the vault. This constitutes a theft of unclaimed yield, which is a significant economic risk.\n",
+            "severity": "high",
+            "location": [
+                "vault_program::process_update_vault_balance"
+            ],
+            "files": [
+                "restaking/vault_program/src/update_vault_balance.rs"
+            ]
+        }
+    ]
+}

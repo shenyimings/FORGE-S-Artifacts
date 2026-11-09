@@ -1,0 +1,149 @@
+{
+    "project": "ellipsis_plasma_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/ellipsis_plasma_audit_final.pdf.json/crates/plasma_state/src/amm.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.14285714285714285,
+        "recall": 1.0,
+        "f1": 0.25
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-128",
+        "CWE-664",
+        "CWE-190",
+        "CWE-682",
+        "CWE-703",
+        "CWE-369",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Inconsistencies in the AMM Fee Logic",
+            "description": "1. **Description:** The function `amm::get_limit_order_size_in_base_and_quote` incorrectly applies fees to the base asset amount after converting from the quote asset, rather than applying the fee directly to the quote asset before conversion. This leads to an incorrect post-fee calculation and premature termination of limit orders due to fee adjustments.\n\n2. **Cause:** The root cause is the incorrect order of operations in fee application: the system converts the quote amount to base using the exchange rate and then applies the fee on the resulting base amount, instead of applying the fee on the original quote amount prior to conversion.\n\n3. **Exploitation:** An attacker could exploit this by placing limit orders that are prematurely stopped due to miscalculated fees, allowing them to manipulate execution prices or re-enter the market at improved prices after partial execution, potentially gaining unfair trading advantages.\n\n4. **Impact:** The impact includes incorrect execution of limit orders at suboptimal prices, loss of potential price improvements for users, and possible economic inefficiencies in the AMM due to improper fee handling and order termination.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code is primarily AMM math/state-transition logic. While there is no explicit “authority” concept in this file (so classic access-control issues are not directly visible here), several security-relevant state transitions rely on unchecked arithmetic, unvalidated configuration parameters, and panic-based control flow (`assert!`). In Solana programs, panics and integer wrapping can become denial-of-service vectors and/or lead to state corruption that downstream components (token transfers, accounting, protocol fee withdrawal, etc.) may incorrectly trust.\n\nThe most severe issues stem from:\n1) unchecked subtraction/addition on critical pool accounting fields (`total_lp_shares`, reserves, cumulative fees), which can wrap in release builds and silently corrupt state (CWE-664/CWE-703/CWE-682);\n2) lack of bounds-checking on configuration fields (`protocol_allocation_in_pct`, `fee_in_bps`) which can drive underflow in fee-split logic and underflow in fee-adjust math (CWE-682/CWE-703);\n3) use of `assert!` for user-influenced conditions, which can abort execution and cause DoS (CWE-703/CWE-691);\n4) some divisions assume non-zero reserves/snapshots; if invariants are ever violated (or state is corrupted by the above issues), this becomes a hard panic (CWE-703).\n",
+            "findings": [
+                {
+                    "title": "Unchecked underflow/overflow in burn() allows LP share and reserve corruption",
+                    "description": "`burn()` does not validate `lp_shares <= self.total_lp_shares` and performs unchecked arithmetic:\n  - `self.total_lp_shares -= lp_shares;` (unchecked)\n  - `self.base_reserves -= base_amount_withdrawn.downcast()?;` (unchecked)\n  - `self.quote_reserves -= quote_amount_withdrawn.downcast()?;` (unchecked)\n\nIf `lp_shares` exceeds `total_lp_shares`, `base_amount_withdrawn`/`quote_amount_withdrawn` can exceed reserves and the subsequent `-=` operations can underflow. In release builds this can wrap, yielding extremely large reserve/share values and permanently corrupting pool state (and any downstream token movement/accounting that trusts it).\n",
+                    "category": "CWE-664",
+                    "severity": "critical",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Fee split underflow when protocol_allocation_in_pct > 100 can silently wrap and pass internal checks",
+                    "description": "`get_fee_splits()` computes:\n  `protocol_fees = (total_fees * protocol_allocation_in_pct) / 100;`\n  `lp_fees = total_fees - protocol_fees;` (unchecked subtraction on u64)\n\nIf `protocol_allocation_in_pct > 100`, `protocol_fees` can exceed `total_fees`, causing `lp_fees` to underflow and wrap to a huge u64. In `apply_fees()`, the check:\n  `if lp_fees + protocol_fees != total_fees { ... }`\ncan still pass due to u64 wrapping (lp_fees wraps such that lp_fees+protocol_fees == total_fees modulo 2^64), leading to massive incorrect fee accrual, potential overflows later, and broken reward accounting.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "fee_in_bps is not bounded; pre_fee_adjust_rounded_up() denominator can underflow/wrap",
+                    "description": "`pre_fee_adjust_rounded_up()` computes:\n  `denominator = FEE_ADJUST_MULITPLIER - (FEE_ADJUSTED_BASIS_POINT * fee_in_bps)`\nwith plain u128 subtraction. If `fee_in_bps >= 10000` (or otherwise large enough), the subtraction can underflow in release builds and wrap, producing an invalid denominator. This can yield nonsensical pre-fee amounts (including unexpectedly small/large values), breaking swap/fee invariants and potentially enabling fee bypass or accounting corruption depending on how results are used.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Panic-based control flow (assert!) in mint() can be triggered to DoS",
+                    "description": "In `mint()` (non-initial deposit path), the branch:\n  `assert!(base_amount_desired >= base_amount_optimal);`\nuses `assert!` instead of returning a controlled error. Because `base_amount_optimal` and `quote_amount_optimal` are derived from integer division/rounding, edge cases can violate this assumption. If an attacker can supply deposit amounts that hit this path, the program may panic/abort, causing a denial of service for that instruction and potentially impacting composability.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unchecked accumulation can overflow and wrap (total_lp_shares, cumulative fees)",
+                    "description": "Multiple critical accumulators are updated with unchecked `+=`:\n  - `self.total_lp_shares += lp_shares;` (mint)\n  - `self.cumulative_quote_lp_fees += lp_fees;` (apply_fees)\n  - `self.cumulative_quote_protocol_fees += protocol_fees;` (apply_fees)\n\nIf these values grow large (or become corrupted by other bugs), they can overflow and wrap in release builds, silently breaking pool accounting, fee withdrawal expectations, and reward distribution math.\n",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Division-by-zero risks in deposit and limit-order math if reserves/snapshots are ever zero",
+                    "description": "Several functions divide by reserves/snapshots without guarding against zero:\n  - `deposit_amount_quote()`: `/ self.base_reserves`\n  - `deposit_amount_base()`: `/ self.quote_reserves`\n  - `get_complementary_limit_order_size()`: uses `/ base_snapshot` or `/ quote_snapshot`\n\nWhile normal initialization aims to prevent zero reserves, any earlier state corruption (e.g., via underflow/overflow issues) or unexpected edge conditions could set reserves/snapshots to 0 and cause a panic at division time, resulting in DoS.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Incorrect exceptional-condition reporting: checked_add/checked_sub mapped to wrong error variants",
+                    "description": "In reserve update helpers:\n  - `update_pool_reserves_after_sell()` uses `checked_add(...).ok_or(PlasmaStateError::Underflow)` (but checked_add fails on overflow)\n  - `update_pool_reserves_after_sell()` uses `checked_sub(...).ok_or(PlasmaStateError::Overflow)` (but checked_sub fails on underflow)\n\nThis misclassification can cause upstream logic to handle failures incorrectly (e.g., retries, metrics, or error-based branching), weakening robustness and potentially masking exploitation attempts.\n",
+                    "category": "CWE-703",
+                    "severity": "low",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains multiple arithmetic hazards in core AMM math and accounting that map to the provided CWE root causes. The highest-risk themes are (1) divisions whose denominators can be zero (either due to missing initialization checks or unvalidated parameters), (2) unchecked integer arithmetic in u64/u128 that can overflow/wrap in release builds, and (3) an underflow path in the fee-adjust denominator when `fee_in_bps` is not constrained. These issues can lead to panics/DoS, incorrect fee accounting, or (if reachable with crafted state/parameters) incorrect swap/LP math.\n",
+            "findings": [
+                {
+                    "title": "Divide-by-zero in burn(): missing total_lp_shares == 0 guard",
+                    "description": "`Amm::burn()` computes:\n  - `base_amount_withdrawn = base_reserves * lp_shares / total_lp_shares`\n  - `quote_amount_withdrawn = quote_reserves * lp_shares / total_lp_shares`\nbut does not check `self.total_lp_shares == 0` before dividing.\n\nIf `burn()` is called on an uninitialized/empty pool (or a corrupted state where `total_lp_shares` is 0), this will divide by zero and panic/abort the instruction (DoS).\n",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Multiple division-by-zero sites when reserves/snapshots are zero",
+                    "description": "Several helper calculations divide by values that can be zero, with no guards:\n  - `deposit_amount_quote()`: `/ self.base_reserves`\n  - `deposit_amount_base()`: `/ self.quote_reserves`\n  - `get_complementary_limit_order_size()`: divides by `base_snapshot` or `quote_snapshot`\n  - `get_limit_order_size_in_base_and_quote()`:\n      * `/(base_snapshot + post_fee_adjust_rounded_down(base_snapshot))` (can be 0 if `base_snapshot` is 0)\n      * `/(2 * quote_snapshot)` (can be 0 if `quote_snapshot` is 0)\n      * `... / quote_snapshot` and `... / base_snapshot` (can be 0)\n  - Constant-product helpers:\n      * `get_base_out_from_quote_in()`: `k / (quote_reserves + quote_in)` (0 if both are 0)\n      * `get_quote_out_from_base_in()`: `k / (base_reserves + base_in)` (0 if both are 0)\n\nWhile swaps check `total_lp_shares != 0`, they do not explicitly enforce non-zero reserves/snapshots. Any path that leaves reserves/snapshots at 0 (bad initialization, corrupted account data, or edge-case admin/config actions) can trigger runtime panics.\n",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Fee pre-adjust denominator can underflow or become zero if fee_in_bps is not validated",
+                    "description": "`pre_fee_adjust_rounded_up()` computes:\n  - `denominator = FEE_ADJUST_MULITPLIER - (FEE_ADJUSTED_BASIS_POINT * fee_in_bps)`\n\nProblems if `fee_in_bps` is not constrained:\n  - If `fee_in_bps == 10000`, then `denominator == 0` → division by zero.\n  - If `fee_in_bps > 10000`, the subtraction underflows in release builds (wraparound), producing a very large `denominator` and therefore a much smaller-than-correct result (incorrect fee math).\n\nSince `fee_in_bps` is set in `Amm::new()` with no validation, unsafe values can brick the AMM (DoS) or cause incorrect swap fee computations.\n",
+                    "category": "CWE-191",
+                    "severity": "critical",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "u64 overflow in protocol fee split computation",
+                    "description": "`get_fee_splits()` computes:\n  - `protocol_fees = (total_fees * protocol_allocation_in_pct as u64) / 100`\n\nThe multiplication is performed in `u64` and is unchecked. If `total_fees` is large and/or `protocol_allocation_in_pct` exceeds expected bounds (also unvalidated), this can overflow/wrap, producing incorrect protocol/LP fee splits.\n\nThis impacts accounting (`cumulative_quote_*_fees`) and `reward_factor` updates, potentially misallocating fees.\n",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unchecked u64 additions can overflow (LP shares, reserves, cumulative fees)",
+                    "description": "Several state updates use unchecked `+=` on `u64` fields, which will wrap on overflow in release builds:\n  - `self.total_lp_shares += lp_shares` (in `mint()`)\n  - `self.base_reserves += ...` / `self.quote_reserves += ...` (in `mint()` non-initial branch)\n  - `self.cumulative_quote_lp_fees += lp_fees` and `self.cumulative_quote_protocol_fees += protocol_fees` (in `apply_fees()`)\n\nIf reserves/fees/shares grow near `u64::MAX`, these wraparounds can corrupt AMM accounting, break invariants, and potentially enable economically incorrect behavior (e.g., mispriced shares or fees).\n",
+                    "category": "CWE-128",
+                    "severity": "high",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-135",
+            "CWE-191",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-1339"
+        ]
+    ]
+}

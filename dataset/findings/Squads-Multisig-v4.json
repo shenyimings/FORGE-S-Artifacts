@@ -1,0 +1,180 @@
+{
+    "path": "reports/Squads-Multisig-v4.pdf",
+    "project_info": {
+        "url": "https://github.com/squads-protocol/v4",
+        "commit_id": "ce140d682642d98666b5154656e2ec11d26e8933",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-09-22",
+        "project_path": "contracts/Squads-Multisig-v4.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Remove Any Spending Limit",
+            "description": "1. **Description:** The vulnerability allows any caller to remove a spending limit without proper validation that the spending limit account belongs to the multisig. This occurs in the `config_transaction_execute` instruction when handling the `ConfigAction::RemoveSpendingLimit` action.\n2. **Cause:** The spending limit account is taken directly from `remaining_accounts` without validating its ownership or association with the multisig instance, enabling unauthorized removal.\n3. **Exploitation:** An attacker could craft a transaction with a fake or foreign spending limit account in `remaining_accounts` and invoke the config transaction execution, leading to the removal of a legitimate spending limit.\n4. **Impact:** This could disrupt intended spending controls, potentially allowing unrestricted withdrawals or bypassing budget constraints set by the multisig.\n",
+            "severity": "medium",
+            "location": [
+                "Multisig.config_transaction_execute#-"
+            ],
+            "files": [
+                "programs/multisig/src/instructions/config_transaction_execute.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Approved Proposals Don\u2019t Become Stale",
+            "description": "1. **Description:** Approved proposals do not become stale over time, meaning they can be executed indefinitely unless explicitly canceled. This creates a risk of delayed execution of outdated or no longer desired actions.\n2. **Cause:** The proposal state machine does not include a timeout or expiration mechanism for approved proposals, leaving them perpetually executable.\n3. **Exploitation:** An attacker or malicious member could delay execution of an approved proposal until a future point when conditions are more favorable (e.g., price changes, governance shifts), or execute old transactions that were meant to be time-bound.\n4. **Impact:** This undermines the timeliness and intent of governance decisions, potentially leading to unexpected or undesirable on-chain effects long after approval.\n",
+            "severity": "medium",
+            "location": [
+                "Multisig.proposal_execute#-"
+            ],
+            "files": [
+                "programs/multisig/src/state/proposal.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Lookup Tables Used in Unfrozen State",
+            "description": "1. **Description:** The program uses lookup tables that are not in a frozen state, allowing them to be modified after being used in transaction construction.\n2. **Cause:** Address lookup tables can be extended or altered even after being referenced in a transaction, which breaks the assumption that the set of valid addresses is fixed at the time of transaction signing.\n3. **Exploitation:** An attacker could modify the lookup table between the time the transaction is signed and executed, potentially substituting malicious program addresses or altering destination accounts.\n4. **Impact:** This could lead to execution of unintended instructions or fund transfers to attacker-controlled accounts if the lookup table is manipulated post-signing.\n",
+            "severity": "low",
+            "location": [
+                "Multisig.create_lookup_table#-"
+            ],
+            "files": [
+                "programs/multisig/src/utils/executable_transaction_message.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-494"
+                ]
+            },
+            "title": "Callee Programs Might be Updated Before Being Executed",
+            "description": "1. **Description:** The program does not verify that callee programs (e.g., invoked via CPI) have not been upgraded to malicious versions before execution.\n2. **Cause:** There is no validation that the program accounts being invoked are still the expected, trusted versions; upgrades can occur without detection.\n3. **Exploitation:** If a dependency program is upgraded to a malicious version, the multisig could unknowingly execute code from the backdoored program during proposal execution.\n4. **Impact:** This could result in loss of funds or unauthorized actions if a dependent program is compromised or maliciously updated.\n",
+            "severity": "low",
+            "location": [
+                "Multisig.execute_transaction#-"
+            ],
+            "files": [
+                "programs/multisig/src/instructions/batch_execute_transaction.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Minority Multisigs Allow for Proposal Griefing",
+            "description": "1. **Description:** In minority threshold multisigs (where threshold m < n/2), disapproving members can cancel an approved proposal, effectively creating a griefing vector.\n2. **Cause:** The cancellation threshold is equal to the approval threshold, so a minority group that disapproves can later cancel an approved proposal if they maintain cohesion.\n3. **Exploitation:** Members who initially disapproved a proposal can later cancel it after it has been approved, undermining governance stability and predictability.\n4. **Impact:** This reduces confidence in the finality of approvals and may discourage participation or lead to strategic blocking behavior in low-threshold multisigs.\n",
+            "severity": "informational",
+            "location": [
+                "Multisig.proposal_cancel#-"
+            ],
+            "files": [
+                "programs/multisig/src/instructions/proposal_vote.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-1265"
+                ]
+            },
+            "title": "Reentrancy Voting Possible",
+            "description": "1. **Description:** A reentrancy vulnerability exists in the voting mechanism, allowing a proposal to be canceled during its own execution due to improper state management.\n2. **Cause:** The proposal state remains as Approved during execution, making it eligible for cancellation via reentrant calls to `proposal_vote::cancel`.\n3. **Exploitation:** A malicious program invoked during proposal execution could reenter the vote instruction to cancel the proposal before execution completes, yet the state would revert to Executed upon return.\n4. **Impact:** This inconsistency could lead to confusion about proposal state and potential misuse in complex execution flows, though no direct fund loss is identified.\n",
+            "severity": "informational",
+            "location": [
+                "Multisig.proposal_vote#-"
+            ],
+            "files": [
+                "programs/multisig/src/instructions/proposal_vote.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-228"
+                ]
+            },
+            "title": "TransactionMessage Not Validated",
+            "description": "1. **Description:** Users can create Vault or Batch transactions containing invalid or nonsensical transaction messages, which are not validated before being stored on-chain.\n2. **Cause:** The program does not parse or validate the inner `TransactionMessage` structure when creating a VaultTx or BatchTx.\n3. **Exploitation:** Attackers or users could submit malformed or syntactically incorrect transaction data, bloating storage or creating confusion during execution attempts.\n4. **Impact:** While not directly exploitable for fund loss, this wastes resources and could interfere with off-chain tooling or user experience.\n",
+            "severity": "informational",
+            "location": [
+                "Multisig.create_vault_transaction#-"
+            ],
+            "files": [
+                "programs/multisig/src/instructions/vault_transaction_create.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-732"
+                ]
+            },
+            "title": "Controlled Multisigs Create Social Attack Vectors",
+            "description": "1. **Description:** Multisigs with a config authority (controlled multisigs) introduce social engineering risks, as the authority can unilaterally change configurations.\n2. **Cause:** The presence of a config authority allows centralized control over critical parameters, contradicting the decentralized nature expected of multisigs.\n3. **Exploitation:** A malicious or compromised config authority could alter membership or thresholds without consensus, enabling takeovers or exclusion of members.\n4. **Impact:** This creates trust assumptions that undermine the security model, especially if users believe the multisig is fully decentralized when it is not.\n",
+            "severity": "informational",
+            "location": [
+                "Multisig.set_config_authority#-"
+            ],
+            "files": [
+                "programs/multisig/src/instructions/multisig_config.rs"
+            ]
+        }
+    ]
+}

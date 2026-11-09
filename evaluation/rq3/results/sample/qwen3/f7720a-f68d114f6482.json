@@ -1,0 +1,166 @@
+{
+    "project": "MetaPool_Liquid_Staking_NEAR_Smart_Contract_Security_Audit_Report_Halborn_Final.pdf.json",
+    "files": [
+        "dataset/contracts/MetaPool_Liquid_Staking_NEAR_Smart_Contract_Security_Audit_Report_Halborn_Final.pdf.json/metapool/src/fungible_token_standard.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.07692307692307693,
+        "recall": 0.2,
+        "f1": 0.1111111111111111
+    },
+    "cwe_ground_truth": [
+        "CWE-400",
+        "CWE-770",
+        "CWE-1325",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-755",
+        "CWE-682",
+        "CWE-285",
+        "CWE-287",
+        "CWE-778",
+        "CWE-284",
+        "CWE-346",
+        "CWE-703",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "DENIAL OF SERVICE CONDITION DUE TO STORAGE BLOATING",
+            "description": "The MetaPool contract does not require users to make a storage deposit to cover the costs of storing their stNEAR balance. This allows a malicious user to initiate multiple small token transfers to non-existent accounts, which forces the contract to allocate storage for each new account. The contract uses its own balance to pay for this storage, and if the free balance is insufficient, further storage operations will fail, leading to a Denial of Service condition. This would prevent new users from staking, directly impacting the core functionality of the contract. Although the DoS can be reversed by sending more NEAR to the contract, the lack of a proactive storage fee mechanism creates a significant risk.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code contains several security issues related to the listed CWEs. First, in the `ft_transfer_call` function, there is an improper access control (CWE-284) because the function does not validate whether the receiver is a valid contract that can handle `ft_on_transfer`, potentially leading to loss of funds if called on a non-contract account. Second, there is an improper handling of exceptional conditions (CWE-703) in `ft_resolve_transfer`, where the function assumes that `receiver_id.into()` is safe without checking for potential panics or invalid account IDs, which could lead to unexpected contract behavior. Third, there is an incorrect calculation (CWE-682) in the gas computation: the subtraction `env::prepaid_gas() - GAS_FOR_FT_TRANSFER_CALL - GAS_FOR_RESOLVE_TRANSFER - ONE_TGAS` may underflow if insufficient gas is provided, although the prior assertion helps mitigate this, it does not prevent all edge cases, especially if gas constants are modified in the future. Finally, the `ft_metadata_set` function uses `self.assert_owner_calling()` which is not defined in the provided code, indicating a potential protection mechanism failure (CWE-693) if the check is missing or incorrectly implemented.\n",
+            "findings": [
+                {
+                    "title": "Improper Access Control in ft_transfer_call",
+                    "description": "The function `ft_transfer_call` does not verify that the receiver is a valid contract capable of handling `ft_on_transfer`. This could result in tokens being sent to a non-contract account, leading to permanent loss of funds as the callback mechanism will fail silently during resolution.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Handling of Exceptional Conditions in ft_resolve_transfer",
+                    "description": "The function `ft_resolve_transfer` performs `.into()` on `receiver_id` without validating or handling potential parsing errors or panics. If an invalid account ID is passed, this could cause the contract to panic, leading to denial of service or unexpected behavior during token resolution.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Incorrect Calculation in Gas Subtraction",
+                    "description": "The gas calculation in `ft_transfer_call` subtracts multiple constants from `env::prepaid_gas()` without checking for underflow. While there is an assertion, it does not guarantee that the subtraction won't underflow in edge cases, especially if gas constants are changed, potentially leading to runtime panics or incorrect gas allocation.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Protection Mechanism Failure in ft_metadata_set",
+                    "description": "The function `ft_metadata_set` calls `self.assert_owner_calling()`, but this method is not defined or shown in the provided code. If this check is missing or incorrectly implemented, unauthorized users could modify the token metadata, leading to spoofing or misleading information being presented to users.",
+                    "category": "CWE-693",
+                    "severity": "high",
+                    "confidence": 0.98
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code implements a NEP-141 compliant fungible token (likely stNEAR) on NEAR Protocol. Upon analyzing the code with respect to the listed CWEs, several issues are identified:\n\n1. **CWE-285: Improper Authorization** - The `ft_metadata_set` function is intended to allow only the owner to update the token metadata. It calls `self.assert_owner_calling()`, but this function is not defined in the provided code. If `assert_owner_calling` is not properly implemented or is missing, any user could modify the token metadata (name, symbol, icon, etc.), leading to spoofing or misleading representations.\n\n2. **CWE-346: Origin Validation Error** - In `ft_transfer_call`, the contract calls `ext_ft_receiver::ft_on_transfer` on an external contract specified by `receiver_id`. However, there is no validation that the `receiver_id` is a valid and trusted contract. This could allow malicious contracts to be targeted, or untrusted contracts to be tricked into handling tokens. While this is part of the NEP-141 standard, the lack of any access control or validation on the receiver increases risk.\n\n3. **CWE-778: Insufficient Logging** - The contract logs when tokens are burned in `ft_resolve_transfer`, but there are no logs for critical operations such as `ft_transfer`, `ft_transfer_call`, or `ft_metadata_set`. Missing logs for these operations reduces auditability and makes it harder to detect malicious activity or debug issues.\n\n4. **CWE-287: Improper Authentication** - The `assert_one_yocto()` function is used to ensure that at least one yoctoNEAR is attached to prevent unauthorized calls. However, this is a standard NEAR pattern, but if `assert_one_yocto` is not correctly implemented (not shown in code), it could allow free function calls, leading to potential abuse.\n\n5. **CWE-424: Improper Protection of Alternate Path** - The `ft_resolve_transfer` function is marked with `#[private]`, which ensures it can only be called by the contract itself. However, if the promise chain is manipulated or if the internal logic fails to enforce this, it could be bypassed. The use of `ValidAccountId` in the public interface but not consistently in internal logic may lead to validation gaps.\n\nNote: Some functions refer to `MetaPool` instead of `Contract`, suggesting a possible inconsistency or typo in the implementation (e.g., `impl FungibleTokenCore for MetaPool`). This could indicate a larger structural issue if `MetaPool` is not correctly defined or aliased.\n",
+            "findings": [
+                {
+                    "title": "Missing Owner Authorization Check in ft_metadata_set",
+                    "description": "The function `ft_metadata_set` calls `self.assert_owner_calling()` to restrict access to the owner, but the implementation of this method is not provided. If this method is not correctly implemented or is a no-op, any user can modify the token's metadata (name, symbol, icon, etc.), leading to potential spoofing or branding attacks.",
+                    "category": "CWE-285",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Lack of Receiver Validation in ft_transfer_call",
+                    "description": "The `ft_transfer_call` function forwards tokens to any `receiver_id` without validating whether the receiver is a legitimate or expected contract. This could lead to tokens being sent to malicious or unintended contracts, increasing the risk of loss or misuse.",
+                    "category": "CWE-346",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient Logging for Critical Token Operations",
+                    "description": "The contract only logs when tokens are burned in `ft_resolve_transfer`, but does not log standard transfers (`ft_transfer`, `ft_transfer_call`) or metadata changes (`ft_metadata_set`). This lack of comprehensive logging reduces transparency and hinders auditability and incident response.",
+                    "category": "CWE-778",
+                    "severity": "low",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Potential Improper Authentication Due to Missing assert_one_yocto Implementation",
+                    "description": "The functions `ft_transfer` and `ft_transfer_call` call `assert_one_yocto()` to enforce a 1 yoctoNEAR deposit, a common NEAR pattern to prevent unauthorized calls. However, if this function is not properly implemented or is missing, attackers could invoke these functions without cost, potentially leading to abuse.",
+                    "category": "CWE-287",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Inconsistent Type Usage Suggests Structural Issues",
+                    "description": "The implementation blocks use `MetaPool` as the impl target (e.g., `impl FungibleTokenCore for MetaPool`), but the contract struct is named `Contract`. This inconsistency suggests a possible error in the codebase, such as a missing type alias or incorrect struct name, which could lead to undefined behavior or compilation issues if not resolved.",
+                    "category": "CWE-755",
+                    "severity": "medium",
+                    "confidence": 0.75
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-193",
+            "CWE-269",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-655",
+            "CWE-191",
+            "CWE-345",
+            "CWE-182",
+            "CWE-393",
+            "CWE-778",
+            "CWE-654",
+            "CWE-807",
+            "CWE-358",
+            "CWE-1270",
+            "CWE-357",
+            "CWE-190",
+            "CWE-923",
+            "CWE-311",
+            "CWE-1267",
+            "CWE-326",
+            "CWE-135",
+            "CWE-757",
+            "CWE-184",
+            "CWE-228",
+            "CWE-369",
+            "CWE-397",
+            "CWE-327",
+            "CWE-424",
+            "CWE-656",
+            "CWE-128",
+            "CWE-1339",
+            "CWE-282",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-330",
+            "CWE-754",
+            "CWE-1335",
+            "CWE-755"
+        ]
+    ]
+}

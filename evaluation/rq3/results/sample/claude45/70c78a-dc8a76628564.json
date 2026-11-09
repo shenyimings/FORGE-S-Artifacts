@@ -1,0 +1,180 @@
+{
+    "project": "2025-06-23.pdf.json",
+    "files": [
+        "dataset/contracts/2025-06-23.pdf.json/programs/whirlpool/src/manager/swap_manager.rs",
+        "dataset/contracts/2025-06-23.pdf.json/programs/whirlpool/src/manager/fee_rate_manager.rs",
+        "dataset/contracts/2025-06-23.pdf.json/programs/whirlpool/src/state/oracle.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.5,
+        "recall": 0.375,
+        "f1": 0.42857142857142855
+    },
+    "cwe_ground_truth": [
+        "CWE-664",
+        "CWE-682",
+        "CWE-691",
+        "CWE-1068",
+        "CWE-799",
+        "CWE-710",
+        "CWE-670",
+        "CWE-372"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-697",
+        "CWE-682",
+        "CWE-691",
+        "CWE-284",
+        "CWE-703"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Malicious user can keep high adaptive fee at low cost",
+            "description": "The Orca Whirlpools program uses an adaptive fee mechanism that increases fees during high-frequency trading periods, determined by tracking the last swap timestamp. The vulnerability arises because the system updates the last_swap_timestamp even for negligible swaps (e.g., 1 smallest token unit), as long as the amount is non-zero. This allows a malicious user to artificially maintain the pool in a high-frequency trading state by periodically executing minimal swaps, thereby keeping the adaptive fee elevated without significant cost. The root cause is the lack of a threshold or significance check on the swap amount before updating the timestamp. This could lead to unfairly high fees for legitimate users, reducing capital efficiency and user trust in the pool's fee model.\n"
+        },
+        {
+            "title": "Not skipping liquidity gaps when fetching the last tick group index",
+            "description": "During a swap, the Whirlpools program processes tick groups sequentially using the advance_tick_group function, which increments or decrements the tick group index by 1 without verifying whether the new tick group contains liquidity. This occurs even when the get_next_initialized_tick_index function is designed to skip over liquidity gaps. As a result, the swap loop inefficiently iterates through empty tick groups, increasing computational overhead and transaction costs. The root cause is the failure to align the fee rate manager's tick group advancement logic with the liquidity-aware tick traversal mechanism. An attacker could exploit this by creating sparse tick arrays, forcing unnecessary iterations and potentially increasing gas usage for users, though no direct fund loss occurs.\n"
+        },
+        {
+            "title": "Inconsistent volatility accumulator updates",
+            "description": "The volatility_accumulator is updated differently depending on whether adaptive_fee_update_skipped is enabled. In adaptive_fee_update_skipped mode, the accumulator is correctly updated when crossing tick groups via advance_tick_group_after_skip. However, when adaptive_fee_update_skipped is false, the tick_group_index is incremented via advance_tick_group without updating the volatility_accumulator, even at the end of a swap that crosses a tick boundary. This inconsistency can lead to inaccurate volatility tracking, affecting the adaptive fee calculation. The root cause is the lack of a unified update mechanism for the volatility_accumulator across both code paths. This could result in suboptimal fee adjustments, potentially undercharging or overcharging fees based on actual market conditions.\n"
+        },
+        {
+            "title": "Inaccurate tick group index update conditions",
+            "description": "The swap function unconditionally calls advance_tick_group when adaptive_fee_update_skipped is false, without verifying that a tick group boundary has actually been crossed (i.e., curr_sqrt_price == bounded_sqrt_price_target). This leads to the tick_group_index being incremented even when no boundary is crossed, resulting in an incorrect index. Although the team noted that this has no real harm due to the index being memory-only and reset on subsequent swaps, it reflects a logic inconsistency. The root cause is an overly broad condition for tick group advancement. While the impact is minimal, it could confuse developers and lead to incorrect assumptions in future modifications.\n"
+        },
+        {
+            "title": "Question on the adaptive fee rate cap",
+            "description": "The total_fee_rate is calculated as the sum of static_fee_rate and adaptive_fee_rate, both of which are capped individually. However, the adaptive_fee_rate is capped at FEE_RATE_HARD_LIMIT independently, meaning that when added to a non-zero static_fee_rate, the total could exceed the hard limit before being capped. The issue questions whether the adaptive_fee_rate should instead be capped at FEE_RATE_HARD_LIMIT - static_fee_rate to prevent this intermediate overflow. The root cause is a design decision on fee capping strategy. While the final total is correctly capped, the current approach allows the adaptive component to consume the entire fee budget, potentially undermining the static fee's role. The team confirmed this is intentional.\n"
+        },
+        {
+            "title": "The tick_group_index_reference is not updated in edge cases",
+            "description": "The tick_group_index_reference is not updated when the time elapsed since the last update is less than the filter_period, even though the current tick group has changed. This causes subsequent adaptive fee calculations to use an outdated reference, leading to incorrect index_delta values and thus inaccurate fee rates. For example, if two swaps occur within the filter_period, the second swap will calculate volatility based on the initial tick group, not the one set by the first swap. The root cause is the conditional update logic in update_reference. This could result in lower-than-expected fees during rapid successive trades, potentially benefiting attackers who front-run or sandwich trades.\n"
+        },
+        {
+            "title": "Inconsistent comments",
+            "description": "The comment in advance_tick_group_after_skip states that the tick_group_index will advance by one more if sqrt_price is not on the tick_group_size boundary, which is incorrect. The actual logic suggests the opposite: the index adjustment occurs based on boundary alignment. This misleading comment could lead to misunderstandings during code review or maintenance. The root cause is an inaccurate or outdated comment. While there is no direct security impact, it increases the risk of future bugs if developers rely on the comment for logic interpretation.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code, I have identified several potential security issues stemming from the specified CWE root causes:\n\n1. **CWE-682: Incorrect Calculation** - In `swap_manager.rs`, the `calculate_protocol_fee` function performs a division that could potentially lead to precision loss or incorrect fee calculations. The function uses `try_into().unwrap()` which could panic if the result exceeds u64::MAX, though this is unlikely given the constraints. More critically, the fee calculation uses integer division which truncates, potentially leading to accumulated rounding errors over many transactions.\n\n2. **CWE-703: Improper Check or Handling of Exceptional Conditions** - Multiple instances of `.unwrap()` calls throughout the codebase, particularly in `fee_rate_manager.rs` in the `compute_adaptive_fee_rate` function. While some are in test code, the production code also contains `.try_into().unwrap()` which could panic if assumptions about value ranges are violated.\n\n3. **CWE-664: Improper Control of a Resource Through its Lifetime** - In `oracle.rs`, the `OracleAccessor` manages access to Oracle account data through `Ref` and `RefMut` borrows. The `load_mut()` function checks if the account is writable, but there's a potential race condition where the account's writable status could change between the check and the actual mutation. Additionally, the `update_adaptive_fee_variables` function has unreachable code paths that suggest incomplete state management.\n\n4. **CWE-691: Insufficient Control Flow Management** - In `swap_manager.rs`, the swap loop contains complex nested conditions and multiple early returns. The loop structure with `while amount_remaining > 0 && adjusted_sqrt_price_limit != curr_sqrt_price` followed by an inner `loop` with a break condition creates potential for infinite loops if the break conditions are not properly met. The comment \"do while loop\" suggests this is intentional, but the control flow is not clearly enforced.\n\n5. **CWE-284: Improper Access Control** - In `oracle.rs`, the `OracleAccessor::new` function performs validation checks but the `is_oracle_account_initialized` function has an unreachable panic case for whirlpool mismatch. The comment \"Just for safety: Oracle address is derived from Whirlpool address, so this should not happen\" indicates reliance on external invariants that may not always hold, potentially allowing unauthorized access if the derivation assumption is violated.\n\n6. **CWE-697: Incorrect Comparison** - In `fee_rate_manager.rs`, the `get_bounded_sqrt_price_target` function uses `max` and `min` comparisons to bound the sqrt_price. However, the boundary calculation uses `clamp(MIN_TICK_INDEX, MAX_TICK_INDEX)` which could mask issues if the boundary_tick_index calculation produces values outside the valid range, leading to incorrect price boundaries.\n",
+            "findings": [
+                {
+                    "title": "Potential Precision Loss in Protocol Fee Calculation",
+                    "description": "The `calculate_protocol_fee` function in swap_manager.rs uses integer division which truncates remainders. Over many transactions, this could lead to accumulated rounding errors that benefit either the protocol or users unfairly. The calculation `(global_fee as u128) * (protocol_fee_rate as u128) / PROTOCOL_FEE_RATE_MUL_VALUE` may lose precision, and the `.try_into().unwrap()` could panic if the result exceeds u64::MAX, though this is constrained by the input ranges.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unsafe Unwrap Operations in Fee Rate Calculations",
+                    "description": "The `compute_adaptive_fee_rate` function in fee_rate_manager.rs contains `.try_into().unwrap()` calls that could panic if the calculated fee_rate exceeds u32::MAX. While the code attempts to cap the value with `FEE_RATE_HARD_LIMIT`, the unwrap occurs before this check in the conversion, creating a potential panic condition. Additionally, the `calculate_protocol_fee` function uses `.try_into().unwrap()` which could fail under extreme conditions.",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Race Condition in Oracle Account Mutation",
+                    "description": "In oracle.rs, the `OracleAccessor::load_mut()` function checks if the account is writable with `if !self.oracle_account_info.is_writable`, but this check is performed after the account has been loaded. There's a potential race condition where the account's writable status could change between initialization and mutation. Additionally, the `update_adaptive_fee_variables` function contains unreachable code paths (the `_ => unreachable!()` arm) which suggests incomplete handling of state transitions.",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Complex Control Flow with Potential for Infinite Loop",
+                    "description": "The swap function in swap_manager.rs contains a complex nested loop structure with a `while` loop containing an inner `loop` with multiple break conditions. The outer loop condition `while amount_remaining > 0 && adjusted_sqrt_price_limit != curr_sqrt_price` combined with the inner loop's break condition `if amount_remaining == 0 || curr_sqrt_price == sqrt_price_target` creates multiple exit paths. If the state updates within the loop don't properly advance toward these conditions, an infinite loop could occur, potentially causing transaction timeouts or excessive computation.",
+                    "category": "CWE-691",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Reliance on External Invariants for Access Control",
+                    "description": "In oracle.rs, the `is_oracle_account_initialized` function contains an unreachable panic case with the comment 'Just for safety: Oracle address is derived from Whirlpool address, so this should not happen.' This indicates reliance on an external invariant (that Oracle addresses are correctly derived from Whirlpool addresses) for security. If this derivation assumption is violated due to a bug elsewhere in the system or malicious input, the unreachable code could be reached, or worse, the check could be bypassed entirely, potentially allowing unauthorized access to Oracle data.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Incorrect Boundary Calculation in Price Target",
+                    "description": "The `get_bounded_sqrt_price_target` function in fee_rate_manager.rs calculates a boundary_tick_index and then clamps it with `clamp(MIN_TICK_INDEX, MAX_TICK_INDEX)`. However, if the calculation `*tick_group_index * adaptive_fee_constants.tick_group_size as i32 + adaptive_fee_constants.tick_group_size as i32` produces a value outside the valid range, the clamp will silently adjust it, potentially masking overflow or underflow issues. This could lead to incorrect price boundaries being used in swaps, affecting the adaptive fee mechanism's correctness.",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Wrapping Arithmetic in Fee Accumulation",
+                    "description": "In swap_manager.rs, the `calculate_fees` function uses `wrapping_add` for protocol fee accumulation: `next_protocol_fee = next_protocol_fee.wrapping_add(delta)`. While wrapping arithmetic prevents panics, it allows the protocol fee to silently overflow and wrap around to zero or a small value. This could lead to loss of protocol fees if the accumulated fees exceed u64::MAX, which while unlikely in normal operation, represents improper handling of the resource (fees) through its lifetime.",
+                    "category": "CWE-664",
+                    "severity": "low",
+                    "confidence": 0.6
+                }
+            ]
+        },
+        {
+            "reasoning": "After carefully analyzing the provided Solana smart contract code (swap_manager.rs, fee_rate_manager.rs, and oracle.rs), I have examined the code from the perspective of each CWE in the candidate list. Here are my findings:\n\n1. **CWE-190 (Integer Overflow or Wraparound)**: The code uses `checked_add`, `checked_sub`, and `wrapping_add` operations extensively to prevent overflow. However, there are several instances where arithmetic operations could potentially overflow:\n   - In `fee_rate_manager.rs`, the `compute_adaptive_fee_rate` function performs `u64::from(crossed) * u64::from(crossed)` which could overflow if `crossed` is large enough.\n   - In `swap_manager.rs`, the `calculate_fees` function uses `wrapping_add` for `next_protocol_fee`, which intentionally allows overflow but could lead to incorrect fee calculations.\n   - The calculation `((global_fee as u128) * (protocol_fee_rate as u128) / PROTOCOL_FEE_RATE_MUL_VALUE)` in `calculate_protocol_fee` could overflow before division.\n\n2. **CWE-369 (Divide By Zero)**: In `swap_manager.rs`, the `calculate_fees` function has a division by `curr_liquidity`:",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-135",
+            "CWE-410",
+            "CWE-487",
+            "CWE-118",
+            "CWE-369",
+            "CWE-670",
+            "CWE-501",
+            "CWE-911",
+            "CWE-768",
+            "CWE-705",
+            "CWE-1339",
+            "CWE-610",
+            "CWE-704",
+            "CWE-400",
+            "CWE-834",
+            "CWE-673",
+            "CWE-362",
+            "CWE-668",
+            "CWE-404",
+            "CWE-666",
+            "CWE-913",
+            "CWE-1329",
+            "CWE-580",
+            "CWE-190",
+            "CWE-662",
+            "CWE-128",
+            "CWE-496",
+            "CWE-669",
+            "CWE-431",
+            "CWE-372",
+            "CWE-922",
+            "CWE-799",
+            "CWE-430",
+            "CWE-193",
+            "CWE-841",
+            "CWE-1335",
+            "CWE-1229",
+            "CWE-495",
+            "CWE-191",
+            "CWE-1265",
+            "CWE-706",
+            "CWE-665",
+            "CWE-221"
+        ]
+    ]
+}

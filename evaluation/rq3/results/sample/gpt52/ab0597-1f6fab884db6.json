@@ -1,0 +1,199 @@
+{
+    "project": "cantina_espresso_march2025.pdf.json",
+    "files": [
+        "dataset/contracts/cantina_espresso_march2025.pdf.json/signature/src/bls_over_bn254.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.16666666666666666,
+        "recall": 0.3333333333333333,
+        "f1": 0.2222222222222222
+    },
+    "cwe_ground_truth": [
+        "CWE-358",
+        "CWE-707",
+        "CWE-710",
+        "CWE-20",
+        "CWE-693"
+    ],
+    "cwe_detected": [
+        "CWE-1173",
+        "CWE-707",
+        "CWE-240",
+        "CWE-435",
+        "CWE-1284",
+        "CWE-172",
+        "CWE-1289",
+        "CWE-703",
+        "CWE-20",
+        "CWE-1287"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Rogue Key Attacks Against BLS Aggregate Signature Verification",
+            "description": "1. **Description:** The implementation is potentially vulnerable to rogue key attacks during BLS aggregate signature verification if proper safeguards are not in place. The security of the aggregation relies on ensuring that each public key contributor does not manipulate their key to gain control over the aggregate.\n2. **Cause:** The vulnerability arises because the system may accept public keys without proofs of possession or knowledge, allowing a malicious actor to craft a key that, when aggregated, gives them control over the resulting aggregate key.\n3. **Exploitation:** An attacker could register a rogue public key derived from other users' public keys, enabling them to forge aggregate signatures on arbitrary messages.\n4. **Impact:** This could lead to a breakdown in the authenticity guarantees of the BLS signature scheme, allowing unauthorized message signing and potentially compromising consensus or authentication systems relying on these signatures.\n"
+        },
+        {
+            "title": "Signatures Validated to be On-Curve",
+            "description": "1. **Description:** The verification methods (verify, aggregate_verify, multi_sig_verify) do not ensure that the provided signature points lie on the correct elliptic curve.\n2. **Cause:** Missing on-curve validation for BN254 signature points before processing, which is a prerequisite for secure pairing-based cryptography.\n3. **Exploitation:** An attacker could provide invalid curve points as signatures, potentially triggering edge cases in the cryptographic operations or leading to information leakage.\n4. **Impact:** This may result in incorrect verification outcomes or open the door to side-channel or other cryptographic attacks that exploit invalid curve points.\n"
+        },
+        {
+            "title": "Software Execution Timing Side Channel of Secret Signing Key",
+            "description": "1. **Description:** The scalar multiplication operation in the BLS signing process exhibits timing variations that depend on the secret key, creating a potential side channel.\n2. **Cause:** The implementation uses a non-constant-time algorithm for group scalar multiplication, allowing timing analysis to infer bits of the private key.\n3. **Exploitation:** An attacker with fine-grained timing access to the signing operation (e.g., via shared infrastructure or network timing) could perform a timing attack to recover the secret key over multiple observations.\n4. **Impact:** Full compromise of the private signing key, leading to complete loss of signature authenticity and potential impersonation of the key holder.\n"
+        },
+        {
+            "title": "Signing Optimization to Avoid Extra Group Scalar Multiplication",
+            "description": "1. **Description:** The signing process regenerates the public key from the secret key even when it is already available.\n2. **Cause:** Inefficient API design that performs redundant cryptographic operations.\n3. **Exploitation:** Not a security vulnerability, but increases computational cost.\n4. **Impact:** Higher gas or CPU usage during signing operations.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code is a BLS-over-BN254 implementation that includes single-signature verification plus aggregate/multisignature helpers. From the provided CWE root causes, the most relevant issues stem from (1) multi-party composition pitfalls (rogue-key / missing PoP and message-uniqueness requirements), (2) inadequate validation of adversarially-controlled inputs (accepting identity keys/signatures; non-canonical scalar encodings), and (3) exceptional-condition handling and control-flow/resource risks (unbounded “hash-and-pray” loop and panic-on-unwrap). These issues can matter significantly in Solana/on-chain contexts due to compute limits and adversarial inputs.\n",
+            "findings": [
+                {
+                    "title": "Rogue-key attack surface in aggregate/multisignature verification (no Proof-of-Possession / binding)",
+                    "description": "The APIs `aggregate_verify` (CoreAggregateVerify-like) and `multi_sig_verify` (FastAggregateVerify-like) accept arbitrary sets of public keys and do not require Proof-of-Possession (PoP) or an augmented scheme that binds each public key into the hash.\n`vk.check()` only validates curve/subgroup membership; it does not prevent rogue-key attacks where a malicious participant chooses a public key as a function of honest participants' keys to make an aggregate verification pass without possessing the corresponding secret key.\n\nThis is a classic \"correct components, insecure composition\" issue: single BLS verification is fine, but aggregating across multiple signers without PoP/augmentation introduces a forgery avenue in protocols that accept attacker-supplied keys.\n\nAffected code:\n- `fn aggregate_verify(...)` (multi-pairing across (H(m_i), pk_i) terms)\n- `fn multi_sig_verify(...)` (aggregates public keys by addition, then verifies)\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.82
+                },
+                {
+                    "title": "Aggregate verification does not enforce distinct messages (spec requirement), enabling misuse and potential forgeries in higher-level protocols",
+                    "description": "The IETF BLS \"CoreAggregateVerify\" construction assumes the messages are distinct; if messages repeat, the security assumptions change and additional protections are needed (typically PoP or augmented hashing).\n`aggregate_verify` checks only `vks.len() == msgs.len()` but does not enforce message uniqueness, so callers can inadvertently (or adversarially) pass repeated messages and believe they are performing secure aggregate verification.\n\nIn integrated systems, this can become security-relevant if the aggregate signature is used as an authorization threshold/proof over \"different\" statements but duplicates are allowed.\n\nAffected code:\n- `fn aggregate_verify(...)`: no check that `msgs` are distinct.\n",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unbounded hash-to-curve loop and panic-on-unwrap can be used for DoS in constrained environments",
+                    "description": "`hash_to_curve` uses a non-constant-time \"hash-and-pray\" loop:\n  while Y.legendre().is_qnr() { x += 1; Y = x^3 + 3; }\nThis loop is probabilistic and has no explicit iteration cap, so in worst cases it can run for many iterations. In Solana (compute-budgeted) or other metered environments, an attacker-controlled message could be used to increase compute consumption and cause denial of service.\n\nAdditionally, it calls `Y.sqrt().unwrap()` assuming the Legendre symbol check is perfectly aligned with `sqrt()` returning `Some`. While mathematically sound, any upstream library edge case/bug or exceptional field element handling could trigger a panic, turning malformed/adversarial inputs into a process abort instead of a handled error.\n\nAffected code:\n- `pub fn hash_to_curve(...)`: unbounded loop and `unwrap()`.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Insufficient validation: identity/zero keys and identity signatures are not rejected, enabling trivial 'verification' in protocols with attacker-chosen keys",
+                    "description": "The code does not explicitly reject:\n- zero signing keys created via `SignKey::from_bytes` / `KeyPair::from_bytes` (they reduce arbitrary bytes mod the scalar field order, allowing 0),\n- identity public keys (vk = g2 * 0 = infinity),\n- identity signatures (sigma = infinity).\n\nFor a zero public key, verification reduces to:\n  pairing(sig, g2) == pairing(H(m), 0) == 1\nwhich holds for `sig = 0` (identity) for any message (in the prime-order group). If a higher-level protocol treats a provided public key as an identity/authority key without out-of-band trust anchoring, an attacker can pick `vk = 0` and `sig = 0` and pass verification trivially.\n\n`vk.check()` is called in aggregate/multisig paths, but curve/subgroup checks commonly accept the point at infinity; the code does not add a non-identity check.\n\nAffected code:\n- `SignKey::from_bytes`, `KeyPair::from_bytes` (can create sk=0)\n- `VerKey::verify`, `aggregate_verify`, `multi_sig_verify` (no explicit non-identity checks for vk/sigma)\n",
+                    "category": "CWE-707",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Non-canonical scalar encoding/decoding for secret keys can cause key ambiguity and downstream authorization mistakes",
+                    "description": "`SignKey::to_bytes()` serializes via `into_bigint().to_bytes_le()` which may produce variable-length encodings depending on the bigint representation, and `SignKey::from_bytes()` uses `from_le_bytes_mod_order`, which reduces any-length input mod the field order.\n\nThis combination permits many byte strings to map to the same secret key (non-canonical encoding). In systems that store/compare serialized keys (or derive identities/hashes from serialized form), this can lead to mismatched identity checks, duplicate-account scenarios, or bypasses where the same underlying key is represented by multiple encodings.\n\nAffected code:\n- `SignKey::to_bytes`, `SignKey::from_bytes`\n- `KeyPair::to_bytes`, `KeyPair::from_bytes` (delegates to SignKey)\n",
+                    "category": "CWE-707",
+                    "severity": "low",
+                    "confidence": 0.74
+                }
+            ]
+        },
+        {
+            "reasoning": "The code is a cryptographic library module implementing BLS over BN254. From the provided CWE root causes, the main risks stem from (1) insufficient validation of externally-provided group elements (verification keys/signatures), (2) ambiguous message/context structuring via raw concatenation, (3) non-canonical / lossy decoding of scalar keys from bytes, and (4) potentially unbounded, input-dependent hashing-to-curve behavior.\n\nIn particular, `VerKey::verify` (and the scheme-level `verify` wrapper) validates only that `sig.sigma` is “on curve” and does not validate the verification key at all. This can enable acceptance of invalid keys (including the point at infinity if not rejected elsewhere), and combined with accepting the point-at-infinity signature (also “on curve”), can allow trivial forgeries (pk=0, sig=0) for any message. While aggregate verification paths call `vk.check()`, the single-signature path does not, creating an inconsistency in validation expectations.\n\nAdditionally, `KeyPair::sign` / `VerKey::verify` accept an arbitrary `csid` and build the hash input as `msg || csid` without length-prefixing or domain separation encoding, so different (msg, csid) pairs can collide to the same byte string (e.g., (b\"a\", b\"bc\") vs (b\"ab\", b\"c\")), enabling cross-context signature confusion if callers treat `csid` as a separate structural element.\n\nFinally, `SignKey::from_bytes` / `KeyPair::from_bytes` accept arbitrary-length byte strings and reduce them modulo the scalar field order (`from_le_bytes_mod_order`) without enforcing canonical length/encoding. This is a decoding/encoding mismatch that can create multiple distinct serialized forms for the same key and can lead to unexpected equivalences in systems that assume canonical encodings.\n\n`hash_to_curve` uses “hash-and-pray” with a `while` loop whose runtime depends on attacker-controlled input and has no iteration bound, which can be used as a DoS vector in constrained execution environments.\n",
+            "findings": [
+                {
+                    "title": "Verification does not validate verification key (including potential infinity/invalid points)",
+                    "description": "`VerKey::verify` (and thus `BLSOverBN254CurveSignatureScheme::verify`) does not perform any validity checks on `self.0` (the public key), such as on-curve checks, non-identity checks, or subgroup checks. Only aggregate paths call `vk.check()`.\n\nIf an attacker can supply a malformed/invalid verification key (including potentially the identity point, depending on upstream deserialization and `check()` usage), signature verification behavior can become incorrect or trivially bypassable in some cases.\n\nA concrete risk is accepting `vk = 0` (point at infinity) combined with accepting `sigma = 0` (also “on curve”): then\n`pairing(0, g2) == 1` and `pairing(H(m), 0) == 1`, so verification succeeds for any message with a zero signature under a zero public key.\n",
+                    "category": "CWE-20",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Signature validation only checks is_on_curve; does not reject identity (infinity) signatures",
+                    "description": "`VerKey::verify`, `multi_sig_verify`, and `aggregate_verify` reject signatures only if `!sig.sigma.into_affine().is_on_curve()`.\nMany curve libraries consider the identity (point at infinity) to be on-curve. If so, a zero signature can pass the on-curve gate.\n\nWhen paired with a missing/non-enforced public key validity check (see previous finding), this can enable trivial “signatures” (sigma=0) to verify under certain malformed keys (e.g., pk=0), undermining unforgeability expectations in systems that do not strictly validate keys/signatures as non-identity.\n",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Ambiguous structuring of (msg, csid) due to raw concatenation without framing",
+                    "description": "`KeyPair::sign` and `VerKey::verify` construct the hashed message as `[msg, csid.as_ref()].concat()`, with `csid` being caller-provided (`B: AsRef<[u8]>`).\n\nWithout length-prefixing or an unambiguous encoding, distinct pairs can map to the same byte string, e.g.:\n- (msg=b\"a\", csid=b\"bc\") => b\"abc\"\n- (msg=b\"ab\", csid=b\"c\") => b\"abc\"\n\nIf downstream components treat `msg` and `csid` as separate structural elements (domain separation / protocol ID), this ambiguity can allow signatures created for one context to be interpreted as valid for another context.\n(The trait-level scheme uses a fixed `CS_ID`, but the public `KeyPair::sign`/`VerKey::verify` APIs expose the ambiguous interface.)\n",
+                    "category": "CWE-240",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Non-canonical / lossy decoding of signing keys from bytes (mod-order reduction, no length checks)",
+                    "description": "`SignKey::from_bytes` and `KeyPair::from_bytes` use `ScalarField::from_le_bytes_mod_order(bytes)`, which:\n- accepts arbitrary-length inputs\n- reduces them modulo the scalar field order\n\nMeanwhile, `SignKey::to_bytes()` uses `into_bigint().to_bytes_le()`, which is variable-length and not a fixed canonical encoding.\n\nThis decode/encode mismatch means multiple distinct byte strings can decode to the same signing key, and serialized keys may not round-trip to a unique canonical form. In systems that rely on canonical encodings (hashing keys as identifiers, equality checks over serialized forms, signature-key pinning, etc.), this can lead to unexpected values/interpretations and structural inconsistencies.\n",
+                    "category": "CWE-172",
+                    "severity": "low",
+                    "confidence": 0.77
+                },
+                {
+                    "title": "Unbounded input-dependent loop in hash_to_curve (potential DoS via crafted messages)",
+                    "description": "`hash_to_curve` uses a \"hash-and-pray\" loop:\n`while Y.legendre().is_qnr() { x += 1; Y = x^3 + b; }`\nwith no upper bound on iterations. The number of iterations is message-dependent.\n\nAn attacker controlling `msg` can potentially induce high iteration counts, causing performance degradation or DoS in constrained environments (e.g., on-chain, metered runtimes, or batch verification services).\n",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "The code is a BLS-over-BN254 signature implementation. From the provided CWE list, the main security-relevant problems stem from insufficient/incorrect validation of externally supplied inputs (public keys, secret keys, and their serialized forms).\nIn particular:\n- The codebase has a validation routine for verification keys (`vk.check()`) and uses it in aggregate/multisig verification, but the normal single-signature verification path (`SignatureScheme::verify` -> `VerKey::verify`) omits it. This is an inconsistent and potentially unsafe use of the available validation framework.\n- Secret key (and keypair) deserialization accepts arbitrary-length byte strings and reduces them modulo the scalar field order. This permits non-canonical encodings (many different byte arrays map to the same scalar), and also permits degenerate keys such as the all-zero scalar. These are input-validation issues (length/syntax/canonical form) and can create key-identity confusion in higher-level protocols that treat the byte string as an identifier or expect canonical encodings.\n",
+            "findings": [
+                {
+                    "title": "Single-signature verification omits verification-key validity checks (on-curve/subgroup)",
+                    "description": "`SignatureScheme::verify()` calls `vk.verify(...)`, but `VerKey::verify()` does not validate `self` (the verification key) via `vk.check()` or equivalent checks (e.g., on-curve and subgroup membership).\nIn contrast, `aggregate_verify()` and `multi_sig_verify()` explicitly enforce `vk.check()` for each verification key.\nIf an attacker can supply a malformed/unvalidated `VerKey` to the normal verification API, the pairing check may be performed on an invalid point. In pairing-based schemes, accepting invalid-curve / wrong-subgroup public keys can enable signature forgeries or other algebraic attacks depending on the curve/group checks guaranteed by the underlying library and how keys are sourced/deserialized.\n",
+                    "category": "CWE-1173",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Non-canonical secret-key (and keypair) deserialization allows unsafe equivalence of different byte encodings",
+                    "description": "`SignKey::from_bytes()` and `KeyPair::from_bytes()` use `ScalarField::from_le_bytes_mod_order(bytes)`, which reduces arbitrary-length input modulo the field order.\nThis means many distinct byte strings decode to the same scalar value (e.g., appending extra bytes, or adding multiples of the modulus), creating non-canonical encodings.\nIf the byte representation is used as a unique identifier, cached key handle, allowlist entry, or for equality comparisons at a higher layer, an attacker can exploit these \"different bytes, same key\" equivalences to bypass checks or confuse identity/accounting.\n",
+                    "category": "CWE-1289",
+                    "severity": "medium",
+                    "confidence": 0.86
+                },
+                {
+                    "title": "Secret-key (and keypair) deserialization performs no length/syntax validation",
+                    "description": "`SignKey::from_bytes()` and `KeyPair::from_bytes()` accept any byte slice length (including empty or excessively long inputs) and silently map it into a scalar via modular reduction.\nThis is improper validation of the expected quantity/syntactic correctness of the input encoding for a scalar field element (typically a fixed-width canonical encoding is expected, e.g., 32 bytes for BN254 Fr).\nImpact ranges from inconsistent cross-implementation behavior to enabling the unsafe equivalence described above; it also makes it difficult to reliably reject malformed inputs.\n",
+                    "category": "CWE-1284",
+                    "severity": "medium",
+                    "confidence": 0.83
+                },
+                {
+                    "title": "Degenerate (zero) signing keys are accepted without validation",
+                    "description": "The code permits constructing secret keys from arbitrary bytes (`from_bytes`) and does not reject the zero scalar.\nA zero signing key produces an identity verification key and yields identity signatures for all messages. While such a keypair is mathematically valid, many applications expect to forbid degenerate keys because they can undermine security assumptions or create special-case behavior (e.g., a trivially computable signature under the identity public key).\nIf secret keys are user-provided/imported, the lack of validation allows these degenerate keys to be introduced.\n",
+                    "category": "CWE-1287",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-463",
+            "CWE-240",
+            "CWE-138",
+            "CWE-172",
+            "CWE-116",
+            "CWE-74",
+            "CWE-170",
+            "CWE-228",
+            "CWE-20",
+            "CWE-1426"
+        ],
+        [
+            "CWE-1173",
+            "CWE-1286",
+            "CWE-1285",
+            "CWE-1288",
+            "CWE-1287",
+            "CWE-1284",
+            "CWE-1289",
+            "CWE-179"
+        ]
+    ]
+}

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["assign","Given [`ProperUint`]s `a` and `b` with the same number of limbs, returns whether `a == b`."]]};

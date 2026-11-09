@@ -1,0 +1,120 @@
+name: VIRTUAL_CURVE
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  SOLANA_CLI_VERSION: 2.1.0
+  NODE_VERSION: 20.19.0
+  ANCHOR_CLI_VERSION: 0.31.0
+  PROC_MACRO2_VERSION: 1.0.94
+  NIGHTLY_TOOLCHAIN: nightly-2025-04-14
+
+jobs:
+  program_changed_files:
+    runs-on: ubuntu-latest
+    outputs:
+      program: ${{steps.changed-files-specific.outputs.any_changed}}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Get specific changed files
+        id: changed-files-specific
+        uses: tj-actions/changed-files@v18.6
+        with:
+          files: |
+            programs/virtual-curve
+
+  anchor_build:
+    runs-on: ubuntu-latest
+    needs: program_changed_files
+    if: needs.program_changed_files.outputs.program == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/setup-solana
+      - uses: ./.github/actions/setup-dep
+      - uses: ./.github/actions/setup-anchor
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
+          components: clippy
+      # proc-macro2 version
+      - name: Pin proc-macro2 version
+        run: |
+          cargo update -p proc-macro2 --precise ${{ env.PROC_MACRO2_VERSION }}
+        shell: bash
+      # Cache rust, cargo
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "true"
+          cache-on-failure: true
+      - uses: actions/cache@v4
+        with:
+          path: ~/.anchor
+          key: anchor-${{ runner.os }}-${{ hashFiles('Anchor.toml') }}
+      # Build with nightly toolchain
+      - run: RUSTUP_TOOLCHAIN=${{ env.NIGHTLY_TOOLCHAIN }} anchor build -p virtual_curve --no-idl
+        shell: bash
+
+  cargo_test:
+    runs-on: ubuntu-latest
+    needs: program_changed_files
+    if: needs.program_changed_files.outputs.program == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: 1.79.0
+          components: clippy
+      # Cache rust, cargo
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --package virtual-curve
+        shell: bash
+
+  integration_test:
+    runs-on: ubuntu-latest
+    needs: program_changed_files
+    if: needs.program_changed_files.outputs.program == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-solana
+      - uses: ./.github/actions/setup-dep
+      - uses: ./.github/actions/setup-anchor
+      # Install pnpm
+      - uses: pnpm/action-setup@v3 # docs https://pnpm.io/continuous-integration#github-actions
+        with:
+          version: 9.5.0 # Optional: specify a pnpm version
+
+      # Install nightly toolchains
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
+          components: clippy
+      # proc-macro2 version 
+      - name: Update proc-macro2 version
+        run: |
+          cargo update -p proc-macro2 --precise ${{ env.PROC_MACRO2_VERSION }}
+        shell: bash
+      # Cache rust, cargo
+      - uses: Swatinem/rust-cache@v2
+
+      # Cache node_modules
+      - uses: actions/cache@v4
+        id: cache-node-modules
+        with:
+          path: ./node_modules
+          key: ${{ runner.os }}-${{ hashFiles('./package-lock.json') }}
+      - run: which anchor
+        shell: bash
+      # Testing
+      - run: pnpm install
+        shell: bash
+      # Run tests with nightly toolchain
+      - run: RUSTUP_TOOLCHAIN=${{ env.NIGHTLY_TOOLCHAIN }} pnpm test
+        shell: bash

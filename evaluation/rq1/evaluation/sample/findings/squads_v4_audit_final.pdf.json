@@ -1,0 +1,130 @@
+{
+    "path": "reports/squads_v4_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/Squads-Protocol/v4",
+        "commit_id": "735b75301d82fd5b4c747dcd2cb4ec98cc1540fa",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-07-12",
+        "project_path": "contracts/squads_v4_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect Reallocation Size",
+            "description": "The vulnerability arises when adding members to a multi-signature account that requires reallocation of account space. The function `realloc_if_needed` attempts to reallocate space for ten additional members, but in cases where `config_transaction_execute` adds more than ten members at once, this fixed increment may be insufficient. The root cause is the use of a fixed reallocation size without considering the actual number of members being added. An attacker could exploit this by triggering a large batch addition of members when the account is near capacity, causing a reallocation failure. This would prevent further member additions or configuration changes, leading to a denial of service for account management functions.\n",
+            "severity": "low",
+            "files": [
+                "programs/multisig/src/state/multisig.rs"
+            ],
+            "location": [
+                "multisig_add_member",
+                "config_transaction_execute",
+                "Multisig.realloc_if_needed"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ],
+                "4": [
+                    "CWE-1188"
+                ],
+                "5": [
+                    "CWE-453"
+                ]
+            },
+            "title": "Blocked Transaction Addition",
+            "description": "When creating a batch transaction, the associated proposal can be initialized in either Draft or Active state. The validation in `BatchAddTransaction::validate` only allows transaction additions if the proposal is in Draft state. However, a malicious actor with proposal creation privileges can set the proposal to Active state upon creation, thereby permanently blocking any transaction from being added to the batch. The root cause is the lack of enforcement that the proposal must be created in Draft state for a new batch. This allows an attacker to render a batch unusable before any transactions are added, resulting in a denial of service for batch execution workflows.\n",
+            "severity": "low",
+            "files": [
+                "programs/multisig/src/instructions/batch_add_transaction.rs"
+            ],
+            "location": [
+                "proposal_create",
+                "BatchAddTransaction.validate#proposal.status"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Lack Of Member Checks",
+            "description": "The `config_transaction_execute` instruction allows the creation of a SpendingLimit account without validating the member list. Specifically, it does not check whether the member list is empty or contains duplicate entries. The root cause is the absence of input validation during SpendingLimit initialization. An attacker could create a SpendingLimit with no members, rendering it useless, or with duplicate members, potentially skewing permission logic or causing unexpected behavior during enforcement. While this does not lead to immediate fund loss, it introduces state inconsistencies and could interfere with correct spending limit enforcement in the future.\n",
+            "severity": "informational",
+            "files": [
+                "programs/multisig/src/instructions/config_transaction_execute.rs"
+            ],
+            "location": [
+                "config_transaction_execute",
+                "SpendingLimit.invariant"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing Permission Range Check",
+            "description": "The multi-signature system uses a u8 bitmask to store member permissions, with only the lower 3 bits used for Initiate, Vote, and Execute permissions. However, no validation is performed to ensure that higher bits are not set when adding or creating members. The root cause is the lack of a permission range check during member initialization. An attacker could craft a member with invalid permission bits set, potentially leading to undefined behavior or future vulnerabilities if those bits are misinterpreted. This could compromise the integrity of the permission system and lead to unauthorized actions if the code is extended in the future.\n",
+            "severity": "informational",
+            "files": [
+                "programs/multisig/src/state/multisig.rs"
+            ],
+            "location": [
+                "multisig_create",
+                "add_member",
+                "Multisig"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-501"
+                ]
+            },
+            "title": "Unnecessary Writability",
+            "description": "The `to_instruction_and_accounts` function determines account writability solely based on the `is_writable` flag of `AccountInfo`, without validating whether read-only accounts are incorrectly marked as writable. The root cause is the lack of a check against `loaded_writable_accounts` in `new_validated`. This can result in accounts that should be read-only being marked as writable in the generated `AccountMeta`, forcing the Sealevel runtime to process transactions serially instead of in parallel. This reduces transaction throughput and efficiency, degrading overall system performance and scalability.\n",
+            "severity": "informational",
+            "files": [
+                "programs/multisig/src/utils/executable_transaction_message.rs"
+            ],
+            "location": [
+                "to_instruction_and_accounts",
+                "AccountMeta.new"
+            ]
+        }
+    ]
+}

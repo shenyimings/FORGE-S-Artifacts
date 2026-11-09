@@ -1,0 +1,76 @@
+{
+    "path": "reports/solana_attestation_service_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/solana-foundation/solana-attestation-service",
+        "commit_id": "dda0ab2",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-04-30",
+        "project_path": "contracts/solana_attestation_service_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ]
+            },
+            "title": "Re-utilization of Attestation Account",
+            "description": "The vulnerability arises when a closed attestation account is re-utilized with the same nonce and account. In this scenario, the verify_system_account check in process_create_attestation fails because the expected token account cannot be initialized, as it already exists. The root cause is the assumption that the token account does not exist during re-initialization, without proper handling for cases where it has been previously created and closed. An attacker could exploit this by closing and reusing an attestation account with the same parameters, causing the instruction to fail unexpectedly. The impact is a denial of service for legitimate users attempting to reuse such accounts, disrupting normal functionality.\n",
+            "severity": "high",
+            "files": [
+                "program/src/processor/create_tokenized_attestation.rs"
+            ],
+            "location": [
+                "process_create_attestation"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Failure to Check Pause Status of Schemas",
+            "description": "The create_attestation instruction does not verify whether the associated schema's is_paused flag is set to true before proceeding with attestation creation. This omission stems from missing conditional logic to enforce schema state validation. As a result, attackers or malicious actors can create attestations even when the schema has been explicitly paused, bypassing intended governance controls. This undermines the purpose of the pause mechanism, allowing unauthorized attestations to be issued despite administrative disablement of the schema. The impact includes potential abuse of disabled schemas and loss of control over attestation issuance.\n",
+            "severity": "high",
+            "files": [
+                "program/src/processor/create_attestation.rs"
+            ],
+            "location": [
+                "create_attestation"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Inadequate Rent Funding on Increased Account Size",
+            "description": "The instructions change_authorized_signers and change_schema_description modify account data by reallocating the account to a larger size without ensuring sufficient lamports are added to maintain rent-exemption. In Solana, increasing an account's size increases its rent requirement, and failure to top up lamports accordingly results in the account becoming non-rent-exempt. This leads to runtime errors such as InsufficientFundsForRent during execution. The root cause is the absence of a rent recalculation and top-up step after reallocating the account. Attackers can trigger this vulnerability by increasing the number of authorized signers or extending the schema description, forcing account reallocation and causing program failure. The impact is a denial of service due to transaction failures when valid operations are attempted.\n",
+            "severity": "medium",
+            "files": [
+                "program/src/processor/change_authorized_signers.rs",
+                "program/src/processor/change_schema_description.rs"
+            ],
+            "location": [
+                "change_authorized_signers",
+                "change_schema_description"
+            ]
+        }
+    ]
+}

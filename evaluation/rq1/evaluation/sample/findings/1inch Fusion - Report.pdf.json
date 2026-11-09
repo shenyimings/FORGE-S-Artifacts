@@ -1,0 +1,166 @@
+{
+    "path": "reports/1inch Fusion - Report.pdf",
+    "project_info": {
+        "url": "https://github.com/1inch/solana-fusion",
+        "commit_id": "0c368487fd2c4383a8f080c6f38a67fb9de98183",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-02-28",
+        "project_path": "contracts/1inch Fusion - Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Consider Paying Fees in the Native Sol Token when the native_dst_asset Flag Is Set",
+            "description": "The protocol allows makers to set the native_dst_asset flag during order creation to receive SOL instead of a token. However, the fill() function pays protocol fees in the destination token regardless of this flag, which can cause issues if the maker does not provide a valid destination token account. The root cause is inconsistent handling of payout logic for fees versus user entitlements. An attacker could exploit this by creating an order with native_dst_asset set but without a valid destination token account, potentially disrupting fee collection. The impact includes potential loss of protocol fees or failed transactions due to invalid account usage.\n",
+            "severity": "medium",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "programs/fusion-swap/src/lib.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Potential Bypass of Fees Parameters in Order Creation",
+            "description": "Makers are required to specify protocol and integrator fees along with their associated token accounts during order creation. However, the program does not enforce strict validation of these parameters, allowing a maker to omit or misconfigure fee accounts and thus avoid paying fees. The root cause is the lack of on-chain enforcement of fee configurations. A malicious maker could bypass UI-level checks by directly interacting with the program and create orders with missing or incorrect fee accounts, leading to unintended fee avoidance. The impact is potential loss of revenue for the protocol and integrators, especially if resolvers inadvertently fill such orders.\n",
+            "severity": "medium",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "programs/fusion-swap/src/lib.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Potential Surplus Fee Bypass via Inflated estimated_dst_amount in get_fee_amounts()",
+            "description": "The get_fee_amounts() function applies surplus fees only if the actual destination amount exceeds the user-supplied estimated_dst_amount. However, a maker can set estimated_dst_amount to an excessively high value relative to min_dst_amount, preventing the surplus fee condition from being met. The root cause is the misuse of estimated_dst_amount as a threshold for surplus fees without bounding it realistically. An attacker could exploit this by inflating estimated_dst_amount to avoid paying surplus fees on positive slippage. The impact is loss of expected surplus fee revenue for the protocol.\n",
+            "severity": "medium",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "programs/fusion-swap/src/lib.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Improper Slippage Handling",
+            "description": "The protocol uses min_dst_amount as the minimum acceptable destination amount for the maker, but fees are deducted after calculating the destination amount based on exchange rates. If the total fees exceed the Dutch auction bump, the final amount received by the maker may fall below min_dst_amount. The root cause is the order of operations: applying fees after rate calculation without ensuring the final amount respects the slippage floor. An attacker (or unlucky maker) could end up receiving less than the guaranteed minimum, breaking the expected slippage protection. The impact is violation of user expectations and potential loss of trust or funds.\n",
+            "severity": "low",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "programs/fusion-swap/src/lib.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Consider Validating the authority of the taker_src_ata Account",
+            "description": "The protocol does not validate that the taker_src_ata account is owned by the taker or an authorized entity. This allows a taker to specify any token account as the source, which could lead to fund loss if an incorrect account is used. The root cause is missing ownership checks on user-provided accounts. A taker could accidentally or intentionally provide a wrong ATA, leading to tokens being transferred from an unintended account. The impact is potential loss of funds due to misrouted transfers, especially in automated or complex resolver setups.\n",
+            "severity": "low",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "programs/fusion-swap/src/lib.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Lack of Monotonicity Enforcement in Dutch Auction Rate Bumps",
+            "description": "The Dutch auction mechanism is intended to have declining price rates over time, but the calculate_rate_bump() function does not enforce that rate bumps are in strictly decreasing order. The root cause is missing input validation for the sequence of rate adjustments. A user could supply non-monotonic rate bumps (e.g., increasing prices), which contradicts the documented Dutch auction behavior. The impact is deviation from expected auction dynamics, potentially leading to unfair trades or manipulation of price curves.\n",
+            "severity": "informational",
+            "files": [
+                "programs/fusion-swap/src/dutch_auction.rs"
+            ],
+            "location": [
+                "programs/fusion-swap/src/dutch_auction.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing Input Validation",
+            "description": "The program accepts user-supplied fee values (protocol and integrator fees) and Dutch auction rate bumps without enforcing bounds. Unlike the surplus fee, which is capped, these values are not validated against reasonable limits (e.g., <= BASE_1E5). The root cause is insufficient input sanitization. An attacker could provide extremely high fee values or rate bumps, potentially leading to arithmetic overflows or unexpected behavior in fee calculations or auction pricing. The impact includes potential protocol instability, incorrect fee deductions, or manipulation of auction outcomes.\n",
+            "severity": "informational",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "programs/fusion-swap/src/lib.rs"
+            ]
+        }
+    ]
+}

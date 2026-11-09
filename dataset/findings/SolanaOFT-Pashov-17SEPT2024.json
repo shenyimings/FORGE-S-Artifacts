@@ -1,0 +1,261 @@
+{
+    "path": "reports-without-source/SolanaOFT-Pashov-17SEPT2024.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/LayerZero-Labs/monorepo"
+        ],
+        "commit_id": [
+            "aa003678c6e6fac40a503bb81113620aefce9dd6"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-09-12",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Mint decimal manipulation",
+            "description": "The ld2sd_rate (local-to-shared decimal rate) can be manipulated by the initializer through exploitation of the MintCloseAuthority extension in the Solana program. This vulnerability arises because the initializer controls the mint's decimal value, which can be changed after creation by closing and reinitializing the mint at the same address with fewer decimals. The root cause is the lack of validation during initialization to ensure the MintCloseAuthority is disabled or set to None. An attacker could exploit this by first initializing a mint with high decimals (e.g., 18), using it to set a high ld2sd_rate, then closing and recreating the mint with lower decimals (e.g., 6), causing the rate to become inflated. This leads to incorrect token accounting, where legitimate transfers may be treated as dust and discarded, or cross-chain transfers can be manipulated to receive more tokens than intended due to rate discrepancies. The impact includes potential financial loss, incorrect cross-chain messaging, and arbitrage-like attacks that undermine the integrity of the token bridge.\n",
+            "severity": "medium",
+            "location": [
+                "init_oft.rs::InitOFT#apply",
+                "oft/src/instructions/init_oft.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack of message size validation in OFT encoding",
+            "description": "The OFT implementation lacks explicit size checks for the compose_msg parameter in its encoding functions, which could lead to the creation of oversized messages. This issue occurs in the msg_codec.rs and compose_msg_codec.rs files, where the encoded message size is calculated based on the input message length without any upper bound validation. The root cause is the absence of input validation for message size, which is a critical oversight in a cross-chain messaging protocol. An attacker could exploit this by crafting extremely large messages that exceed typical transaction size limits on Solana or downstream chains, potentially causing transaction failures, increased gas costs, or denial-of-service conditions. The impact includes degraded system performance, failed cross-chain messages, and possible disruption of normal protocol operations due to resource exhaustion.\n",
+            "severity": "low",
+            "location": [
+                "oft/src/msg_codec.rs",
+                "oft/src/compose_msg_codec.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Inconsistent compose_msg implementation",
+            "description": "There are two different implementations of the compose_msg function in msg_codec.rs and compose_msg_codec.rs that handle short input messages inconsistently. The version in msg_codec.rs returns an Option<Vec<u8>>, allowing proper error handling when the message is too short, while the one in compose_msg_codec.rs returns an empty Vec instead, which can lead to silent failures. The root cause is the lack of standardization across utility functions handling the same type of data. Although the main logic uses the safer version, the existence of the inconsistent implementation introduces risk if future code changes inadvertently use the unsafe version. An attacker could potentially trigger unexpected behavior by sending malformed or truncated messages that are mishandled by the unsafe implementation. The impact is relatively low but includes potential logic errors, silent data loss, or incorrect message processing in edge cases, especially if the unsafe version is used in future extensions.\n",
+            "severity": "low",
+            "location": [
+                "oft/src/msg_codec.rs#40",
+                "oft/src/compose_msg_codec.rs#45"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "Lack of flexible account sizing and data reallocation for future upgrades",
+            "description": "The protocol uses hardcoded account sizes without provisions for future expansion, making upgrades difficult. For example, the init_oft function initializes accounts with a fixed space based on INIT_SPACE, without any padding for future fields. The root cause is the lack of forward-compatible design in account initialization. This could be exploited indirectly by attackers who force the protocol into a state where migration becomes impossible or extremely costly, especially if new features require larger account storage. Even without malicious intent, this limitation complicates protocol evolution and increases technical debt. The impact includes inability to upgrade account structures without complex migrations, potential downtime during upgrades, and increased risk of bugs during reallocation processes. Future upgrades may require freezing the protocol or implementing complex workarounds.\n",
+            "severity": "low",
+            "location": [
+                "init_oft.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Lack of validation for peer address",
+            "description": "The send function uses the peer_address directly from the peer configuration without verifying its correspondence to the destination endpoint ID (dst_eid). Although the peer account is loaded based on dst_eid, there is no explicit check to confirm that the stored peer_address is correct for that endpoint. The root cause is insufficient input validation in cross-chain message routing. An attacker could exploit this if they can manipulate the peer configuration (e.g., through a compromised admin key) to point to a malicious address, enabling theft of received tokens. Even without active exploitation, this creates a single point of failure in the trust model. The impact includes potential loss of funds during cross-chain transfers if the peer address is tampered with, undermining the security guarantees of the messaging layer.\n",
+            "severity": "low",
+            "location": [
+                "oft/src/instructions/send.rs#129"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack of minimum threshold check on fee withdrawal",
+            "description": "The withdraw_fee function lacks a minimum threshold check, allowing withdrawals of very small or zero-value amounts after fees. While it checks that the withdrawal does not exceed available balance, it does not enforce a minimum amount. The root cause is incomplete validation logic in the fee withdrawal mechanism. This could be exploited by automated bots or malicious actors who repeatedly withdraw negligible amounts, potentially leading to economic denial-of-service through excessive transaction spam or draining of dust balances in a way that wastes gas. In automated systems, this could also trigger unnecessary transactions with no economic benefit. The impact includes inefficient use of blockchain resources, increased operational costs, and potential abuse vectors in fee collection systems.\n",
+            "severity": "low",
+            "location": [
+                "oft/src/instructions/withdraw_fee.rs#36"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-405"
+                ],
+                "4": [
+                    "CWE-407"
+                ]
+            },
+            "title": "Rate Limiter vulnerability to large transaction dominance",
+            "description": "The rate limiter operates on a first-come, first-served basis without considering transaction size, making it vulnerable to domination by large transactions. The try_consume function in peer_config.rs subtracts the full amount from the token bucket without rate shaping or fairness controls. The root cause is the simplistic token bucket design that doesn't account for transaction size distribution. An attacker could exploit this by submitting large transactions that consume most or all of the rate limit, preventing smaller transactions from being processed. Due to Solana's high throughput, this can happen rapidly, leading to effective denial-of-service for regular users. The impact includes unfair resource allocation, degraded user experience for small transactions, and potential centralization of bridge usage by large actors who can monopolize bandwidth.\n",
+            "severity": "low",
+            "location": [
+                "oft/src/state/peer_config.rs#52",
+                "oft/src/instructions/send.rs#68"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-636"
+                ]
+            },
+            "title": "Critical OFT settings vulnerable to Solana restarts",
+            "description": "Critical settings in the OFTStore structure, such as paused and default_fee_bps, can revert to previous states during Solana chain restarts. Because Solana can revert state to a prior slot, these fields may roll back to outdated values, potentially reactivating a paused system or restoring old fee configurations. The root cause is the lack of protection against state rollback in critical configuration fields. An attacker could exploit network conditions or wait for a restart event to benefit from outdated settings—for example, if the system was paused due to an ongoing attack, a rollback could reactivate it prematurely. The impact includes potential re-exploitation of already mitigated vulnerabilities, incorrect fee calculations leading to financial loss, and loss of control over system state during critical periods.\n",
+            "severity": "low",
+            "location": [
+                "OFTStore::paused",
+                "OFTStore::default_fee_bps"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "DOS risk due to frozen token_escrow",
+            "description": "The init_oft instruction allows initialization with a token_mint that has a freeze_authority, which can lead to a denial-of-service if the token_escrow account is frozen. The root cause is the lack of validation during initialization to check for the presence of a freeze authority on the mint. If the freeze authority freezes the token_escrow, all fee transfers to it will revert, rendering the send function unusable. This could be exploited by a malicious token issuer or compromised authority freezing the account to disrupt protocol operations. The impact is a complete halt of cross-chain transfers for that token, as fee collection is essential to message processing. Even legitimate tokens like USDC have freeze authorities, so this represents a systemic risk unless properly managed.\n",
+            "severity": "low",
+            "location": [
+                "init_oft.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Unlimited decimals of local token mints",
+            "description": "The init_oft function only checks that token_mint.decimals >= params.shared_decimals but does not cap the maximum decimals, which can lead to overflow in sd2ld calculations. The ld2sd_rate is calculated as 10^(local_decimals - shared_decimals), and when used in sd2ld via unchecked multiplication, it can cause arithmetic overflow for large decimal differences. The root cause is missing bounds checking on decimal values despite using u64 for amounts. An attacker could exploit this by initializing a token with high decimals (e.g., 18) and sending amounts that, when converted, exceed u64 limits, causing transaction reverts. While the overflow reverts execution, it can still be used for denial-of-service. The impact includes potential disruption of token transfers, wasted gas, and instability in cross-chain messaging for high-decimal tokens.\n",
+            "severity": "low",
+            "location": [
+                "init_oft.rs::apply",
+                "OFTStore::sd2ld"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Multiple native OFTs can be created for the same token mint",
+            "description": "The protocol allows only one native OFT per token mint, but this rule is not enforced in code. The oft_store PDA uses token_escrow in its seed, allowing multiple native OFTs for the same mint by creating different escrow accounts. The root cause is incorrect PDA seeding logic that doesn't distinguish between native and adapter OFTs at the account derivation level. An attacker could exploit this to create multiple native OFTs, breaking the protocol's design assumptions and leading to inconsistent state across chains. This could result in double-minting, conflicting token balances, or routing errors in cross-chain messages. The impact includes violation of token supply invariants, potential for fund loss, and corruption of cross-chain consistency guarantees.\n",
+            "severity": "low",
+            "location": [
+                "init_oft.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Users can avoid paying fees",
+            "description": "The send function incorrectly applies the remove_dust function to fee calculations, allowing users to reduce their fees to zero by sending amounts that align with the dust removal threshold. The fee is calculated as oft_store.remove_dust(calculate_fee(...)), but since fees are paid in local tokens, dust removal is unnecessary and harmful. The root cause is the misuse of dust removal logic, which should only apply to cross-chain amount conversions, not local fee payments. An attacker can exploit this by carefully choosing transfer amounts (e.g., 19,999,999 with ld2sd_rate=1e6) so that the resulting fee is entirely removed as dust. The impact is significant revenue loss for the protocol, as users can bypass the fee system entirely while still using the bridge, undermining the economic sustainability of the service.\n",
+            "severity": "low",
+            "location": [
+                "send.rs"
+            ],
+            "files": []
+        }
+    ]
+}

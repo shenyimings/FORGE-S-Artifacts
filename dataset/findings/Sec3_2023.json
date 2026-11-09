@@ -1,0 +1,306 @@
+{
+    "path": "reports/Sec3_2023.pdf",
+    "project_info": {
+        "url": "https://github.com/marinade-finance/liquid-staking-program",
+        "commit_id": "4b5a6c60016ddefd1126755253f5269b557221bd",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-10-25",
+        "project_path": "contracts/Sec3_2023.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ]
+            },
+            "title": "split_stake_account rent not returned in some cases",
+            "description": "The vulnerability arises because the rent fee for the split_stake_account is not returned to the payer in certain cases where the account is initialized but not used in crank instructions. The root cause is the lack of rent refund logic when early returns occur (e.g., when a validator has already reached its unstake target or when a double delta stake is detected). An attacker could exploit this by repeatedly triggering these early-return paths, causing the bot or user (rent payer) to lose rent fees with each call. This could lead to a denial-of-service (DoS) condition by draining the bot's balance over time.\n",
+            "severity": "low",
+            "location": [
+                "crank/deactivate_stake.rs#63-68",
+                "crank/deactivate_stake.rs#150-159",
+                "crank/deactivate_stake.rs#216-228",
+                "partial_unstake.rs#140-149"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/crank/deactivate_stake.rs",
+                "programs/marinade-finance/src/instructions/management/partial_unstake.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "min_stake and slots_for_stake_delta validation in initialization",
+            "description": "The vulnerability lies in the lack of validation for min_stake and slots_for_stake_delta parameters during the program's initialization. These values are directly assigned to the state without checks, unlike in the config_marinade instruction which includes proper range validation. The root cause is inconsistent validation logic between initialization and reconfiguration. An attacker or misconfigured deployment could set these values to unsafe levels (e.g., too low min_stake or update window), potentially disrupting staking operations or enabling economic attacks. The impact includes potential protocol instability or degraded security posture due to improperly configured parameters.\n",
+            "severity": "low",
+            "location": [
+                "admin/initialize.rs#112-175",
+                "admin/config_marinade.rs#71-102"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/admin/initialize.rs",
+                "programs/marinade-finance/src/instructions/admin/config_marinade.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Add validator without approval",
+            "description": "The deposit_stake_account instruction allows adding new validators without requiring approval from the manager_authority when auto_add_validator_enabled is set. The root cause is insufficient access control in the validator addition logic. A malicious user could repeatedly add validators until the validator list is full, potentially leading to a denial-of-service condition by blocking legitimate validator additions. This undermines the intended governance model where validator additions should be controlled or approved by the manager authority.\n",
+            "severity": "low",
+            "location": [
+                "user/deposit_stake_account.rs#90",
+                "user/deposit_stake_account.rs#149-153"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/user/deposit_stake_account.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ]
+            },
+            "title": "duplication_flag account is not properly closed",
+            "description": "The duplication_flag account is not properly closed because its lamports are transferred out but the account ownership is not reassigned to the system program, which is required for full closure. The root cause is incomplete account cleanup logic in the remove_validator instruction. While the lamports are moved to the operational_sol_account, the account remains alive because its owner is unchanged. This could lead to wasted storage and prevent the account from being fully reclaimed by the system, though the immediate security impact is low.\n",
+            "severity": "low",
+            "location": [
+                "management/remove_validator.rs#72-77"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/management/remove_validator.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Small rounding error in deposit",
+            "description": "A small rounding error occurs in the deposit instruction where the calculation of msol_to_mint does not account for the exact amount of msol swapped. The root cause is using sol_deposited to calculate msol_to_mint instead of using the more precise difference between user_msol_buy_order and msol_swapped. This can lead to slight inaccuracies in mSOL minting, potentially causing minor economic imbalances or user fund discrepancies. While the impact is minimal due to the small scale of the error, it represents a precision issue in the core liquidity mechanism.\n",
+            "severity": "low",
+            "location": [
+                "user/deposit.rs#120-142",
+                "user/deposit.rs#181-191"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/user/deposit.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Conflicts between code and comments in deposit_stake_account",
+            "description": "There is a discrepancy between the comment and the actual code in the deposit_stake_account instruction. The comment states that the stake must be active since current_epoch + WAIT_EPOCHS, but the code checks that the current epoch is greater than or equal to activation_epoch + WAIT_EPOCHS. The root cause is outdated or incorrect commenting. This can mislead developers and auditors about the actual validation logic, potentially leading to incorrect assumptions about stake activation requirements. While the code itself is correct, the misleading comment constitutes a documentation vulnerability.\n",
+            "severity": "informational",
+            "location": [
+                "user/deposit_stake_account.rs#116-121"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/user/deposit_stake_account.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant validator update in stake_reserve",
+            "description": "The validator.last_stake_delta_epoch is redundantly updated in the stake_reserve instruction. The root cause is duplicate assignment of the same field: once in the conditional block (lines 169) and again after the conditional (line 278). This redundant update is unnecessary and could lead to confusion or potential bugs if the logic diverges in the future. While it does not currently affect functionality, it represents poor coding practice and increases maintenance risk.\n",
+            "severity": "informational",
+            "location": [
+                "crank/stake_reserve.rs#154-170",
+                "crank/stake_reserve.rs#277-285"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/crank/stake_reserve.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Inconsistent comments/implementations in remove_liquidity",
+            "description": "In the remove_liquidity instruction, the code does not return an error when lp_mint.supply exceeds liq_pool.lp_supply, despite a comment indicating that an error should be returned. The root cause is incomplete error handling implementation. This inconsistency could allow unauthorized LP token minting to go undetected, unlike in add_liquidity which properly enforces this check. The impact is reduced security assurance and potential for undetected token supply inflation.\n",
+            "severity": "informational",
+            "location": [
+                "liq_pool/remove_liquidity.rs#83-86"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/liq_pool/remove_liquidity.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "MIN_UPDATE_WINDOW may be shorter than expected",
+            "description": "The MIN_UPDATE_WINDOW constant is defined as 3000 slots with a comment stating it represents half an hour. However, due to the actual Solana slot time (~420ms), 3000 slots equate to approximately 21 minutes, not 30. The root cause is an inaccurate assumption about slot duration in the code comment. This could mislead operators about the expected update frequency window, potentially affecting operational planning and security assumptions about update timing.\n",
+            "severity": "informational",
+            "location": [
+                "stake_system.rs#53-57"
+            ],
+            "files": [
+                "programs/marinade-finance/src/state/stake_system.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-390"
+                ]
+            },
+            "title": "Execution not terminated when lp_mint.supply > liq_pool.lp_supply",
+            "description": "In the remove_liquidity instruction, when lp_mint.supply exceeds liq_pool.lp_supply, the program only emits a log message instead of terminating execution with an error. The root cause is inconsistent security enforcement compared to add_liquidity, which properly uses require_lte! to prevent such discrepancies. An attacker could exploit this by minting unauthorized LP tokens and then removing liquidity without detection. The impact includes potential token supply inflation and loss of accounting integrity.\n",
+            "severity": "informational",
+            "location": [
+                "liq_pool/remove_liquidity.rs#83-86",
+                "liq_pool/add_liquidity.rs#86-89"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/liq_pool/remove_liquidity.rs",
+                "programs/marinade-finance/src/instructions/liq_pool/add_liquidity.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "The global extra_stake_delta_runs can be maliciously consumed",
+            "description": "The extra_stake_delta_runs counter can be depleted by repeated calls to stake_reserve, even though it is intended as a controlled override mechanism. The root cause is the permissionless nature of the stake_reserve crank combined with global state mutation. A malicious user could consume all extra runs, preventing legitimate use by administrators. While the team assessed this as low risk since it provides no direct benefit to the attacker, it represents a potential denial-of-service vector against administrative operations.\n",
+            "severity": "informational",
+            "location": [
+                "crank/stake_reserve.rs#154-166"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/crank/stake_reserve.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "stake_target may be less than min_stake in stake_reserve",
+            "description": "The calculated stake_target in stake_reserve can be less than min_stake in edge cases where total_stake_delta is itself less than min_stake. The root cause is flawed logic in the stake_target calculation that applies .max(min_stake) before considering the total_stake_delta constraint. This violates the assumption that all stakes should meet the minimum threshold, potentially leading to the creation of uneconomical or invalid stake accounts.\n",
+            "severity": "informational",
+            "location": [
+                "crank/stake_reserve.rs#195-207"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/crank/stake_reserve.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "delayed_unstake_fee and withdraw_stake_account_fee checks",
+            "description": "The delayed_unstake_fee and withdraw_stake_account_fee are initialized to zero despite comments stating they should not be zero to prevent economic attacks. The root cause is missing validation during initialization and configuration. While the team considers this acceptable for deployment flexibility, it creates a window where these critical fees are disabled, potentially exposing the protocol to spam or economic attacks until properly configured.\n",
+            "severity": "informational",
+            "location": [
+                "mod.rs#75-85",
+                "initialize.rs#172-173",
+                "config_marinade.rs#181-195"
+            ],
+            "files": [
+                "programs/marinade-finance/src/instructions/admin/initialize.rs",
+                "programs/marinade-finance/src/instructions/admin/config_marinade.rs"
+            ]
+        }
+    ]
+}

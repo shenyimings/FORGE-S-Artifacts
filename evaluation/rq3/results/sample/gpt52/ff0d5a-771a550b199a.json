@@ -1,0 +1,221 @@
+{
+    "project": "sanctum_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/sanctum_audit_final.pdf.json/programs/s-controller/src/processor/add_lst.rs",
+        "dataset/contracts/sanctum_audit_final.pdf.json/programs/s-controller/src/processor/remove_lst.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.35714285714285715,
+        "recall": 0.625,
+        "f1": 0.45454545454545453
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-1325",
+        "CWE-664",
+        "CWE-770",
+        "CWE-400",
+        "CWE-1287",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-669",
+        "CWE-1325",
+        "CWE-664",
+        "CWE-1229",
+        "CWE-118",
+        "CWE-284",
+        "CWE-770",
+        "CWE-668",
+        "CWE-610",
+        "CWE-703",
+        "CWE-405",
+        "CWE-400",
+        "CWE-789"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Denial Of Service",
+            "description": "1. **Description:** The `add_lst` instruction is vulnerable to a denial-of-service attack due to the creation of unnecessary associated token accounts (ATAs) before validating the main logic.\n2. **Cause:** The function calls `create_ata_invoke` twice for `pool_reserves` and `protocol_fee_accumulator` without first checking if the mint has already been added or if the ATA exists.\n3. **Exploitation:** An attacker can repeatedly invoke `create_ata_invoke` for the same mint before `add_lst` is executed, bloating the blockchain with redundant ATAs and consuming storage.\n4. **Impact:** This leads to increased on-chain storage costs and potential performance degradation, constituting a denial-of-service vector against the protocol’s scalability.\n"
+        },
+        {
+            "title": "Account Type Validation",
+            "description": "1. **Description:** The `add_lst` and `remove_lst` instructions lack proper validation of account types, particularly the token program and fee account.\n2. **Cause:** `add_lst` does not verify whether the token program is `spl-token` or `spl-token-2022`, and `remove_lst` does not confirm that the account being closed is a valid fee account.\n3. **Exploitation:** An attacker could pass an unauthorized token program or a critical state account as the fee account to be closed, leading to protocol malfunction or fund loss.\n4. **Impact:** This could result in the accidental closure of critical accounts or use of incompatible programs, disrupting protocol operations and potentially leading to fund loss.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The two instructions mutate critical protocol state (the on-chain LST registry and its associated token accounts) and move value (rent refunds) but, within this code, there is no explicit authorization check that the caller is an admin/authority for these operations. The verification helpers invoked (`*_verify_account_keys`, `*_verify_account_privileges`) appear to focus on account derivations and signer/writable requirements, not on *who* is permitted to perform the state transition. In `process_remove_lst`, the instruction also closes token accounts and refunds rent to `refund_rent_to`, which is user-supplied via accounts and included in `free_args.resolve()`; if there is no separate admin gate, an attacker can choose themselves as the refund recipient.\n\nAdditionally, `remove_lst` indexes into the list with `lst_state_list[lst_index]`. In Rust this will panic on out-of-bounds and abort the program instead of returning a controlled error, enabling a cheap denial-of-service style failure when the index is inconsistent with the on-chain list state (e.g., concurrent modifications or corrupted account data).\n",
+            "findings": [
+                {
+                    "title": "Unauthorized add/remove of LST entries due to missing explicit admin authorization",
+                    "description": "`process_add_lst` and `process_remove_lst` perform security-critical state changes (extending/removing entries in `lst_state_list`, creating/closing token accounts) but the shown logic does not enforce that the transaction is initiated by a privileged authority (admin/governance key).\n\nThe verification steps (`add_lst_verify_account_privileges`, `remove_lst_verify_account_privileges`, and key-resolution checks) primarily ensure correct accounts and privilege flags (signer/writable), but do not, in this code, restrict *which signer* is allowed to call these instructions. If the interface-level privilege checks do not include an admin signature requirement, any user could:\n- call `add_lst` to add arbitrary LST mints (state pollution / DoS, unexpected registry contents),\n- call `remove_lst` to remove existing LSTs once their balances are zero (protocol configuration tampering).\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Rent refund recipient appears caller-controlled in remove_lst (potential rent theft if not admin-gated)",
+                    "description": "In `process_remove_lst`, both token accounts are closed and their rent is refunded to `accounts.refund_rent_to`:\n- `close_token_account_invoke_signed(... refund_rent_to: accounts.refund_rent_to ...)`\n- followed by `remove_from_list_pda(... refund_rent_to: accounts.refund_rent_to ...)`\n\nIn `verify_remove_lst`, `refund_rent_to` is taken directly from the provided accounts and used to derive `expected` via `RemoveLstFreeArgs { refund_rent_to: *actual.refund_rent_to.key, ... }`. This means the “expected” key will match whatever the caller supplied, so the subsequent `remove_lst_verify_account_keys` check will not constrain the refund destination to a protocol-owned address.\n\nIf `remove_lst` is not strictly restricted to an authorized admin, an attacker can select themselves as `refund_rent_to` and capture rent refunds when removing an LST (once balances are drained to zero by normal protocol operation).\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Out-of-bounds list indexing can panic and abort execution",
+                    "description": "`verify_remove_lst` reads the list and then does `let lst_state = lst_state_list[lst_index];`.\nIf `lst_index` is out of bounds for the deserialized `lst_state_list` length, Rust will panic. On Solana, a panic aborts the program rather than returning a controlled `ProgramError`, which can be used as a cheap way to force instruction failure (DoS against callers/automation), especially if account data is malformed or if there is any mismatch between the index validation and the actual decoded list length.\n\nSafer pattern: `lst_state_list.get(lst_index).ok_or(...) ?` with a dedicated error.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Registry append relies on extend_list_pda behavior; risk of overwriting last entry if no actual extension occurs",
+                    "description": "`process_add_lst` calls `extend_list_pda::<LstState>(...)` and then immediately does:\n- `let list = try_lst_state_list_mut(&mut lst_state_list_data)?;`\n- `let new_entry = list.last_mut().ok_or(...) ?;`\n- `*new_entry = LstState { ... }`\n\nThis assumes `extend_list_pda` always increases the list by exactly one and that `last_mut()` refers to a newly allocated, unused slot. If `extend_list_pda` can return `Ok(())` without actually extending (e.g., at max capacity, or due to an internal no-op), this code would overwrite the previous last valid entry, corrupting the registry.\n\nThis is a lifetime/control issue around the list resource: the code does not re-check that the list length changed or that the new slot is uninitialized before writing.\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.45
+                }
+            ]
+        },
+        {
+            "reasoning": "Review focused on the provided instruction handlers `process_add_lst` and `process_remove_lst` and their local verification helpers. The main risk themes are (1) control-sphere/authority issues around who is allowed to add/remove an LST and who receives rent refunds, (2) denial-of-service vectors via unbounded state growth and panics from unchecked indexing, and (3) potential “externally-controlled reference” risks for CPI program IDs if the upstream account-key verification does not strictly pin them to the canonical SPL/ATA program IDs.\n\nBecause several critical checks are delegated to `*_verify_account_keys`, `*_verify_account_privileges`, and `FreeArgs::resolve()`, any missing constraints in those helpers can directly enable the issues described below. Findings are written as “present if not otherwise guaranteed by the interface verification,” and where possible, tied to concrete unsafe patterns in the visible code (e.g., direct slice indexing).\n",
+            "findings": [
+                {
+                    "title": "Potential missing authorization to add/remove LST configuration (protocol-control exposed to untrusted callers)",
+                    "description": "`process_add_lst` and `process_remove_lst` perform protocol configuration changes (adding/removing an LST entry, creating/closing protocol-owned token accounts, and mutating the LST state list PDA). In the visible code, there is no explicit check that the caller is an admin/governance authority; the only gating shown is:\n- `add_lst_verify_account_privileges(...)` / `remove_lst_verify_account_privileges(...)` (implementation not shown)\n- `verify_not_rebalancing_and_not_disabled(pool_state)` (state gating, not authority)\n\nIf the interface privilege checks do not enforce a strict admin signer, then any signer-funded user could:\n- Add arbitrary new LST mints and sol_value_calculators into the protocol’s global list (changing what the pool accepts/recognizes).\n- Remove an LST entry once its balances are zero (changing protocol behavior and potentially collecting rent refunds; see separate finding).\n\nThis is a control-sphere break: untrusted users would gain control over protocol-owned configuration/state.\n",
+                    "category": "CWE-668",
+                    "severity": "critical",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Rent refund recipient is externally chosen during LST removal (rent lamports can be redirected)",
+                    "description": "In `process_remove_lst`, both token account closures and the list entry removal refund lamports to `accounts.refund_rent_to`, which is derived from user-provided accounts/args:\n\n- `close_token_account_invoke_signed(... refund_rent_to: accounts.refund_rent_to, ...)`\n- `remove_from_list_pda(... refund_rent_to: accounts.refund_rent_to, ...)`\n\nThe verifier builds `RemoveLstFreeArgs { refund_rent_to: *actual.refund_rent_to.key, ... }`, meaning the recipient is not inherently bound to a protocol treasury address in this function.\n\nIf `remove_lst_verify_account_keys/privileges` do not enforce `refund_rent_to` == an authorized treasury (or enforce only an admin can call), then an attacker can call `remove_lst` (when balances/sol_value are zero) and redirect all reclaimed rent from:\n- `protocol_fee_accumulator` ATA\n- `pool_reserves` ATA\n- any lamports freed by shrinking/removing list PDA storage (depending on `remove_from_list_pda` semantics)\n\nThis is an unintended resource transfer to the wrong sphere.\n",
+                    "category": "CWE-669",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Unchecked slice indexing on LST list can panic (DoS) if upstream resolution fails to bound-check",
+                    "description": "In `verify_remove_lst`, the code performs direct indexing:\n\n`let lst_state = lst_state_list[lst_index];`\n\nIn Rust, out-of-bounds indexing will panic, aborting the program rather than returning a controlled `ProgramError`. The comment says “index checked during accounts resolution,” but that check is not visible here and depends on `RemoveLstFreeArgs::resolve()` and/or the interface verification.\n\nIf an attacker can supply an out-of-range `lst_index` that passes earlier checks, they can trigger a panic-based denial-of-service for the transaction (and potentially for any composed transaction flow relying on this instruction’s graceful failure).\n",
+                    "category": "CWE-118",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unbounded growth of lst_state_list PDA via add_lst can lead to resource exhaustion / operational DoS",
+                    "description": "`process_add_lst` always calls:\n- `extend_list_pda::<LstState>(...)`\n- then writes a new `LstState` into `list.last_mut()`\n\nThere is no visible cap on the number of LST entries. If adding LSTs is not strictly admin-gated (or if an admin key is compromised), repeated calls can:\n- Inflate the PDA’s data size and rent footprint.\n- Increase compute costs for any instruction that must iterate/deserialize the list.\n- Potentially push list-dependent instructions over compute or transaction size limits, creating a persistent operational DoS.\n\nEven if the attacker must pay rent as `payer`, the protocol still inherits the long-term state bloat and performance cost.\n",
+                    "category": "CWE-400",
+                    "severity": "high",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Creation of emergent protocol resources (new LST entries/accounts) without visible policy constraints",
+                    "description": "Adding an LST indirectly creates new durable protocol resources:\n- A new `LstState` entry in the global list PDA\n- New ATAs (`pool_reserves` and `protocol_fee_accumulator`) tied to the new mint\n\nIf not strictly policy-controlled (e.g., admin-only, allowlist of mints/calculators), attackers can manufacture new “supported” assets and accounting buckets that the broader protocol may treat as legitimate, violating intended asset onboarding policy. This is especially sensitive if other instructions later rely on the list as an authorization/allowlist.\n",
+                    "category": "CWE-1229",
+                    "severity": "high",
+                    "confidence": 0.55
+                },
+                {
+                    "title": "CPI program IDs may be externally controlled if not pinned by account-key verification",
+                    "description": "Both files pass program accounts from `accounts` into CPIs:\n- `create_ata_invoke(... token_program: accounts.lst_token_program, system_program: ..., ...)`\n- `close_token_account_invoke_signed(... token_program: accounts.lst_token_program, ...)`\n\nIf `add_lst_verify_account_keys` / `remove_lst_verify_account_keys` do not strictly enforce that:\n- `lst_token_program` == the canonical SPL Token program ID\n- `system_program` == system program ID\n(and any ATA program constraints inside `create_ata_invoke`)\n\nthen an attacker could supply a malicious program account to receive the CPI, potentially causing unexpected behavior and violating the intended control sphere of token/account operations.\n",
+                    "category": "CWE-610",
+                    "severity": "high",
+                    "confidence": 0.45
+                }
+            ]
+        },
+        {
+            "reasoning": "The main security-relevant behavior in the provided code is that `process_add_lst` can grow a program-owned “list PDA” via `extend_list_pda::<LstState>(...)` and then writes into the newly appended entry. There is no explicit bound/limit on list growth in this module, and the only anti-spam measure shown is “mint not a duplicate” (by attempting ATA creation), which still allows an attacker to add arbitrarily many distinct mints.\n\nIf `add_lst_verify_account_privileges()` (and/or account resolution) does not strictly restrict `process_add_lst` to an authorized admin, this becomes a practical denial-of-service/storage-bloat vector: an attacker can repeatedly grow the PDA, increasing on-chain state size and causing higher compute and data-IO costs for any instruction that later needs to read/deserialize/scan this list. This is a classic unbounded resource allocation pattern and can also create asymmetric resource consumption where a one-time attacker-funded expansion imposes ongoing costs on other users.\n\nNo issues related to excessive logging, autoboxing/unboxing, missing references to active allocated resources, or wear-leveling/power-management in NVM are evident in the provided snippets.\n",
+            "findings": [
+                {
+                    "title": "Unbounded growth of LST state list PDA (storage allocation without limits)",
+                    "description": "In `process_add_lst`, the contract calls `extend_list_pda::<LstState>(...)` and then writes the new `LstState` into `list.last_mut()`. There is no maximum length/cap check on the number of LSTs that can be added.\n\nThe only shown safeguard is that ATA creation “verifies that the mint is not a duplicate”, but an attacker can still add unbounded *distinct* mints to force continual state growth. This can bloat the program-owned list account and increase rent footprint and data size indefinitely.\n\nImpact depends on access control in `add_lst_verify_account_privileges()`; if adding is not strictly admin-gated, this is a straightforward state-bloat/DoS primitive.\n",
+                    "category": "CWE-770",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Asymmetric compute/data-IO amplification via forced state bloat",
+                    "description": "Because `process_add_lst` can extend the list PDA with new entries, an attacker can create a large on-chain list that subsequent instructions (in this program or others) must read/deserialize/process. This shifts ongoing compute/data-IO costs to all future users interacting with the list, creating asymmetric resource consumption: the attacker pays for expansions once (and possibly relatively cheaply in terms of transaction fees), while others pay increased compute-unit and account-loading costs repeatedly.\n\nThis is especially relevant on Solana where compute units and account data loads are constrained resources; a sufficiently large list can push other instructions toward compute-budget exhaustion and degrade availability.\n\nAs with the previous finding, exploitability depends on whether `add_lst_verify_account_privileges()` strictly restricts who can call `process_add_lst`.\n",
+                    "category": "CWE-405",
+                    "severity": "medium",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code performs dynamic on-chain “memory” growth by extending (reallocating) the `lst_state_list` PDA each time `process_add_lst` is called via `extend_list_pda::<LstState>(...)`. There is no visible upper bound on the number of LSTs that can be added, nor any throttling/rate-limiting, and no explicit maximum list length check before reallocating.\n\nThis creates a resource-exhaustion vector: an actor who can successfully invoke `process_add_lst` repeatedly can force the program to perform a separate allocation (account data realloc) for every new entry, steadily increasing the total memory used by the list account. Over time this can bloat the PDA toward Solana’s account size limits, increase rent requirements, and increase per-instruction compute/serialization costs, potentially leading to denial of service (e.g., future instructions failing due to size/compute limits). This matches CWE-1325 (sequential allocations without properly limiting aggregate memory). Additionally, because the effective allocation size grows with an untrusted, actor-influenced count (number of prior successful additions), the code can be driven into attempting excessively large reallocations that will fail near protocol limits, matching CWE-789.\n\nNo file descriptor/handle allocation patterns exist in Solana BPF that map to CWE-774 in this code.\n",
+            "findings": [
+                {
+                    "title": "Unbounded growth of lst_state_list via repeated extend_list_pda reallocations",
+                    "description": "`process_add_lst` always calls `extend_list_pda::<LstState>` to append a new entry to `lst_state_list`, but there is no explicit maximum list length (cap) enforced before extending. If `process_add_lst` is callable by a broad set of users (or if an authorized role can be abused), an attacker can repeatedly add LSTs and force the program to perform many separate reallocations—one per entry—causing unbounded aggregate account data growth.\n\nImpact:\n- State bloat and rising rent requirements for the `lst_state_list` PDA (payer-funded, but still creates long-term state bloat and operational risk).\n- Increased compute/serialization cost for any instruction that reads/parses the list.\n- Potential denial of service as the account approaches Solana account size limits or compute limits, making further updates or reads fail.\n\nRecommended mitigations:\n- Enforce a hard maximum number of LST entries (e.g., `MAX_LSTS`) before calling `extend_list_pda`.\n- Consider batching growth (allocate in chunks) and/or require governance/admin authorization for adding LSTs if not already guaranteed by `add_lst_verify_account_privileges`.\n",
+                    "category": "CWE-1325",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Actor-influenced realloc size can drive excessive allocation attempts (DoS near size limits)",
+                    "description": "The size of the `lst_state_list` account after `extend_list_pda` implicitly depends on the current list length, which in turn depends on how many times `process_add_lst` has been successfully executed. There is no pre-check to stop growth before nearing Solana account limits (e.g., ~10MB) or to prevent attempts to realloc beyond feasible bounds.\n\nEven if realloc ultimately fails, repeated attempts can be used to:\n- Waste compute units and transaction fees for callers (and potentially for integrators/automation that keep retrying).\n- Push the program into a state where maintenance operations become fragile due to large state size.\n\nRecommended mitigations:\n- Add an explicit precondition that rejects additions when the list is at/near a maximum size.\n- Track and enforce limits at the program/state level (not just relying on realloc failure).\n",
+                    "category": "CWE-789",
+                    "severity": "medium",
+                    "confidence": 0.63
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-669",
+            "CWE-913",
+            "CWE-1229",
+            "CWE-400",
+            "CWE-665",
+            "CWE-410",
+            "CWE-668",
+            "CWE-580",
+            "CWE-221",
+            "CWE-1329",
+            "CWE-662",
+            "CWE-666",
+            "CWE-118",
+            "CWE-404",
+            "CWE-704",
+            "CWE-610",
+            "CWE-496",
+            "CWE-501",
+            "CWE-706",
+            "CWE-673",
+            "CWE-911",
+            "CWE-487",
+            "CWE-922",
+            "CWE-372",
+            "CWE-495"
+        ],
+        [
+            "CWE-1246",
+            "CWE-771",
+            "CWE-779",
+            "CWE-405",
+            "CWE-1235",
+            "CWE-920",
+            "CWE-770"
+        ],
+        [
+            "CWE-774",
+            "CWE-1325",
+            "CWE-789"
+        ]
+    ]
+}

@@ -1,0 +1,146 @@
+{
+    "path": "reports/solana_zktoken_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/solana-labs/solana/tree/master/zk-token-sdk",
+        "commit_id": "9e703f8",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-09-26",
+        "project_path": "contracts/solana_zktoken_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Edge Cases While Transferring With Fees",
+            "description": "This vulnerability involves edge cases in the calculation of `delta_fee` during confidential transfers with fees, where malicious provers can manipulate parameters to create valid proofs that result in the recipient losing funds. The root cause is the lack of validation ensuring that `fee_to_encrypt` does not exceed `transfer_amount`. An attacker can set `fee_to_encrypt` greater than `transfer_amount` while still producing a valid proof, especially in two specific cases: when `transfer_amount` is zero and `fee_to_encrypt` is non-zero, or when `fee_to_encrypt` exceeds `transfer_amount`. As a result, the destination account is forced to cover the excess fee, leading to a loss of funds.\n",
+            "severity": "critical",
+            "files": [
+                "zk-token-sdk/src/instruction/transfer/with_fee.rs"
+            ],
+            "location": [
+                "with_fee.rs#calculate_fee"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing Validation For Fee Amount",
+            "description": "The vulnerability arises from the absence of validation that `maximum_fee` is less than or equal to `transfer_amount` in the `process_set_transfer_fee` function. Although `fee_to_encrypt` is intended to be deducted from the transferred amount, there is no check to prevent `maximum_fee` from being set to a value exceeding `transfer_amount`. A malicious prover can set `fee_to_encrypt` equal to a large `maximum_fee`, which, when processed, causes the destination account to pay more in fees than the amount received, resulting in a net loss of funds. This can be exploited without requiring special privileges, making it a critical issue.\n",
+            "severity": "critical",
+            "files": [
+                "zk-token-sdk/src/instruction/transfer/with_fee.rs"
+            ],
+            "location": [
+                "transfer_fee/processor.rs#process_set_transfer_fee"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Inconsistent Check On Maximum Commitments",
+            "description": "The vulnerability stems from an inconsistency in the validation of the number of commitments during proof generation versus verification. While the proof generation process checks that the number of commitments does not exceed `MAX_COMMITMENTS`, the verifier fails to perform the same check on the `bit_lengths` vector. This allows a dishonest prover to include more commitments than allowed, leading to the verification of commitments outside the original set. The exploitation involves crafting a proof with more than `MAX_COMMITMENTS` entries, which the verifier accepts due to the missing length check, potentially leading to incorrect state validation and security assumptions.\n",
+            "severity": "high",
+            "files": [
+                "zk-token-sdk/src/range_proof/mod.rs"
+            ],
+            "location": [
+                "batched_range_proof/mod.rs#new"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Right Shift Overflow Panic",
+            "description": "This vulnerability occurs in `BatchedRangeProofU128Data::new` and similar functions when handling bit lengths greater than 64, leading to a panic during right shift operations. The root cause is the lack of validation on individual bit lengths in the `bit_lengths` vector, even though the total sum is checked. If a single element exceeds 64 bits, a right shift operation may overflow, causing the program to panic. An attacker can trigger this by submitting a proof with a bit length greater than 64 (e.g., 70), which passes the sum check (e.g., 70+30+28=128) but causes a runtime panic during processing, resulting in a denial of service.\n",
+            "severity": "high",
+            "files": [
+                "zk-token-sdk/src/range_proof/mod.rs"
+            ],
+            "location": [
+                "batched_range_proof_u128.rs#BatchedRangeProofU128Data::new"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Panic On Setting Zero Batch Size",
+            "description": "The vulnerability exists in the `set_compression_batch_size` function, which allows setting the batch size to zero without validation. When `compression_batch_size` is set to zero, the `decode_u32` function attempts to process batches of Ristretto points but encounters an empty batch, leading to a panic. The cause is the absence of a check ensuring the batch size is positive. An attacker can trigger this by setting the batch size to zero, disrupting the discrete logarithm computation and causing a denial of service due to the unhandled edge case.\n",
+            "severity": "medium",
+            "files": [
+                "zk-token-sdk/src/instruction/transfer/with_fee.rs"
+            ],
+            "location": [
+                "handler_update_lending_market.rs#set_compression_batch_size"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack Of Restriction On Seed Length",
+            "description": "The vulnerability arises from the lack of a length restriction on the seed input in the `from_seed` method of `ElGamalSecretKey`. Since the function recursively calls itself without bounds checking, an excessively long seed can lead to a stack overflow or panic. The root cause is the absence of input validation on seed length. An attacker can exploit this by providing a very long seed, causing the system to crash or behave unpredictably, resulting in a denial of service.\n",
+            "severity": "medium",
+            "files": [
+                "zk-token-sdk/src/zk_token_elgamal/mod.rs"
+            ],
+            "location": [
+                "elgamal.rs#ElGamalSecretKey::from_seed"
+            ]
+        }
+    ]
+}

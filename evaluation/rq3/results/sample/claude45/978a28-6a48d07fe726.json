@@ -1,0 +1,136 @@
+{
+    "project": "blocksec_ref_finance_exchange_v1.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_finance_exchange_v1.0_signed.pdf.json/ref-exchange/src/simple_pool.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.125,
+        "recall": 1.0,
+        "f1": 0.2222222222222222
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-1339",
+        "CWE-664",
+        "CWE-190",
+        "CWE-682",
+        "CWE-284",
+        "CWE-193",
+        "CWE-703",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect Admin Fees Calculation in Simple Pool",
+            "description": "In the Simple Pool implementation, the calculation for minting shares to the admin as part of admin fees is mathematically incorrect. The current formula results in the admin receiving fewer shares than intended, leading to lower-than-expected admin fees. The root cause lies in the flawed derivation of the `Minted_Share` formula, which does not properly account for the total fee amount relative to pool value changes. An attacker cannot directly exploit this, but the protocol itself suffers from incorrect fee accounting, which can be consistently triggered during any swap involving the Simple Pool. The impact is a systematic under-collection of admin fees, resulting in financial loss for the protocol and misaligned economic incentives.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the Solana smart contract code, I need to clarify that this is actually a NEAR Protocol smart contract (using near_sdk), not a Solana contract. However, I will proceed with the security analysis based on the provided CWE categories.\n\nThe contract implements a simple AMM (Automated Market Maker) pool similar to Uniswap. After thorough analysis, I've identified several security issues:\n\n1. **CWE-682 (Incorrect Calculation)**: In the `add_liquidity` function, there's a potential rounding issue. The calculation uses `(U256::from(amounts[i] - 1) * U256::from(self.shares_total_supply) / self.amounts[i])` which subtracts 1 from the input amount and later adds 1 to the calculated amount. This could lead to incorrect share calculations, especially with small amounts, potentially allowing users to receive more shares than they should or causing the pool to lose value over time.\n\n2. **CWE-682 (Incorrect Calculation)**: In the `remove_liquidity` function, the calculation `(U256::from(self.amounts[i]) * U256::from(shares) / U256::from(self.shares_total_supply)).as_u128()` uses integer division which always rounds down. This means users might receive slightly less than their fair share, and over time, dust amounts could accumulate in the pool that cannot be withdrawn.\n\n3. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: The `share_transfer` function uses `.expect(ERR13_LP_NOT_REGISTERED)` which will panic if either the sender or receiver is not registered. While this is intentional, it doesn't handle the edge case gracefully and could lead to unexpected contract state if called in a complex transaction flow.\n\n4. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The comment `[AUDIT_13] Never unregister a LP when he removed all his liquidity` indicates that LPs are never fully unregistered even when their balance reaches zero. This could lead to storage bloat over time as the `shares` LookupMap will continue to grow with zero-balance entries that are never cleaned up.\n\n5. **CWE-682 (Incorrect Calculation)**: In the `swap` function, the fee calculation and distribution logic involves multiple divisions that could compound rounding errors. The calculation `(numerator / denominator).as_u128()` for both exchange fees and referral fees uses integer division, which could result in lost precision and fees not being properly distributed.\n\n6. **CWE-697 (Incorrect Comparison)**: In the `internal_get_return` function, the assertion checks `in_balance > U256::zero() && out_balance > U256::zero()` but doesn't check if the balances are sufficient for the swap. While `amount_in > 0` is checked, there's no verification that `out_balance` is greater than the calculated `amount_out`, which could theoretically lead to an underflow in the swap function (though this is caught later).\n\n7. **CWE-284 (Improper Access Control)**: The `share_transfer` function allows any account to transfer shares from any sender to any receiver without verifying that the caller is authorized to perform this transfer. This is a critical vulnerability as it allows unauthorized share transfers.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized Share Transfer Vulnerability",
+                    "description": "The `share_transfer` function does not verify that the caller (predecessor_account_id) is authorized to transfer shares from the sender_id. Any account can call this function to transfer shares from any sender to any receiver, as long as the sender has sufficient balance. This breaks the fundamental security model of token transfers.",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Rounding Error in Liquidity Addition Leading to Incorrect Share Calculation",
+                    "description": "In the `add_liquidity` function, the calculation `U256::from(amounts[i] - 1) * U256::from(self.shares_total_supply) / self.amounts[i]` subtracts 1 before multiplication and adds 1 after division. This asymmetric rounding can lead to users receiving incorrect amounts of shares, potentially allowing exploitation through repeated small deposits or causing loss of value for existing liquidity providers.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Integer Division Rounding in Liquidity Removal",
+                    "description": "The `remove_liquidity` function uses integer division `(U256::from(self.amounts[i]) * U256::from(shares) / U256::from(self.shares_total_supply)).as_u128()` which always rounds down. This means users consistently receive slightly less than their proportional share, and dust amounts accumulate in the pool over time that cannot be withdrawn by any user.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Storage Bloat from Never Unregistering Zero-Balance LPs",
+                    "description": "The contract explicitly never unregisters LPs even when they remove all liquidity (see AUDIT_13 comment). This means the `shares` LookupMap will continuously grow with zero-balance entries, leading to storage bloat and increased storage costs over time. There's no mechanism to clean up these entries.",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Precision Loss in Fee Distribution Calculations",
+                    "description": "In the `swap` function, fee distribution to exchange and referral accounts uses integer division `(numerator / denominator).as_u128()`. This can result in precision loss where small amounts of fees are lost due to rounding, and over many swaps, these lost fees could accumulate to significant amounts that benefit neither LPs nor fee recipients.",
+                    "category": "CWE-682",
+                    "severity": "low",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Inadequate Exception Handling in Share Transfer",
+                    "description": "The `share_transfer` function uses `.expect(ERR13_LP_NOT_REGISTERED)` which causes a panic if either sender or receiver is not registered. While this is intentional validation, it doesn't handle the exceptional condition gracefully and could cause issues in complex transaction flows or cross-contract calls where a more graceful error return would be appropriate.",
+                    "category": "CWE-703",
+                    "severity": "low",
+                    "confidence": 0.75
+                }
+            ]
+        },
+        {
+            "reasoning": "After carefully analyzing the Solana smart contract code (which is actually a NEAR Protocol contract in Rust), I've examined it for the specified CWE categories related to integer operations, precision, and calculation errors.\n\nKey findings:\n\n1. **CWE-190 (Integer Overflow)**: The code has a potential overflow in `mint_shares()` where `self.shares_total_supply.checked_add(shares)` is used with `.expect()`. While this does check for overflow, if an overflow occurs, it will panic with ERR36_SHARES_TOTAL_SUPPLY_OVERFLOW. However, there's a more subtle issue: in `add_liquidity()`, the calculation `self.amounts[i] += amount` is performed without overflow checking. If `self.amounts[i]` is close to u128::MAX, adding `amount` could overflow.\n\n2. **CWE-369 (Divide By Zero)**: In the `internal_get_return()` function, there's a division operation: `amount_with_fee * out_balance / (U256::from(FEE_DIVISOR) * in_balance + amount_with_fee)`. While there are assertions checking that `in_balance > U256::zero()`, the denominator could theoretically be zero if FEE_DIVISOR is 0. However, FEE_DIVISOR appears to be a constant (likely 10000 based on typical implementations), so this is less likely. More critically, in `add_liquidity()`, there's a division by `self.amounts[i]` which could be zero on first liquidity addition, though the code structure prevents this.\n\n3. **CWE-191 (Integer Underflow)**: In `remove_liquidity()`, the line `self.amounts[i] -= amount` performs subtraction without checked arithmetic. If `amount` is somehow greater than `self.amounts[i]`, this would underflow. While the calculation logic should prevent this, there's no explicit check.\n\n4. **CWE-1339 (Insufficient Precision)**: The `add_liquidity()` function uses integer division which can lose precision. Specifically, `U256::from(amounts[i] - 1) * U256::from(self.shares_total_supply) / self.amounts[i]` performs integer division that truncates fractional parts. This could lead to rounding errors that accumulate over time, potentially allowing value extraction through repeated small deposits/withdrawals.\n\n5. **CWE-193 (Off-by-one Error)**: In `add_liquidity()`, the code uses `amounts[i] - 1` in the fair_supply calculation and then adds `+ 1` when calculating the final amount. This appears to be an intentional rounding mechanism, but the asymmetry (subtracting 1 before division, adding 1 after) could lead to off-by-one errors in edge cases, particularly when amounts are very small.\n",
+            "findings": [
+                {
+                    "title": "Unchecked Integer Overflow in Token Amount Addition",
+                    "description": "In the `add_liquidity()` function, the line `self.amounts[i] += amount` performs addition without overflow checking. If `self.amounts[i]` is close to u128::MAX, adding `amount` could cause an integer overflow, wrapping around to a small value and corrupting the pool's token balance tracking.",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unchecked Integer Underflow in Token Amount Subtraction",
+                    "description": "In the `remove_liquidity()` function, the line `self.amounts[i] -= amount` performs subtraction without checked arithmetic. While the calculation logic should prevent `amount` from exceeding `self.amounts[i]`, there's no explicit runtime check. If a logic error or rounding issue causes `amount > self.amounts[i]`, this would underflow, wrapping to a very large value and corrupting pool state.",
+                    "category": "CWE-191",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Precision Loss in Liquidity Share Calculation",
+                    "description": "The `add_liquidity()` function uses integer division when calculating fair_supply: `U256::from(amounts[i] - 1) * U256::from(self.shares_total_supply) / self.amounts[i]`. This truncates fractional parts, leading to precision loss. Over many deposit/withdrawal cycles, these rounding errors could accumulate, potentially allowing sophisticated attackers to extract value through carefully timed small transactions that exploit the rounding behavior.",
+                    "category": "CWE-1339",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Asymmetric Rounding in Liquidity Calculation May Cause Off-by-One Errors",
+                    "description": "In `add_liquidity()`, the code subtracts 1 before division (`amounts[i] - 1`) and adds 1 after division (`+ 1`). This asymmetric rounding mechanism could lead to off-by-one errors in edge cases, particularly when dealing with very small amounts. The subtraction of 1 before division and addition of 1 after creates an imbalance that may not correctly preserve the constant product invariant in all scenarios.",
+                    "category": "CWE-193",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-135",
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-191",
+            "CWE-1339"
+        ]
+    ]
+}

@@ -1,0 +1,336 @@
+{
+    "path": "reports/blocksec_paras_Market_signed_v1.0.pdf",
+    "project_info": {
+        "url": "https://github.com/ParasHQ/paras-marketplace-contract",
+        "commit_id": "faae37b43eb6b98d6265e76bf3611179060a5e18",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-09-24",
+        "project_path": "contracts/blocksec_paras_Market_signed_v1.0.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ],
+                "3": [
+                    "CWE-617"
+                ]
+            },
+            "title": "Denial of User\u2019s Legitimate Request",
+            "description": "The contract panics when adding market data if the `is_auction` flag is set to false and the `ended_at` argument is not provided, due to an assertion on line 1987. This occurs because the code incorrectly enforces an end time for sale markets, which do not require one by design. An attacker could exploit this by crafting a transaction with missing `ended_at` to block legitimate sales. This leads to a denial of service for valid user requests, preventing NFTs from being listed properly.\n",
+            "severity": "low",
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#1987"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "Improper State Rollback",
+            "description": "When a purchase fails, the `market_data` is deleted before the cross-contract call to `nft_transfer_payout()` but is not restored if the call fails. This is because `internal_delete_market_data()` is called unconditionally before the promise, and the callback `resolve_purchase()` does not reinsert the data upon failure. An attacker could trigger a failed transfer (e.g., via invalid approval) to permanently remove a listing. This results in unexpected loss of market data and denial of future legitimate purchases.\n",
+            "severity": "low",
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#467",
+                "lib.rs#533-550"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Improper Market Type Assertion",
+            "description": "The `buy()` function contains an assertion that prevents purchases when `market_data.is_auction` is false, which contradicts the intended behavior for direct sale listings. This misalignment in logic makes non-auction listings unbuyable, effectively locking NFTs in sale. The root cause is an incorrect assertion that assumes all purchases must be auctions. This can be exploited by attempting to buy a sale listing, which will always revert, leading to loss of usability and potential revenue.\n",
+            "severity": "low",
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#436"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Extra Attached NEARs May Be Locked",
+            "description": "When a user attaches more NEAR tokens than the listed price during a purchase, the excess amount is not refunded and remains permanently locked in the contract. This occurs because the contract does not validate or return the difference between `attached_deposit` and `price`. An attacker could exploit this by overpaying to test the behavior, or malicious users could trick others into overpaying. The impact is permanent loss of user funds, reducing trust and economic integrity.\n",
+            "severity": "medium",
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#buy"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-191"
+                ]
+            },
+            "title": "Potential Lost of Users\u2019 Assets Due to Improper Treasury Fee",
+            "description": "The treasury fee is subtracted from the seller's payout without checking for underflow. If the fee exceeds the seller's portion, the subtraction on line 1099 (`amount.0 - treasury_fee`) will cause an arithmetic panic. This occurs in `resolve_purchase()` and `resolve_offer()` when royalty payouts consume most of the price. An attacker could set up a high-fee scenario or manipulate pricing to trigger the underflow, leading to a failed transaction and frozen assets. The impact is loss of user funds and disruption of marketplace operations.\n",
+            "severity": "medium",
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#587",
+                "lib.rs#1099"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Failure of NEAR Transfer without Enough Balance",
+            "description": "The contract initiates NEAR transfers (e.g., in `add_offer()`) without first checking if it has sufficient balance, relying on runtime failure instead of validation. If the contract balance is too low, the transfer promise will fail in the next block, but the state change (e.g., offer deletion) is not reverted. This creates a scenario where users lose funds without receiving the expected NFT or refund. The root cause is missing balance checks using `env::account_balance()`. The impact is irreversible loss of user assets and broken transaction atomicity.\n",
+            "severity": "medium",
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#710"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "Potential Centralization Problem",
+            "description": "The contract owner has unchecked authority to modify critical parameters (e.g., fees, whitelists) and can upgrade or drain the contract via full access keys. This creates a single point of failure and trust, enabling malicious or compromised owners to steal funds or censor users. The lack of multi-sig or DAO governance increases systemic risk. While not an immediate exploit, this design flaw undermines decentralization and can lead to catastrophic loss if abused.\n",
+            "severity": null,
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Potential Unsupported NFT Contracts Problem",
+            "description": "The contract assumes all whitelisted NFTs implement NEP-199 (payouts), but does not validate this. If a non-compliant NFT is whitelisted, `nft_transfer_payout()` calls will fail, breaking purchases. This is due to a missing check during whitelist operations. Attackers could exploit this by requesting inclusion of invalid contracts, causing service disruption. The impact is denial of service for listings involving such NFTs and potential user fund loss.\n",
+            "severity": null,
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#470"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-654"
+                ],
+                "3": [
+                    "CWE-308"
+                ]
+            },
+            "title": "Lack of assert_one_yocto() in Privileged Functions",
+            "description": "Privileged functions like `add_approved_nft_contract_ids()` do not require a 1 yocto NEAR deposit, bypassing two-factor authentication (2FA) protection. This allows unauthorized calls if the function access key is compromised. The root cause is missing `assert_one_yocto()` calls, which are standard for securing admin functions on NEAR. This increases the risk of privilege escalation and unauthorized configuration changes.\n",
+            "severity": null,
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#add_approved_nft_contract_ids",
+                "lib.rs#remove_approved_nft_contract_ids",
+                "lib.rs#add_approved_paras_nft_contract_ids",
+                "lib.rs#add_approved_ft_token_ids"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Precision Loss",
+            "description": "In `add_bid()`, the minimum bid calculation performs division before multiplication (`current_bid.price.0 / 100 * 5`), which truncates fractional amounts due to integer arithmetic. This can result in a lower effective minimum bid than intended, allowing bids that should be rejected. The correct order should be multiplication first to preserve precision. This leads to economic imbalance and potential exploitation in auction bidding logic.\n",
+            "severity": null,
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#1706"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Code Optimization (I)",
+            "description": "The function `internal_add_market_data()` unnecessarily validates `started_at` and `ended_at` for sale markets, even though these fields are only relevant for auctions. This adds redundant computation and gas costs. The issue stems from a lack of conditional checks based on market type. While not exploitable, it reduces efficiency and increases user transaction costs.\n",
+            "severity": null,
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#2022-2028"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-571"
+                ]
+            },
+            "title": "Code Optimization (II)",
+            "description": "The `add_bid()` function re-checks that `started_at` and `ended_at` are not None, even though they are already enforced during market creation. This introduces redundant assertions and gas overhead. The root cause is failure to leverage prior validation. This does not pose a security risk but degrades performance.\n",
+            "severity": null,
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#1654",
+                "lib.rs#1661"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant Code",
+            "description": "The function `internal_delete_trade()` contains null checks for `trade_data`, even though it is already validated in the calling function `delete_trade()`. This redundancy adds unnecessary complexity and gas usage. The code assumes possible invalid state that cannot occur under normal execution flow. This is a code quality issue with minor performance impact.\n",
+            "severity": null,
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Inconsistent Function Prototype Definitions",
+            "description": "The `nft_transfer()` function in the marketplace contract lacks a `memo` parameter, making it incompatible with some NFT contracts that expect it. This inconsistency can cause cross-contract call failures. The issue arises from incomplete interface definition in `external.rs`. This may lead to interoperability issues and failed transfers when integrating with certain NFT standards.\n",
+            "severity": null,
+            "files": [
+                "paras-marketplace-contract/src/external.rs"
+            ],
+            "location": [
+                "external.rs#15"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "Auctions Can Be Canceled Arbitrarily by the Seller",
+            "description": "Sellers can cancel auction listings at any time using `delete_market_data()`, even after an auction has ended but before payout. This allows sellers to avoid selling to the highest bidder, undermining auction fairness. While the project considers this by design, it creates a trust issue where bidders risk their time and gas without guaranteed execution. This can be exploited strategically to manipulate bidding behavior.\n",
+            "severity": null,
+            "files": [
+                "paras-marketplace-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#2181"
+            ]
+        }
+    ]
+}

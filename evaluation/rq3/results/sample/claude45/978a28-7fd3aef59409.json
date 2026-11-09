@@ -1,0 +1,210 @@
+{
+    "project": "blocksec_ref_finance_exchange_v1.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_finance_exchange_v1.0_signed.pdf.json/ref-exchange/src/storage_impl.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.21428571428571427,
+        "recall": 1.0,
+        "f1": 0.35294117647058826
+    },
+    "cwe_ground_truth": [
+        "CWE-404",
+        "CWE-459",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-664",
+        "CWE-697",
+        "CWE-404",
+        "CWE-682",
+        "CWE-772",
+        "CWE-691",
+        "CWE-666",
+        "CWE-668",
+        "CWE-459",
+        "CWE-460",
+        "CWE-703",
+        "CWE-372"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Improper Account Unregistration",
+            "description": "The function `storage_unregister()` allows users to unregister their accounts and reclaim their NEAR deposits, but it fails to verify whether the user's `legacy_tokens` mapping is empty before proceeding with unregistration. This flaw arises because the function does not include a validation check on the `legacy_tokens` field, which is used to track tokens from legacy systems. An attacker or regular user could exploit this by unregistering their account while still holding non-zero `legacy_tokens`, effectively causing those tokens to be permanently lost since there is no mechanism to recover or transfer them post-unregistration. The impact is loss of user funds recorded in `legacy_tokens`, leading to financial damage for affected users.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code (which appears to be NEAR Protocol code, not Solana), I've identified several security issues stemming from the candidate CWE list:\n1. **CWE-682 (Incorrect Calculation)**: In the `storage_deposit` function, when `registration_only` is false and the account is already registered, the function calls `internal_register_account` with the full `amount`. This could lead to incorrect balance calculations if the internal function doesn't properly handle already-registered accounts, potentially allowing users to inflate their storage balance.\n2. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: The `storage_deposit` function has inconsistent validation logic. When `registration_only` is false, there's no check to ensure `amount >= min_balance` for already-registered accounts before calling `internal_register_account`. This could lead to unexpected behavior or state corruption.\n3. **CWE-691 (Insufficient Control Flow Management)**: The control flow in `storage_deposit` has two distinct paths (registration_only true/false) that handle already-registered accounts differently. When `registration_only` is false, the code doesn't check if the account is already registered before calling `internal_register_account`, which could lead to unintended state modifications.\n4. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: In `storage_unregister`, the function removes the account and transfers funds, but the TODO comment indicates incomplete logic for the `force` option. This suggests improper resource lifecycle management, as the function may not properly handle all edge cases for account cleanup.\n5. **CWE-697 (Incorrect Comparison)**: In `storage_deposit`, the condition `if amount < min_balance && !already_registered` only validates minimum balance for new registrations. However, when `registration_only` is false and the account exists, there's no validation that the deposit amount is meaningful or meets any requirements, which could lead to incorrect state updates.",
+            "findings": [
+                {
+                    "title": "Incorrect Balance Calculation for Already-Registered Accounts",
+                    "description": "In the `storage_deposit` function, when `registration_only` is false and an account is already registered, the function calls `internal_register_account(&account_id, amount)` without checking if the account already exists. This could lead to incorrect balance calculations or allow users to manipulate their storage balance by repeatedly depositing, depending on how `internal_register_account` handles existing accounts.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Missing Validation for Non-Registration-Only Deposits",
+                    "description": "The `storage_deposit` function only validates that `amount >= min_balance` when the account is not already registered. When `registration_only` is false and the account exists, there's no validation of the deposit amount before calling `internal_register_account`. This could lead to unexpected behavior or state corruption if invalid amounts are processed.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Inconsistent Control Flow for Account Registration",
+                    "description": "The `storage_deposit` function has two distinct control flow paths based on `registration_only`, but they handle already-registered accounts inconsistently. The registration_only=false path doesn't check if an account is already registered before calling `internal_register_account`, which could lead to unintended state modifications or resource conflicts.",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Incomplete Resource Lifecycle Management in storage_unregister",
+                    "description": "The `storage_unregister` function contains a TODO comment indicating that the `force` option logic is not implemented. The function removes accounts and transfers funds without fully handling all edge cases, which could lead to improper resource cleanup or leave the contract in an inconsistent state.",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient Validation Logic for Deposit Amounts",
+                    "description": "The validation condition `if amount < min_balance && !already_registered` only checks minimum balance requirements for new accounts. For already-registered accounts with `registration_only=false`, no validation is performed on the deposit amount, which could allow meaningless or problematic deposits to be processed.",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided Solana/NEAR smart contract code, I've identified several security issues related to the candidate CWEs:\n1. **CWE-666 (Operation on Resource in Wrong Phase of Lifetime)**: The `storage_deposit` function has a critical flaw where it calls `internal_register_account` with the full `amount` in the non-registration_only path, even if the account is already registered. This means it adds funds to an already-registered account without proper state checking, potentially corrupting the account's storage balance tracking.\n2. **CWE-665 (Improper Initialization)**: In the `storage_deposit` function's registration_only path, when an account is already registered, the function logs an error but still accepts and refunds the deposit. However, in the else branch (non-registration_only), there's no check for `already_registered` before calling `internal_register_account`, which could lead to improper re-initialization of an existing account's storage balance.\n3. **CWE-404 (Improper Resource Shutdown or Release)**: The `storage_unregister` function removes the account and transfers funds, but the comment 'TODO: figure out force option logic' indicates incomplete implementation. The `force` parameter is marked as `#[allow(unused_variables)]`, meaning the function doesn't properly handle forced unregistration scenarios where resources might need different cleanup procedures.\n4. **CWE-372 (Incomplete Internal State Distinction)**: The contract doesn't properly distinguish between the state of a newly registered account versus an existing account being topped up with storage deposits. In the non-registration_only path, `internal_register_account` is called regardless of whether the account already exists, which could lead to state confusion.\n5. **CWE-668 (Exposure of Resource to Wrong Sphere)**: The `storage_deposit` function allows anyone to deposit storage for any account (via the `account_id` parameter). While this might be intentional, it creates a trust boundary issue where external actors can influence another account's storage state, potentially causing unexpected behavior or resource exhaustion for the target account.",
+            "findings": [
+                {
+                    "title": "Improper Account Re-registration in Non-Registration-Only Path",
+                    "description": "The `storage_deposit` function calls `internal_register_account` with the full deposit amount in the non-registration_only path without checking if the account is already registered. This can lead to incorrect storage balance tracking when depositing to an existing account, as the function may re-initialize or incorrectly update the account's state instead of properly adding to existing storage.",
+                    "category": "CWE-666",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Incomplete State Checking Before Account Registration",
+                    "description": "The contract fails to properly distinguish between initializing a new account and adding storage to an existing account in the non-registration_only deposit path. The `already_registered` flag is checked only in the registration_only branch, leading to potential improper initialization when the same function is used for both new registrations and storage top-ups.",
+                    "category": "CWE-665",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Incomplete Resource Cleanup Implementation",
+                    "description": "The `storage_unregister` function contains a TODO comment indicating incomplete implementation of the `force` parameter logic. The force parameter is unused (marked with #[allow(unused_variables)]), meaning the function cannot properly handle scenarios where forced unregistration with different cleanup procedures is required. This could lead to improper resource shutdown in edge cases.",
+                    "category": "CWE-404",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Ambiguous Account State Management",
+                    "description": "The contract does not maintain clear state distinction between newly registered accounts and existing accounts receiving additional storage deposits. The `storage_deposit` function's non-registration_only path treats both cases identically by calling `internal_register_account`, which can cause state confusion and incorrect resource management.",
+                    "category": "CWE-372",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "External Control Over Account Storage Resources",
+                    "description": "The `storage_deposit` function allows any caller to deposit storage funds for any account via the optional `account_id` parameter. This exposes account storage resources to external influence, potentially allowing attackers to manipulate another account's storage state, cause unexpected behavior, or contribute to resource exhaustion scenarios by forcing unwanted storage allocations.",
+                    "category": "CWE-668",
+                    "severity": "medium",
+                    "confidence": 0.75
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided Solana/NEAR smart contract code against the specified CWE candidates, I identified several potential security issues:\n1. **CWE-772 (Missing Release of Resource after Effective Lifetime)**: In the `storage_deposit` function, when `registration_only` is true and the account is already registered, the function returns early after refunding the deposit. However, if the Promise transfer fails, the attached deposit is not properly released back to the user, and there's no mechanism to recover these funds.\n2. **CWE-459 (Incomplete Cleanup)**: In the `storage_unregister` function, when an account is unregistered, the code removes the account from storage and transfers the NEAR amount back. However, there's no verification that the account's state is completely cleaned up. The TODO comment suggests the 'force' option logic is not implemented, which could leave orphaned data or incomplete cleanup scenarios. Additionally, if the Promise transfer fails, the account data is already removed but the funds might not be returned, leaving the system in an inconsistent state.\n3. **CWE-772 (Missing Release of Resource after Effective Lifetime)**: In `storage_withdraw`, if the Promise transfer fails after `internal_storage_withdraw` has already modified the account's storage balance, the withdrawn amount is effectively locked and cannot be recovered by the user. The resource (NEAR tokens) is not properly released back to the available pool.\nThese issues stem from the asynchronous nature of NEAR's Promise-based transfers and the lack of proper error handling or rollback mechanisms when transfers fail.",
+            "findings": [
+                {
+                    "title": "Missing Resource Release on Failed Promise Transfer in storage_deposit",
+                    "description": "In the `storage_deposit` function, when an account is already registered with `registration_only=true`, the attached deposit is refunded via a Promise transfer. If this Promise fails, the deposited NEAR tokens are not released back to the user and become inaccessible. There is no callback mechanism to handle transfer failures or retry logic to ensure the resource is properly returned.",
+                    "category": "CWE-772",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Incomplete Cleanup in storage_unregister Function",
+                    "description": "The `storage_unregister` function removes the account from storage and initiates a Promise transfer to return the deposited NEAR. However, if the Promise transfer fails, the account data is already deleted but the funds are not returned, leaving the system in an inconsistent state. Additionally, the TODO comment indicates the 'force' option logic is not implemented, suggesting incomplete cleanup capabilities. There's no mechanism to verify complete state cleanup or handle partial failure scenarios.",
+                    "category": "CWE-459",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Resource Leak on Failed Transfer in storage_withdraw",
+                    "description": "In the `storage_withdraw` function, the code calls `internal_storage_withdraw` which modifies the account's storage balance, then initiates a Promise transfer. If the Promise transfer fails after the internal state has been modified, the withdrawn NEAR tokens are effectively locked - they're removed from the user's available balance but never transferred. There's no rollback mechanism or callback to handle this failure case, resulting in a permanent resource leak.",
+                    "category": "CWE-772",
+                    "severity": "high",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided Solana/NEAR smart contract code against the specified CWE candidates (CWE-226, CWE-568, CWE-460), I found one significant security issue related to CWE-460 (Improper Cleanup on Thrown Exception). In the `storage_deposit` function, when `registration_only` is false, the code calls `self.internal_register_account(&account_id, amount)` without checking if the account is already registered. If an exception occurs during this operation (for example, if the account already exists and the internal function panics), the attached deposit is not refunded to the user. The state may be left inconsistent, and the user's funds could be locked. This represents improper cleanup on thrown exception. Additionally, in `storage_unregister`, if the assertion `account_deposit.tokens.is_empty()` fails, the function panics without any cleanup, though this is less severe as it's intentional validation. The primary concern is the lack of proper error handling and refund mechanisms when exceptions occur during critical state transitions involving user funds.",
+            "findings": [
+                {
+                    "title": "Improper Cleanup on Exception in storage_deposit Function",
+                    "description": "The `storage_deposit` function does not properly handle exceptions when `registration_only` is false. If `internal_register_account` throws an exception (e.g., due to the account already being registered or other internal errors), the attached deposit is not refunded to the caller. This can lead to user funds being locked in the contract without proper state updates, violating the principle of proper cleanup on thrown exceptions.",
+                    "category": "CWE-460",
+                    "severity": "high",
+                    "confidence": 0.85
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-410",
+            "CWE-487",
+            "CWE-118",
+            "CWE-501",
+            "CWE-911",
+            "CWE-610",
+            "CWE-704",
+            "CWE-400",
+            "CWE-673",
+            "CWE-668",
+            "CWE-404",
+            "CWE-666",
+            "CWE-913",
+            "CWE-1329",
+            "CWE-580",
+            "CWE-662",
+            "CWE-496",
+            "CWE-669",
+            "CWE-372",
+            "CWE-922",
+            "CWE-1229",
+            "CWE-495",
+            "CWE-706",
+            "CWE-665",
+            "CWE-221"
+        ],
+        [
+            "CWE-299",
+            "CWE-763",
+            "CWE-1266",
+            "CWE-772",
+            "CWE-459"
+        ],
+        [
+            "CWE-226",
+            "CWE-568",
+            "CWE-460"
+        ]
+    ]
+}

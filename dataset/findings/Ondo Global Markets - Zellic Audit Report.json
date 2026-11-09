@@ -1,0 +1,87 @@
+{
+    "path": "reports-without-source/Ondo Global Markets - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/ondoprotocol/gm-solana"
+        ],
+        "commit_id": [
+            "77fb5bdd0d192c3e0849ed331d9c2228b5eaa202"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-12-12",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-477"
+                ]
+            },
+            "title": "Use of Deprecated realloc in account closing logic",
+            "description": "The `batch_close_attestation_accounts` instruction uses the deprecated `realloc(0, true)?` method to resize account data to zero during account closure. This approach is no longer recommended and deviates from Anchor's standard account closing practices.\n\nThe root cause is the manual implementation of account closing logic instead of using Anchor's built-in `close` utility, which handles lamport transfers and account cleanup in a standardized and safe manner. Additionally, the lamport transfer logic directly modifies mutable borrows without first snapshotting the destination's lamports, which, while functionally correct in this context, introduces unnecessary risk of borrow checker issues.\n\nAn attacker could potentially exploit edge cases in Rust's RefCell borrowing model if the account closure logic interacts unexpectedly with other borrows in complex instruction flows. However, no direct exploitation path for fund loss or privilege escalation is evident.\n\nThe impact is limited to code maintainability and safety. Using deprecated or non-standard patterns increases the risk of subtle bugs during future modifications or upgrades, especially around memory and ownership handling in Solana programs.\n",
+            "severity": "informational",
+            "location": [
+                "batch_close_attestation_accounts"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Stale Quote Arbitrage",
+            "description": "The protocol accepts off-chain attestations for price and trade execution within a fixed 30-second validity window (MAX_ATTESTATION_EXPIRATION). During periods of high volatility, this window may allow execution against prices that are no longer reflective of current market conditions, creating stale quote risk.\n\nThis behavior arises from the design choice to rely on time-based validity rather than real-time oracle validation for every attestation. While mitigations such as OracleSanityCheck and TokenLimit caps exist, they do not eliminate the risk entirely.\n\nAn attacker could potentially exploit this by submitting trades based on outdated but still valid attestations during rapid market movements, gaining arbitrage opportunities at the protocol's expense.\n\nThe impact includes potential financial loss due to unfavorable execution prices, especially in fast-moving markets. However, the risk is acknowledged and accepted by Ondo Finance Inc. as part of their operational model, and additional off-chain monitoring is used to detect abuse.\n",
+            "severity": "informational",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Malleable Attestation Signatures",
+            "description": "Attestations are signed using secp256k1 ECDSA signatures verified via Solana's secp256k1 sysvar program. However, ECDSA signatures are inherently malleable—meaning two different signatures can validate the same message and public key pair (high-S and low-S forms).\n\nThe Solana secp256k1 program does not enforce signature normalization (e.g., requiring only low-S form), which could lead to signature malleability issues in systems that rely on signature uniqueness.\n\nIn this case, the protocol mitigates the risk by using an \"Attestation ID\" derived as a Program Derived Address (PDA) that is included in the attestation payload. Since the ID is based on the payload and not the signature, it remains unchanged across malleated signatures, preventing replay or duplication attacks.\n\nTherefore, while the malleability exists, it does not result in a vulnerability due to the protocol's idempotency design. The finding is primarily informational, highlighting a common cryptographic nuance that is safely handled here.\n",
+            "severity": "informational",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ],
+                "3": [
+                    "CWE-1110"
+                ]
+            },
+            "title": "Role Documentation",
+            "description": "The program implements a fine-grained Role-Based Access Control (RBAC) system using PDAs and enumerated role types. While this enhances security by limiting privilege scope, the complexity increases administrative burden and the risk of misconfiguration.\n\nThe issue stems from insufficient in-code documentation for role types, making it difficult to understand the intended responsibilities and distinctions between similar roles (e.g., Admin vs Manager roles).\n\nWithout clear documentation, developers may assign inappropriate roles to new functions or misunderstand the implications of role permissions during audits or upgrades.\n\nThe impact is reduced code clarity and maintainability, potentially leading to authorization logic errors in the future. Zellic recommends adding contextual comments to the RoleType enum to improve long-term codebase health.\n",
+            "severity": "informational",
+            "location": [],
+            "files": []
+        }
+    ]
+}

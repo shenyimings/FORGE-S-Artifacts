@@ -1,0 +1,295 @@
+{
+    "path": "reports/zenith-zap-audit-nov-2025.pdf",
+    "project_info": {
+        "url": "https://github.com/MeteoraAg/zap-program",
+        "commit_id": "0ec22498bb28759be13b956a16f6b5652d25eded",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-11-19",
+        "project_path": "contracts/zenith-zap-audit-nov-2025.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Incorrect rounding on get_price_change_bps will lead to slippage not working",
+            "description": "The `get_price_change_bps` function calculates the basis points (BPS) change between pre- and post-swap square root prices but uses floor division, which truncates the result downward. This causes the function to return a lower BPS value than the actual price movement. For example, a true change of 5.9 BPS is rounded down to 5 BPS. The root cause is the use of integer division without ceiling, which fails to accurately reflect small price movements. An attacker or market fluctuation could exploit this by causing a price impact slightly above the user's intended slippage limit, yet still pass the check due to the underestimated BPS. The impact is that users may experience worse execution prices than expected, undermining the slippage protection mechanism, though no direct fund loss occurs.\n",
+            "severity": "medium",
+            "location": [
+                "damm_v2_ultils.get_price_change_bps#492"
+            ],
+            "files": [
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-193"
+                ]
+            },
+            "title": "min_swap_amount and max_swap_amount are off by one in calculate_swap_amount",
+            "description": "The binary search in `calculate_swap_amount` fails to converge when the interval between `min_swap_amount` and `max_swap_amount` is 1, because the update logic sets `min_swap_amount = swap_amount` or `max_swap_amount = swap_amount` without adjusting by ±1. The root cause is incorrect interval narrowing, which can cause the search to loop indefinitely within the same bounds. An attacker could potentially trigger this condition by crafting inputs that result in a 1-unit interval, forcing the loop to run for the full 20 iterations without convergence, leading to unnecessary compute consumption. The impact is inefficient execution and potential transaction failure due to compute limit exhaustion, though the risk is low due to the specific conditions required.\n",
+            "severity": "low",
+            "location": [
+                "damm_v2_ultils.calculate_swap_amount#414-438"
+            ],
+            "files": [
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Zap won't allow for referral",
+            "description": "The Zap program calls the DAMM swap CPI with `referral_token_account: None`, preventing any referral fee distribution even when a referral is intended. The root cause is a hardcoded `None` value in the CPI context, with a TODO comment indicating it was left unimplemented. This design flaw means integrators cannot earn referral fees through the Zap interface, removing a potential incentive for usage. An attacker is not directly relevant here, but malicious actors could exploit the lack of referral support to redirect users to alternative interfaces that do support referrals, capturing fee revenue. The impact is economic disincentive for ecosystem participants and reduced adoption of the Zap program.\n",
+            "severity": "low",
+            "location": [
+                "damm_v2_ultils.swap2#383"
+            ],
+            "files": [
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "calculate_swap_result() should throw an error on zero output amount",
+            "description": "The `calculate_swap_result` function does not validate whether the output amount is zero, allowing a swap with zero output to be considered successful. The root cause is missing input validation for edge cases involving very small input amounts. An attacker could exploit this by initiating a zap with a negligible input amount that results in zero output, causing a meaningless transaction to execute. While the financial impact is minimal due to the tiny input size, it wastes user gas and system resources. The impact includes degraded user experience and inefficient use of compute units, but no direct fund loss.\n",
+            "severity": "low",
+            "location": [
+                "damm_v2_ultils.calculate_swap_result#158-173"
+            ],
+            "files": [
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-636"
+                ]
+            },
+            "title": "calculate_swap_amount() uses the swap_amount_in that fails validate_swap_result",
+            "description": "When `validate_swap_result()` fails, the function breaks the loop and uses the last `swap_amount_in` value, which corresponds to a failed validation. The root cause is improper state handling—instead of reverting to the last valid amount, it retains an invalid one. An attacker could manipulate pool conditions to cause validation failures and force the use of an incorrect swap amount, potentially leading to a failed or suboptimal zap execution. The impact is incorrect swap execution or transaction failure, reducing reliability and user trust, though the risk is mitigated by low likelihood and minimal financial loss.\n",
+            "severity": "low",
+            "location": [
+                "damm_v2_ultils.calculate_swap_amount#439-444"
+            ],
+            "files": [
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Potential overflow for amount_in in calculate_swap_amount",
+            "description": "The `amount_in` calculation in `calculate_swap_amount` uses `max_swap_amount.safe_add(min_swap_amount).safe_div(2)`, which performs addition in `u64`. If both values are large (e.g., near `u64::MAX`), their sum may overflow even if the average fits in `u64`. The root cause is arithmetic performed in an insufficiently sized type. An attacker could exploit this by manipulating pool states to trigger large swap amounts, causing the addition to overflow and the transaction to fail. The impact is denial of service for valid swaps under extreme conditions, though the likelihood is low due to the specific numerical requirements.\n",
+            "severity": "low",
+            "location": [
+                "damm_v2_ultils.calculate_swap_amount#391"
+            ],
+            "files": [
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Usage of zap/ledger with multiple pools simultaneously is impossible",
+            "description": "The `UserLedger` account is seeded only with `USER_LEDGER_PREFIX` and the owner's key, preventing a user from having multiple ledgers for different pools. The root cause is insufficient seed diversity, which enforces a one-to-one mapping between user and ledger. If a user attempts to use the Zap program with multiple pools, the same ledger is reused, leading to balance tracking conflicts and potential inconsistencies. An attacker could exploit this by forcing a user into conflicting zap operations across pools, resulting in incorrect balance updates. The impact is state corruption and potential loss of tracking accuracy, though funds are not directly at risk.\n",
+            "severity": "low",
+            "location": [
+                "ledger_instructions.UserLedger#8-14"
+            ],
+            "files": [
+                "programs/zap/src/state/user_ledger.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Overflow possible in update_ledger_balances",
+            "description": "The `update_ledger_balances` function first adds `post_amount_a` to `amount_a` before subtracting `pre_amount_a`, both using `u64`. If `amount_a` is near `u64::MAX`, the intermediate sum may overflow even if the final result would fit. For example, adding a large `post_amount_a` could exceed `u64::MAX` before subtraction, causing `safe_add` to panic. The root cause is improper arithmetic ordering without sufficient bit-width. An attacker could exploit this by manipulating token balances to trigger overflow during ledger updates, causing transaction failure and potential denial of service. The impact is disruption of zap functionality for users with large balances, though no direct fund loss occurs.\n",
+            "severity": "low",
+            "location": [
+                "user_ledger.update_ledger_balances#17-33"
+            ],
+            "files": [
+                "programs/zap/src/state/user_ledger.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1099"
+                ]
+            },
+            "title": "Typo in ultils folder",
+            "description": "The directory `/programs/zap/src/ultils` contains a typo in its name, intended to be \"utils\". The root cause is a spelling error in the folder name. While this does not introduce a security vulnerability, it affects code readability, maintainability, and developer experience. No exploitation path exists, but it may cause confusion or tooling issues in automated scripts expecting standard naming conventions. The impact is purely informational, relating to code quality and consistency.\n",
+            "severity": "informational",
+            "location": [
+                "ultils#"
+            ],
+            "files": [
+                "programs/zap/src/ultils"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1099"
+                ]
+            },
+            "title": "Typo in damm_v2_ultils",
+            "description": "The file `damm_v2_ultils.rs` contains a typo in its name, where \"ultils\" should be \"utils\". The root cause is inconsistent naming stemming from the parent directory's typo. Like the folder issue, this affects code hygiene but not functionality. There is no security impact or exploit vector. The impact is reduced code clarity and professionalism, warranting correction for consistency.\n",
+            "severity": "informational",
+            "location": [
+                "damm_v2_ultils.rs#"
+            ],
+            "files": [
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Bps Max is defined twice",
+            "description": "The constant `BASIS_POINT_MAX` is defined in both `price_math.rs` and `constants.rs`, duplicating the same value (10,000). The root cause is lack of centralized constant management. This redundancy increases maintenance burden and risk of inconsistency if one value is changed without the other. No direct exploit exists, but future changes could introduce bugs if only one definition is updated. The impact is code quality and maintainability, not security.\n",
+            "severity": "informational",
+            "location": [
+                "price_math.BASIS_POINT_MAX#7",
+                "constants.MAX_BASIS_POINT#33"
+            ],
+            "files": [
+                "programs/zap/src/math/price_math.rs",
+                "programs/zap/src/constants.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "calculate_swap_result() hardcodes has_partner = false but does not verify it",
+            "description": "The `calculate_swap_result` function hardcodes `has_partner = false` when calling `get_fee_on_amount`, without verifying that the pool actually has no partner fees. The root cause is an assumption not validated by runtime checks. If partner fees were enabled, this could lead to incorrect fee calculations, though the audit notes partner fees do not affect user trading fees. No exploit path affects user funds, but it could lead to incorrect internal accounting. The impact is low, primarily a code correctness concern.\n",
+            "severity": "informational",
+            "location": [
+                "damm_v2_ultils.calculate_swap_result#147",
+                "damm_v2_ultils.calculate_swap_result#170"
+            ],
+            "files": [
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "pow() fails to handle the case exp == i32::MIN",
+            "description": "The `pow` function uses `exp.abs() as u32` for negative exponents, but `i32::MIN.abs()` cannot be represented in `i32` and may panic or return `i32::MIN`. The root cause is improper handling of edge-case integer arithmetic. While currently no calls use negative exponents, future changes could trigger undefined behavior. There is no current impact, but it represents a latent bug. The impact is potential runtime panic in future code paths, making it an informational issue for proactive fixing.\n",
+            "severity": "informational",
+            "location": [
+                "price_math.pow#42"
+            ],
+            "files": [
+                "programs/zap/src/math/price_math.rs"
+            ]
+        }
+    ]
+}

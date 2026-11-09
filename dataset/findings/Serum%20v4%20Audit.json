@@ -1,0 +1,292 @@
+{
+    "path": "reports/Serum%20v4%20Audit.pdf",
+    "project_info": {
+        "url": "https://github.com/bonfida/dex-v4",
+        "commit_id": "748aaf9",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-12-31",
+        "project_path": "contracts/Serum%20v4%20Audit.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Accounts are not necessarily rent-exempt",
+            "description": "This vulnerability arises because the agnostic-orderbook's create_market instruction assumes that certain accounts (market, event_queue, bids, asks) are created externally and does not enforce that they are rent-exempt. The root cause is the lack of validation that these accounts hold sufficient lamports to be rent-exempt. An attacker can exploit this by allowing such accounts to be purged due to insufficient rent, then recreating them at the same address in a new malicious market. This leads to duplicate references where order book data from a dummy market can be interpreted as valid trades in the original market, enabling the attacker to extract funds at arbitrarily favorable rates. The impact includes loss of user funds and potential manipulation of market integrity.\n",
+            "severity": "critical",
+            "files": [
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "create_market.create_market#43-57"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Missing ownership checks for vaults",
+            "description": "The vulnerability exists in the dex-v4 program's create_market instruction, which fails to verify that the base_vault and quote_vault accounts are owned by the SPL Token program. The cause is the absence of ownership checks despite validating other properties of the token accounts. An attacker can provide spoofed vault accounts that mimic valid SPL token accounts with the correct token authority (market_signer PDA), initialize the market, then close and re-create the vaults under the SPL Token program's ownership. This allows the attacker to gain control and withdraw funds from the vaults. The impact is direct loss of funds locked in the exchange's vaults due to unauthorized withdrawal.\n",
+            "severity": "high",
+            "files": [
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "Dex.create_market#172-180"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Event queue denial of service",
+            "description": "This issue occurs because the close_account instruction in the Dex program transfers lamports from a user account but does not mark it as closed. The root cause is the failure to reset the account tag, allowing the account to be reused after closure. An attacker can close a user account and immediately submit a new order using the same account in a single transaction. Once the account is purged, any Fill event referencing it becomes unprocessable, causing the consume_events instruction to fail. This results in a stuck event queue, preventing further trade settlements and eventually leading to denial of service when the queue fills up. The impact includes loss of funds for matched trades and complete market dysfunction.\n",
+            "severity": "high",
+            "files": [
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "Dex.consume_events#163-167"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Fee tier spoofing",
+            "description": "The vulnerability is in the new_order instruction of the Dex program, which incorrectly checks that the discount_token_account is owned by the user_owner instead of the SPL Token program. The cause is a flawed ownership validation that confuses account ownership with token authority. An attacker can forge a token account owned by themselves (but with user_owner as token authority) and claim discounted fee tiers without holding actual discount tokens (e.g., SRM or MSRM). This allows them to receive lower fees during trading, undermining the economic model. The impact is financial loss to the protocol through reduced fee revenue and unfair advantage to malicious actors.\n",
+            "severity": "medium",
+            "files": [
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "Dex.new_order#171-177"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Self-trading is broken",
+            "description": "The consume_events instruction in the Dex program contains special handling for self-trade Fill events, but it fails to properly update the maker's free token balance after a trade. While it correctly adjusts the locked balance and applies rebates, it omits increasing the free base or quote token balance. The root cause is incomplete logic in the self-trade branch, which creates a discrepancy compared to normal trade processing. An attacker can exploit this by performing self-trades, resulting in the loss of the received quote or base tokens. The impact is direct loss of funds for users engaging in self-trades, reducing trust in the system's correctness.\n",
+            "severity": "medium",
+            "files": [
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "Dex.consume_events#170-300"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-115"
+                ]
+            },
+            "title": "Account tag collision",
+            "description": "Both the agnostic-orderbook (Aob) and dex-v4 (Dex) programs define an AccountTag enum with overlapping numeric values during serialization. The cause is the lack of namespace isolation or disjoint ranges for enum discriminants across crates. This leads to type confusion where, for example, a Market account in Aob could be misinterpreted as a DexState account in Dex if accessed incorrectly. An attacker could potentially exploit this by crafting accounts that are misinterpreted by the program logic, leading to unauthorized state modifications. The impact includes unexpected behavior, potential state corruption, and possible bypass of access controls.\n",
+            "severity": "medium",
+            "files": [
+                "program/src/state.rs"
+            ],
+            "location": [
+                "Aob.AccountTag#26-32",
+                "Dex.AccountTag#18-23"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Markets cannot be closed",
+            "description": "The close_market instruction in the Dex program attempts to directly transfer lamports from base_vault and quote_vault accounts by setting their lamport balance to zero. The root cause is the incorrect assumption that the program can directly manipulate lamports of accounts it does not own. Since these vaults are owned by the SPL Token program, the Solana runtime rejects such modifications. As a result, the close_market function fails, leaving markets permanently open. The impact is the inability to reclaim rent from market accounts, leading to permanent lamport leakage and denial of resource cleanup.\n",
+            "severity": "low",
+            "files": [
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "Dex.close_market#138-148"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ],
+                "3": [
+                    "CWE-680"
+                ]
+            },
+            "title": "Unchecked arithmetic",
+            "description": "The codebase contains multiple instances of unchecked arithmetic operations, such as in the Dex's initialize_account instruction when calculating buffer size. This can lead to integer overflow, where a large input (e.g., max_orders) causes the calculated space to wrap around to a small value due to overflow, resulting in a buffer that is smaller than expected. The root cause is the use of standard arithmetic without overflow checks. An attacker could exploit this by providing a large max_orders value that triggers an overflow, leading to a discrepancy between the expected and actual buffer size. The impact is unexpected behavior and potential memory safety issues, although no direct fund loss is implied.\n",
+            "severity": "informational",
+            "files": [
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "Dex.initialize_account#109"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Uninitialized account tag is unsafe",
+            "description": "The close_market instruction uses the Uninitialized account tag to mark closed accounts, but this tag serializes to zero, which is also the default value for new accounts. This creates ambiguity between truly uninitialized accounts and closed ones. The root cause is the reuse of the Uninitialized tag for closed accounts. An attacker could potentially reuse a closed account by treating it as uninitialized, leading to state confusion. The impact is potential reinitialization of closed accounts and state corruption.\n",
+            "severity": "informational",
+            "files": [
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "close_market#109",
+                "create_market#115-119"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-115"
+                ]
+            },
+            "title": "Inconsistent account tag serialization",
+            "description": "Account tags are serialized using different sizes: u64 in some cases (MarketState, DexState) and u8 in others (EventQueue, Slab), but the code assumes they fit in a single byte (e.g., checking only the first byte). This inconsistency could lead to incorrect validation if a tag value exceeds 255. The root cause is lack of uniform serialization. An attacker could craft an account with a tag that overflows a byte but still passes checks due to partial comparison. The impact is potential bypass of initialization checks and type confusion.\n",
+            "severity": "informational",
+            "files": [
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "utils.check_unitialized#51-56",
+                "create_market#115-119"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing ownership check for market",
+            "description": "The create_market instruction does not verify that the market account is owned by the program. Although ownership is checked implicitly during buffer writes, it is best practice to validate ownership upfront. The root cause is omission of an explicit owner check. While not currently exploitable, it increases the risk of type confusion if other code paths are added. The impact is reduced code robustness and potential future vulnerabilities if assumptions change.\n",
+            "severity": "informational",
+            "files": [
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "create_market#74-80"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Outdated Cargo dependency",
+            "description": "The Dex program uses an outdated version of the agnostic-orderbook library (commit 422b943) despite auditing a newer version (176b410). This means known bugs fixed in later versions remain in the deployed code. The root cause is failure to update dependencies. An attacker could exploit known vulnerabilities in the older version. The impact is potential reintroduction of fixed bugs, undermining the audit's effectiveness.\n",
+            "severity": "informational",
+            "files": [
+                "program/Cargo.lock"
+            ],
+            "location": [
+                "dex-v4/program/Cargo.lock#57-60"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ]
+            },
+            "title": "Market creation allows duplicate accounts",
+            "description": "The create_market instruction allows the same account to be passed multiple times (e.g., as both event queue and bids slab). Although each account is checked for being uninitialized at the start, the same buffer can be overwritten multiple times, resulting in a corrupted or dysfunctional market. The root cause is premature validation before all state transitions. An attacker could create a malformed market to disrupt service. The impact is potential creation of invalid markets and denial of service.\n",
+            "severity": "informational",
+            "files": [
+                "program/src/lib.rs"
+            ],
+            "location": [
+                "create_market#133-148"
+            ]
+        }
+    ]
+}

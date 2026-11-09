@@ -1,0 +1,160 @@
+{
+    "path": "reports/Drift Protocol Audit Report.pdf",
+    "project_info": {
+        "url": "https://github.com/drift-labs/protocol-v1",
+        "commit_id": "70e9ef1f079a69bcc158fa8dbad6507654ec75b6",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-02-16",
+        "project_path": "contracts/Drift Protocol Audit Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Possible sandwich attack on stop loss/trigger orders",
+            "description": "This vulnerability allows an attacker to manipulate the AMM mark price to trigger and fill users' stop loss or trigger orders unfairly. The root cause is that Drift validates trigger conditions using the raw AMM mark price without validating against a TWAP or oracle price, making it susceptible to temporary manipulation. An attacker with sufficient liquidity can push the mark price past a user's trigger threshold, force-fill their order, and then reverse the manipulation to profit from the price discrepancy. This creates a profitable \"sandwich\" attack that exploits users by filling their orders at unfavorable prices, ultimately harming market participants and undermining trust in fair execution.\n",
+            "severity": "high",
+            "files": [
+                "programs/clearing_house/src/lib.rs"
+            ],
+            "location": [
+                "ClearingHouse"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "An attacker may liquidate users unfairly with AMM manipulation",
+            "description": "This issue enables an attacker to manipulate the AMM mark price (up to \u00b110% from the oracle) to trigger unfair liquidations of user positions. The cause lies in the reliance on the raw AMM mark price for margin calculations without cross-checking against oracle or TWAP prices. By temporarily inflating or deflating the mark price, an attacker can push users' margin ratios below liquidation thresholds and profit from liquidation rebates. The exploitation involves opening a large position to manipulate the price, executing liquidations, and then reversing the position. The impact includes unjust liquidations that do not reflect true market conditions, potentially leading to user losses and reduced platform trust.\n",
+            "severity": "high",
+            "files": [
+                "programs/clearing_house/src/lib.rs"
+            ],
+            "location": [
+                "ClearingHouse"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Potential integer overflow in liquidate()",
+            "description": "The liquidate function performs unchecked additions of base_asset_value and base_asset_value_to_close into base_asset_value_closed, creating a potential integer overflow. The root cause is the use of unchecked arithmetic operations in Rust, which do not panic on overflow in release mode. While this value is only used for record-keeping in LiquidationHistory and does not directly affect on-chain state or funds, an overflow could corrupt off-chain systems that rely on this data for analytics or reporting. An attacker could potentially trigger this by engineering a liquidation with extremely large values, though the practical exploitability is low. The impact is limited to data integrity issues in off-chain monitoring tools.\n",
+            "severity": "low",
+            "files": [
+                "programs/clearing_house/src/lib.rs"
+            ],
+            "location": [
+                "ClearingHouse.liquidate"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Anchor IDL instructions are enabled",
+            "description": "Anchor automatically includes IDL instruction handlers that allow on-chain storage and modification of the program's Interface Definition Language (IDL). The cause is the default behavior of Anchor without the no-idl flag. If uninitialized, any party could become the authority of the IDL and store arbitrary data in a program-owned account. While Anchor's 8-byte discriminators prevent type confusion, this creates a composability risk: downstream clients may incorrectly assume that program-owned accounts are trustworthy. The exploitation involves uploading malicious or misleading IDL data, potentially disrupting client integrations. The impact is primarily on trust assumptions in the ecosystem and increased attack surface, though no direct fund loss is possible.\n",
+            "severity": "low",
+            "files": [
+                "programs/clearing_house/src/lib.rs"
+            ],
+            "location": [
+                "ClearingHouse"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Rounding of signed division can be potentially unfavorable",
+            "description": "The functions settle_funding_payment and calculate_funding_payment_in_quote_precision perform signed integer division that rounds toward zero, which is unfavorable to the protocol when users owe funding payments. The cause is Rust's default division behavior for signed integers. When a user has a negative funding payment (i.e., they owe money), the amount deducted is rounded up (toward zero), meaning they pay slightly less than the precise amount. An attacker could exploit this by maintaining positions that accrue small negative funding payments over time to save on fees. The impact is minimal financial leakage from the protocol due to rounding down of owed amounts, though the per-occurrence loss is tiny.\n",
+            "severity": "low",
+            "files": [
+                "programs/clearing_house/src/lib.rs"
+            ],
+            "location": [
+                "ClearingHouse.settle_funding_payment",
+                "ClearingHouse.calculate_funding_payment_in_quote_precision"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Multiple internal inconsistencies in Anchor macros",
+            "description": "There are inconsistent patterns in how account constraints are enforced using Anchor's #[account] macros, particularly in access control checks. For example, the user_positions account is checked against the user in one location but not directly within its own macro. The root cause is inconsistent code style and macro usage across instruction structs. While no immediate security flaw was found, this reduces code readability and increases the risk of future bugs during maintenance or upgrades. An attacker could potentially exploit future changes if developers misunderstand the authorization logic due to the inconsistency. The impact is on code maintainability and long-term security posture rather than immediate exploitability.\n",
+            "severity": "low",
+            "files": [
+                "programs/clearing_house/src/lib.rs",
+                "programs/clearing_house/src/state/mod.rs"
+            ],
+            "location": [
+                "ClearingHouse"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Use of unchecked division operations",
+            "description": "The functions limit_price_satisfied and asset_to_reserve_amount use unchecked division (.div()) instead of safe checked_div(), which could lead to silent errors or panics if division by zero occurs. The cause is deviation from secure coding practices in Rust, where arithmetic operations should be checked in untrusted contexts. Although current preconditions (e.g., non-zero denominators) likely prevent actual division by zero, the lack of explicit checks makes the code fragile and prone to future bugs if invariants change. An attacker might trigger a panic under edge conditions, potentially causing transaction failures or denial-of-service in dependent systems. The impact is low, as no direct fund loss is possible, but it violates best practices for secure smart contract development.\n",
+            "severity": "low",
+            "files": [
+                "programs/clearing_house/src/lib.rs"
+            ],
+            "location": [
+                "ClearingHouse.limit_price_satisfied",
+                "ClearingHouse.asset_to_reserve_amount"
+            ]
+        }
+    ]
+}

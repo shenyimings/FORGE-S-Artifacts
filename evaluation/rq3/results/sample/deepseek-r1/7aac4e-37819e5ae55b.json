@@ -1,0 +1,91 @@
+{
+    "project": "07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json",
+    "files": [
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/fund_account.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-1288",
+        "CWE-664",
+        "CWE-1329",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-682",
+        "CWE-691",
+        "CWE-284",
+        "CWE-703",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Missing validation allows same token swap strategy registration leading to DoS",
+            "description": "The add_token_swap_strategy function in fund_account.rs does not validate that from_token_mint and to_token_mint are different. The root cause is the absence of a require_keys_neq! check or equivalent. An attacker could register a swap strategy with identical source and destination tokens. When the system attempts to execute this swap, it will fail at the system program level, causing the entire transaction to revert. This creates a denial-of-service vector where a malicious fund manager or compromised account could disrupt fund operations by registering invalid strategies. The impact is operational disruption and potential blocking of automated fund management workflows.\n"
+        },
+        {
+            "title": "Token swap strategies cannot be updated or removed",
+            "description": "The fund_manager_add_token_swap_strategy function allows adding strategies but provides no mechanism to update or remove them. The root cause is incomplete administrative functionality. This creates operational inflexibility: incorrect or outdated strategies cannot be corrected, and deprecated DEX pools cannot be removed. The impact is reduced protocol adaptability and potential long-term inefficiencies or risks from obsolete configurations. Although the maximum of 30 strategies limits exposure, the lack of lifecycle management remains a limitation.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "\"The contract exhibits vulnerabilities across multiple CWE categories. First, critical state-changing functions lack access control checks, allowing unauthorized parameter modifications (CWE-284). Second, the migration function does not properly handle unknown versions, risking state corruption (CWE-703). Third, calculations in `get_total_unstaking_obligated_amount_as_sol` may produce incorrect results due to improper sign handling (CWE-682). Fourth, protection mechanisms are incomplete for parameter validation (CWE-693). Finally, version migration logic could become unmaintainable (CWE-691).\"\n",
+            "findings": [
+                {
+                    "title": "Missing Authorization Checks in State-Modifying Functions",
+                    "description": "Critical functions like `set_withdrawal_fee_rate_bps`, `set_deposit_enabled`, `set_transfer_enabled`, and others modify fund parameters without verifying the caller's authorization. This allows any caller to change fund behavior, including fees and operational flags.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Inadequate Version Handling in Migration Logic",
+                    "description": "The `migrate` function handles specific version upgrades but lacks handling for unknown versions. When encountering an unsupported version (not 0,15,16,18), the function fails abruptly at the `require_eq` check, potentially leaving the fund in a corrupted state.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Incorrect Sign Handling in SOL Obligation Calculation",
+                    "description": "The `get_total_unstaking_obligated_amount_as_sol` function incorrectly handles negative values by taking the absolute value via negation (`neg()`) without proper validation. This could lead to precision loss or unintended results when converting to unsigned integers.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Insufficient Parameter Validation Enforcement",
+                    "description": "While setters like `set_withdrawal_fee_rate_bps` include parameter checks, there are no validation mechanisms ensuring critical invariants during state changes (e.g., maintaining withdrawal fees below `FUND_WITHDRAWAL_FEE_RATE_BPS_LIMIT` after initialization).",
+                    "category": "CWE-693",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Unstructured Migration Control Flow",
+                    "description": "Version upgrade logic uses sequential `if` statements that may become unmanageable as versions increase. This pattern increases the risk of incomplete state transitions and improper handling of intermediate versions.",
+                    "category": "CWE-691",
+                    "severity": "low",
+                    "confidence": 0.75
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

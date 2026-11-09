@@ -1,0 +1,42 @@
+{
+    "path": "reports/immunefi/37311-sc-high-attackers-can-steal-rewards-by-depositing-updating-vault-balance-and-withdrawing-immed.md",
+    "project_info": {
+        "url": [
+            "https://github.com/jito-foundation/restaking"
+        ],
+        "commit_id": [
+            "406903e569da657035a2ca71ad16f8a930db6940"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-12-24",
+        "project_path": "contracts/37311-sc-high-attackers-can-steal-rewards-by-depositing-updating-vault-balance-and-withdrawing-immed.md-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "Attackers can steal rewards by depositing, updating vault balance and withdrawing immediately after a large reward is deposited",
+            "description": "1. **Description:** The vulnerability allows an attacker to exploit the timing of reward distribution in the vault by depositing a large amount of tokens immediately after a reward is sent to the vault but before the vault balance is updated. The attacker can then trigger an update and withdraw, capturing a disproportionate share of the newly added rewards without having contributed to the staking activity that generated them.\n\n2. **Cause:** The root cause is the separation of the `update_vault_balance` call from the `mint_to` (deposit) function. When rewards are sent directly to the vault, the internal accounting (vrt_token value) does not automatically reflect the new balance until `update_vault_balance` is called. This creates a window where an attacker can deposit tokens when the share price is still low, thereby acquiring more vrt_tokens relative to the actual value, and then withdraw after the balance update reflects the new rewards.\n\n3. **Exploitation:** An attacker monitoring the chain can detect when a large reward is deposited into the vault. They can then execute a transaction sequence that first updates the vault tracker (without updating the balance), deposits a large amount of ST, calls `update_vault_balance` to rebase the share price, and immediately enqueues a full withdrawal. Because the withdrawal is enqueued right away, the deposited funds are not delegated, ensuring they are not used to generate future yield, but still allow the attacker to capture existing unclaimed rewards.\n\n4. **Impact:** The attacker can siphon off nearly all of the newly added rewards—up to 99% in the provided POC—depriving honest stakers of their rightful yield. This undermines the fairness and economic security of the vault, potentially leading to loss of trust and user funds.\n",
+            "severity": "high",
+            "location": [
+                "vault_program/src/update_vault_balance.rs#L12",
+                "vault.rs#1144"
+            ],
+            "files": [
+                "restaking/vault_program/src/update_vault_balance.rs",
+                "restaking/vault_program/src/mint_to.rs"
+            ]
+        }
+    ]
+}

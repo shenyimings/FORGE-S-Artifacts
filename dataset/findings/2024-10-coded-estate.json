@@ -1,0 +1,748 @@
+{
+    "path": "reports/2024-10-coded-estate.md",
+    "project_info": {
+        "url": "https://github.com/code-423n4/2024-10-coded-estate",
+        "commit_id": "97efb35fd3734676f33598e6dff70119e41c7032",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-10-11",
+        "project_path": "contracts/2024-10-coded-estate.md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ],
+                "4": [
+                    "CWE-638"
+                ]
+            },
+            "title": "Attakers can steal the funds from long-term reservation",
+            "description": "This vulnerability allows an attacker to steal funds from long-term reservations by exploiting the interaction between the `setbidtobuy` and `withdrawtolandlord` functions. The root cause is the lack of proper validation in `withdrawtolandlord`, which allows an approved bidder to withdraw funds from a long-term rental even before the rental period ends. The function only checks that the withdrawal amount does not exceed the deposit minus one month's rent, but does not verify that the caller is the legitimate landlord or that the rental is not active. An attacker can place a bid to gain approval, withdraw a large portion of the tenant's deposited funds, and then cancel the bid to reclaim their initial deposit. This results in unauthorized withdrawal of tenant funds, leading to financial loss for legitimate renters.\n",
+            "severity": "high",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#setbidtobuy",
+                "execute.rs#withdrawtolandlord"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ],
+                "4": [
+                    "CWE-638"
+                ]
+            },
+            "title": "setbidtobuy allows token purchase even when sale is no longer listed",
+            "description": "The `setbidtobuy` function allows a buyer to purchase a token even after the seller has delisted it by setting `sell.islisted` to false. The vulnerability arises because the function does not check the `islisted` flag before processing the bid. As a result, if auto-approve is enabled, any buyer can still complete a purchase despite the seller's intent to halt the sale. This undermines the seller's control over their asset and can lead to unintended transfers. The exploitation involves calling `setbidtobuy` after the token has been delisted, which proceeds without validation, allowing the buyer to gain approval and eventually transfer the NFT via `transfer_nft`. The impact is loss of control and potential financial loss for the seller.\n",
+            "severity": "high",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#setbidtobuy",
+                "execute.rs#setlistforsell"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Insufficient price validation in transfer_nft function enables theft of listed tokens",
+            "description": "The `transfer_nft` function lacks proper validation of the bid amount against the listed price, enabling attackers to acquire NFTs without paying the correct amount. The function defaults the payment amount to zero if the recipient has no active bid, and it does not verify that a valid bid matches the seller's listed price. This allows two exploitation paths: (1) When auto-approve is enabled, a bidder can transfer the NFT to a different address with no bid, receiving the token without payment, then cancel their bid for a full refund; (2) When auto-approve is disabled, a bidder can front-run the seller's `transfer_nft` call by canceling their bid, causing the transfer to proceed with zero payment. The impact is theft of listed tokens and financial loss for sellers.\n",
+            "severity": "high",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#transfer_nft",
+                "execute.rs#setbidtobuy"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Lack of differentiation between rental types leads to loss of funds",
+            "description": "The CodedEstate system allows properties to be listed for both short-term and long-term rentals, with each type potentially using a different denomination (denom) token for payments. Both rental types are stored in the same `rentals` vector and differentiated by a `rental_type` flag in the `Rental` struct. However, the contract does not enforce the use of this flag when processing rental operations, allowing functions meant for one rental type to be used for another without proper validation.\n\nThe root cause is the lack of validation based on the `rental_type` flag in functions that handle rental actions. For example, the `cancelreservationbeforeapprovalforlongterm` function refunds deposits using the long-term rental's `denom`, but it retrieves the deposit amount from a rental entry in the shared `rentals` vector without verifying whether the rental is actually a long-term one.\n\nAn attacker can exploit this by listing a short-term rental with a low-value token (e.g., TokenX) and a long-term rental with a high-value token (e.g., USDC). They can then reserve the short-term rental by paying in TokenX and cancel the reservation using the long-term cancellation function, which refunds them in USDC. This mismatch enables the attacker to receive a refund in a more valuable token than they deposited.\n\nThe impact is significant: the attacker can effectively steal funds from the contract’s pool of user deposits, especially if other users have deposited high-value tokens like USDC for legitimate rentals. This leads to direct financial loss for other users and undermines trust in the system.\n",
+            "severity": "high",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#1413",
+                "execute.rs#870",
+                "setlistforshorttermrental#-",
+                "setlistforlongtermrental#-",
+                "setreservationforshortterm#-",
+                "cancelreservationbeforeapprovalforlongterm#-"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Cancelling Bid Doesn’t Clear Token Approval of Bidder Allows Malicious Bidder to Steal Tokens",
+            "description": "When a token is listed for sale with `auto_approve` enabled, calling `setbidtobuy` grants the bidder approval to transfer the NFT. This approval is intended to allow the bidder to finalize the purchase via `transfer_nft`, which clears approvals, transfers ownership, and sends funds to the seller.\n\nThe vulnerability arises because the `setbidtobuy` function, when used to cancel a bid, removes the bid from the `bids` list but fails to revoke the previously granted approval. This omission leaves the bidder still approved to transfer the token even after their bid is canceled and funds are refunded.\n\nA malicious actor can exploit this by placing a bid (gaining approval), immediately canceling it (receiving a refund), and then calling `transfer_nft` to steal the token without making any payment. Since the approval remains active, the transfer succeeds.\n\nThe impact is severe: attackers can steal valuable tokens (e.g., income-generating properties) without compensating the seller. Given that tokens listed for sale likely have monetary value, this flaw poses a high risk to asset security and user funds.\n",
+            "severity": "high",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "setbidtobuy#-"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Lack of Validation in setlistforsell Allows Changing Denom While There Is Active Bid",
+            "description": "The `setlistforsell` function allows sellers to update the sale configuration of a token, including changing the `denom` (payment token). However, it does not validate whether there are active bids on the token before allowing this change.\n\nThe root cause is the absence of a check for existing bids in `setlistforsell`. As a result, a seller (or attacker) can change the `denom` after receiving a bid in a low-value token, switching it to a high-value token like USDC.\n\nAn attacker can exploit this by minting a token, listing it for sale with a low-value token (e.g., TokenX), placing a bid using that token, changing the `denom` to USDC via `setlistforsell`, and then canceling the bid. Upon cancellation, the refund is issued in the new `denom` (USDC), allowing the attacker to receive high-value tokens in exchange for low-value ones.\n\nThe impact is direct financial loss to the contract and its users, as the attacker drains high-value tokens from the contract’s balance. This undermines the integrity of the bidding system and exposes user deposits to theft.\n",
+            "severity": "high",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "setlistforsell#-",
+                "setbidtobuy#-"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Logic Flaw in check_can_edit_short Allows Editing Short-Term Rental Before Finalization",
+            "description": "The `check_can_edit_short` function is responsible for determining whether a short-term rental listing can be updated. It only checks if the last rental’s checkout time has passed, allowing edits if so. However, it does not verify whether all previous rentals have been finalized via `finalizeshorttermrental`.\n\nThis creates a window where a landlord can change the `denom` in `shortterm_rental` after a rental period ends but before finalizing the payment. Since `finalizeshorttermrental` uses the current `denom` value to send funds, the attacker can redirect the payout to a more valuable token.\n\nAn attacker can exploit this by listing a rental with a low-value token, having an associated reservation paid in that token, waiting for the rental period to end, changing the `denom` to a high-value token (e.g., USDC), and then finalizing the rental. The contract will send the refund in USDC instead of the original token.\n\nThe impact is that the attacker receives a disproportionately high payout, effectively stealing value from the contract’s pool of user deposits. This leads to loss of funds and breaks the expected economic model of the rental system.\n",
+            "severity": "high",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "check_can_edit_short#-",
+                "setlistforshorttermrental#-",
+                "finalizeshorttermrental#-"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Adversary can update listing denoms before finalize to drain funds",
+            "description": "The vulnerability allows an attacker to manipulate the denomination used in a short-term rental listing after a reservation has been made but before finalization. By initially listing a token with a worthless denomination and allowing self-reservation, the attacker can later change the denomination to a valuable one (e.g., USDC) and finalize the rental to extract funds from the contract. The root cause is the lack of validation during listing updates when active or past reservations exist. An attacker can exploit this by minting a token, listing it with a useless coin, reserving it with minimal payment, updating the listing to use USDC, and finalizing the rental. This results in the attacker draining USDC from the contract while leaving behind worthless tokens, leading to a loss of funds held in the contract.\n",
+            "severity": "high",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "SetListForShortTermRental#",
+                "FinalizeShortTermRental#"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Adversary can use send_nft to bypass payment and steal seller’s token in auto-approve scenario",
+            "description": "When auto-approve is enabled, a malicious actor can bypass payment obligations by exploiting the send_nft function, which lacks payment settlement logic. The vulnerability arises because while transfer_nft includes logic to handle payments, send_nft only transfers the token without enforcing any financial settlement. The root cause is the failure to restrict or validate the use of send_nft when a token is listed for sale. An attacker can place a bid to gain approval, use send_nft to transfer the token to their own contract, and then cancel the bid to receive a full refund. This allows the attacker to steal the NFT without paying the seller, resulting in a complete loss of the asset for the seller while the attacker retains both the token and their funds.\n",
+            "severity": "high",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "send_nft#",
+                "transfer_nft#"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "Token owner can burn token with active rental leading to renters’ funds being stuck",
+            "description": "The burn function allows the token owner to destroy a token even when active rentals exist, which results in the permanent loss of rental data and trapped user funds. The root cause is the absence of validation in the burn function to check for active rentals before deletion. When the token is burned, the entire TokenInfo struct is removed, including the rentals vector that stores deposit amounts and reservation details. This prevents renters from canceling their reservations and reclaiming their deposits, as the contract no longer has any record of the rental. An attacker (or malicious owner) can burn the token after receiving deposits, effectively stealing the funds. The impact is irreversible loss of user funds that remain locked in the contract with no way to recover them.\n",
+            "severity": "high",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "burn#",
+                "setlistforshorttermrental#"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Malicious NFT owners can rug the reservation of the long-term",
+            "description": "A malicious homeowner can exploit the combination of withdrawtolandlord and rejectreservationforlongterm functions to steal most of a tenant's deposit in long-term rentals. The vulnerability stems from the ability to withdraw funds proportional to the monthly rent while still being able to reject an active reservation and refund only the remaining balance. The root cause is the lack of restriction on rejecting active reservations and the direct subtraction from the deposit amount during withdrawal. The attacker can wait for the rental period to begin, withdraw most of the deposit using withdrawtolandlord, and then immediately reject the reservation, returning only a small fraction of the original deposit. This allows the owner to effectively steal the majority of the tenant's funds while complying with the contract logic, leading to significant financial loss for the tenant.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "withdrawtolandlord#",
+                "rejectreservationforlongterm#"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ]
+            },
+            "title": "Users can’t cancel reservation due to out-of-gas",
+            "description": "The cancellation functions for short-term and long-term rentals iterate over a user-defined cancellation vector without any length restrictions, making them susceptible to out-of-gas failures. The root cause is the lack of a cap on the size of the cancellation vector, which can be set by the NFT owner during listing. A malicious owner can create an excessively large cancellation list, causing the gas cost of cancellation to exceed block limits. When a user attempts to cancel their reservation, the transaction will fail due to out-of-gas errors, preventing them from reclaiming their funds. This denial-of-service vector effectively locks user funds in the contract indefinitely, as they cannot complete the cancellation process.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "cancelreservationafterapprovalforshortterm#",
+                "cancelreservationafterapprovalforlongterm#",
+                "setlistforshorttermrental#",
+                "setlistforlongtermrental#"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Use of u64 for price_per_day and price_per_month limits handling tokens with 18 decimals",
+            "description": "The use of u64 for price_per_day and price_per_month fields restricts the maximum rental price to approximately 18 tokens when using 18-decimal tokens, which is insufficient for realistic property pricing. The root cause is a data type mismatch: while other parts of the contract use u128 for token amounts, these price fields are limited to u64. This creates a functional limitation where landlords cannot set prices above ~$18 per day or month if using common 18-decimal stablecoins. For example, attempting to set a price of 20 tokens per day (20e18) would exceed the u64 maximum value. This severely limits the platform's usability on chains like Nibiru that support custom 18-decimal tokens, preventing landlords from listing properties at market-appropriate rates.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "SetListForShortTermRental.price_per_day",
+                "SetListForLongTermRental.price_per_month"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect use of u64 for arg amount in withdrawtolandlord can cause withdrawal failure",
+            "description": "The withdrawtolandlord function uses u64 for the amount parameter, which can lead to withdrawal failures when dealing with large amounts of 18-decimal tokens. The root cause is inconsistency in data types across the contract—while funds are handled as u128 elsewhere (e.g., in MessageInfo), this function restricts withdrawals to u64, which caps at ~18 tokens for 18-decimal assets. If a tenant deposits an amount exceeding this limit, the landlord cannot withdraw the full amount through this function. For instance, a deposit of 20 tokens (20e18) would be unwithdrawable. This results in locked funds and loss of access to legitimate rental income, especially problematic on Nibiru chain where custom 18-decimal tokens are supported.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "withdrawtolandlord.amount",
+                "WithdrawToLandlord.amount"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect refund amount is sent to the tenant if long term reservation is cancelled after approval",
+            "description": "The contract fails to refund the correct amount to tenants when a long-term reservation is cancelled after approval. The function `cancelreservationafterapprovalforlongterm()` does not apply the cancellation percentage set by the landlord (`token.longterm_rental.cancellation.percentage`) to calculate the refundable deposit. Instead, it skips the refund entirely during cancellation and later uses the protocol fee (`self.get_fee(deps.storage)`) during finalization, which is unrelated to the landlord's intended cancellation policy. This discrepancy violates the expected behavior where the tenant should receive a refund based on the landlord-defined cancellation terms. As a result, tenants may receive significantly less than expected or nothing at all, undermining trust in the protocol and potentially leading to financial loss for users who cancel under approved conditions.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.cancelreservationafterapprovalforlongterm#1647-1683",
+                "execute.finalizelongtermrental#1727-1731"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "Lack of upfront cost for long-term reservations allows fake reservations, blocking real users",
+            "description": "The `setreservationforlongterm` function allows users to reserve long-term rentals without requiring any upfront payment or deposit. This design enables malicious actors to spam reservations across multiple time slots and addresses, effectively blocking legitimate users from booking the property. Since the system does not distinguish between genuine and fake reservations, property owners must manually verify each one, often through off-chain communication, leading to delays and opportunity costs. Even though owners can reject reservations, the delay caused by verification gives attackers a window to prevent real bookings, resulting in lost revenue and reduced availability. This creates a denial-of-service-like condition that harms both users and owners, especially given the ease of executing such attacks on-chain using multiple wallets.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.setreservationforlongterm"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Reservations can be made outside of rental property’s available_period",
+            "description": "The contract does not validate whether a requested reservation period falls within the property's defined `available_period`. Functions `setreservationforshortterm` and `setreservationforlongterm` only check that the rental duration meets the minimum stay requirement but do not verify alignment with the `available_period` set by the owner during listing. This allows users to book properties outside the intended availability window, such as reserving a property for July when it's only listed as available in June. While owners can manually reject such reservations, the lack of automatic enforcement undermines the purpose of the `available_period` feature. Users may be misled into thinking their bookings are valid, and owners are forced into unnecessary management overhead, reducing the reliability and usability of the rental system.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.setreservationforshortterm",
+                "execute.setreservationforlongterm"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-74"
+                ],
+                "3": [
+                    "CWE-75"
+                ]
+            },
+            "title": "Can impersonate another high value rental because token_uri is arbitrary and supplied by user",
+            "description": "The `mint` function accepts an arbitrary `token_uri` provided directly by the user without sanitization or validation. A malicious actor can exploit this by setting the `token_uri` to mimic that of a high-value property, including copying images, metadata, and attributes, thereby deceiving users into interacting with a fake listing. This creates a phishing risk where users might unknowingly rent or purchase the wrong property, believing it to be a legitimate, high-value asset. Additionally, if the frontend constructs JSON from this untrusted input, there is a potential for JSON injection attacks using special characters like quotes or commas. Although ownership remains a key differentiator, the lack of safeguards on metadata integrity shifts the burden of verification entirely to the frontend and user, increasing the attack surface and reducing trust in the platform.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.mint"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-708"
+                ]
+            },
+            "title": "[M-09] User supplied owner address which is meant to be token owner is never the token owner",
+            "description": "1. **Description:** In the `mint` function, the `owner` parameter is provided by the caller but is not used to set the token's owner. Instead, the token owner is hardcoded to `info.sender`, which is the transaction sender. This creates a discrepancy between the intended owner (passed as a parameter) and the actual owner (set to the caller).\n\n2. **Cause:** The vulnerability arises from incorrect logic in the `mint` function where the `owner` field in the `TokenInfo` struct is set to `info.sender.clone()` instead of using the user-supplied `owner` parameter.\n\n3. **Exploitation:** An attacker (or regular user) attempting to mint a token on behalf of another user will fail, as the token will always be owned by the function caller. This breaks the intended functionality where one user could mint a token for another.\n\n4. **Impact:** The impact includes defective mint logic, leading to incorrect ownership assignment. This could result in user confusion, failed business logic (e.g., gifting or delegated minting), and potential loss of control over expected assets.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#mint#249-257",
+                "execute.rs#293"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "[01] The current logic can’t handle CW20 tokens",
+            "description": "1. **Description:** The contract does not support CW20 token payments for reservations, despite the README stating that any ERC20 (interpreted as CW20 in Cosmos context) can be used.\n\n2. **Cause:** The contract lacks integration logic for handling CW20 token transfers and balance checks, relying only on native token payments.\n\n3. **Exploitation:** Users attempting to use CW20 tokens for reservations will be unable to do so, leading to a broken user experience.\n\n4. **Impact:** Limits the usability and flexibility of the protocol, contradicting documentation and reducing user trust.\n",
+            "severity": "low",
+            "files": [
+                "README.md"
+            ],
+            "location": [
+                "README.md"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "[02] Malicious owners can set the fee to 100%",
+            "description": "1. **Description:** NFT owners can set the fee value to 100% via the `set_fee_value()` function, leaving no revenue for the platform or other stakeholders.\n\n2. **Cause:** Lack of upper limit validation on the fee value input.\n\n3. **Exploitation:** A malicious or misconfigured owner can set the fee to the maximum, disrupting the economic model.\n\n4. **Impact:** Economic imbalance, potential loss of revenue for the protocol, and possible misuse of the system.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#set_fee_value#318-323"
+            ]
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "[03] auto_approve is not used in long-term rent",
+            "description": "1. **Description:** The `auto_approve` flag set by the NFT owner in `setlistforlongtermrental()` is not enforced in the long-term rental logic.\n\n2. **Cause:** The flag is stored but not checked during reservation approval.\n\n3. **Exploitation:** Users may expect automatic approval based on the flag, but the system does not honor it.\n\n4. **Impact:** Misleading functionality, degraded user experience, and potential confusion.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#setlistforlongtermrental#1288"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "[04] minter is not used in this contract delete it",
+            "description": "1. **Description:** The `minter` field in `InstantiateMsg` and the associated `query.rs#minter()` function are unused and should be removed.\n\n2. **Cause:** Dead code from prior versions or templates.\n\n3. **Exploitation:** No direct exploit, but increases code complexity and maintenance burden.\n\n4. **Impact:** Code bloat, potential confusion, and reduced auditability.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/query.rs"
+            ],
+            "location": [
+                "query.rs#minter#418-424"
+            ]
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-477"
+                ]
+            },
+            "title": "[05] Use to_json_binary and from_json_binary",
+            "description": "1. **Description:** The contract uses deprecated `to_binary` and `from_binary` functions instead of the recommended `to_json_binary` and `from_json_binary`.\n\n2. **Cause:** Outdated coding practices.\n\n3. **Exploitation:** No direct security risk, but may lead to compatibility issues.\n\n4. **Impact:** Reduced code quality and potential future breakage.\n",
+            "severity": "low",
+            "files": [
+                "packages/cw721/src/receiver.rs"
+            ],
+            "location": [
+                "packages/cw721/src/receiver.rs#26"
+            ]
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "[06] cosmwasm-std 1.4.0v is vulnerable",
+            "description": "1. **Description:** The contract uses version 1.4.0 of `cosmwasm-std`, which has known vulnerabilities.\n\n2. **Cause:** Use of an outdated and insecure dependency.\n\n3. **Exploitation:** Potential exploitation of known vulnerabilities in the standard library.\n\n4. **Impact:** Risk of undefined behavior, security flaws, or future exploits if not updated.\n",
+            "severity": "low",
+            "files": [
+                "Cargo.lock"
+            ],
+            "location": [
+                "Cargo.lock#158-159"
+            ]
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "[07] The first buyer could get front-runed after autoApprove get updated",
+            "description": "1. **Description:** If a user places a bid and the owner enables `autoApprove`, another user can front-run by submitting a bid and completing the purchase first.\n\n2. **Cause:** Lack of ordering or reservation mechanism for bids.\n\n3. **Exploitation:** Front-running by competing buyers.\n\n4. **Impact:** Unfair transaction ordering, user dissatisfaction.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#setbidtobuy"
+            ]
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "[08] available_period is not used",
+            "description": "1. **Description:** The `available_period` field set by the NFT owner is never checked or used in the contract logic.\n\n2. **Cause:** Incomplete implementation.\n\n3. **Exploitation:** Misleading functionality.\n\n4. **Impact:** Reduced usability and confusion.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#1300",
+                "execute.rs#742"
+            ]
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "[09] The logic doesn’t return the excited funds to the users",
+            "description": "1. **Description:** When a user sends more funds than required for a short-term reservation, the excess is not refunded and is kept by the protocol.\n\n2. **Cause:** Missing refund logic.\n\n3. **Exploitation:** Users lose excess funds.\n\n4. **Impact:** Loss of user funds, reduced trust.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#866"
+            ]
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ]
+            },
+            "title": "[10] Risk of out-of-gas",
+            "description": "1. **Description:** Iterations over the `token.rentals` vector in multiple functions can lead to out-of-gas failures.\n\n2. **Cause:** Unbounded loops.\n\n3. **Exploitation:** Malicious users can create many reservations to force gas exhaustion.\n\n4. **Impact:** Denial of service for legitimate users.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#823",
+                "execute.rs#940",
+                "execute.rs#1822"
+            ]
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "[11] Risk of 100% cancellation penalty for users",
+            "description": "1. **Description:** NFT owners can set the cancellation penalty to 100% for short-term reservations.\n\n2. **Cause:** No cap on penalty percentage.\n\n3. **Exploitation:** Users lose all funds upon cancellation.\n\n4. **Impact:** Unfair terms, potential abuse.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#746"
+            ]
+        },
+        {
+            "id": 30,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "[12] check_can_edit_long() and check_can_edit_short() have the same logic",
+            "description": "1. **Description:** Both functions use the same logic, preventing independent unlisting of long-term or short-term rentals.\n\n2. **Cause:** Incorrect logic in edit checks.\n\n3. **Exploitation:** Users cannot unlist one rental type without affecting the other.\n\n4. **Impact:** Reduced functionality and flexibility.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#1953-1972",
+                "execute.rs#1974-1992"
+            ]
+        },
+        {
+            "id": 31,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "[13] DoS attack",
+            "description": "1. **Description:** Malicious actors can reserve long-term periods without depositing funds, leading to denial of service.\n\n2. **Cause:** No deposit requirement before reservation.\n\n3. **Exploitation:** Spam reservations.\n\n4. **Impact:** Legitimate users unable to book.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#1341-1432"
+            ]
+        },
+        {
+            "id": 32,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "[14] Use a daily or monthly basis",
+            "description": "1. **Description:** The contract uses days for minimum stay but months for pricing, causing confusion.\n\n2. **Cause:** Inconsistent time units.\n\n3. **Exploitation:** Misconfiguration by owners.\n\n4. **Impact:** User confusion and incorrect pricing.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#1373"
+            ]
+        },
+        {
+            "id": 33,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "[15] The function execute.rs#depositforlongtermrental() doesn’t check if the deposit amount is enough for the reserved period",
+            "description": "1. **Description:** The deposit function does not validate that the deposited amount covers the reserved period.\n\n2. **Cause:** Missing validation logic.\n\n3. **Exploitation:** Underpayment for reservations.\n\n4. **Impact:** Financial loss for owners unless manually checked.\n",
+            "severity": "low",
+            "files": [
+                "contracts/codedestate/src/execute.rs"
+            ],
+            "location": [
+                "execute.rs#1544-1590"
+            ]
+        }
+    ]
+}

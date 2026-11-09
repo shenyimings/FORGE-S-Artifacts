@@ -1,0 +1,51 @@
+{
+    "path": "reports/m0_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/m0-foundation/solana-m",
+        "commit_id": "c299921339f3c81a4b781d8e6909a1b8fd1c8a77",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-03-17",
+        "project_path": "contracts/m0_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Improper Handling of Excess M Tokens",
+            "description": "The vault_m_token_account accumulates M tokens from unclaimed rewards. If some wrapped M tokens do not utilize the ClaimFor instruction to claim rewards, those rewards remain in the vault and are not distributed. Since the protocol only mints ext_mint tokens for locked M during wrapping, this surplus M becomes idle and inaccessible. This leads to inaccurate collateral accounting, making the system appear overcollateralized because the vault holds more M tokens than are needed to back the ext_mint supply.\nThe root cause is the lack of logic to handle or redistribute unclaimed rewards in the vault. An attacker or passive user could allow rewards to accumulate without claiming, exacerbating the imbalance.\nAn attacker could exploit this by manipulating perception of collateral health, potentially affecting governance or lending decisions based on reported reserves.\nThe impact includes inaccurate financial reporting, reduced system transparency, and potential misuse in integrated protocols relying on correct collateral ratios.\n",
+            "severity": "medium",
+            "files": [
+                "programs/earn/src/instructions/earn_authority/claim_for.rs"
+            ],
+            "location": [
+                "ClaimFor.handler"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ]
+            },
+            "title": "Inaccurate Mint Supply Tracking",
+            "description": "In the ClaimFor instruction, after calling mint_tokens to mint new tokens via CPI, the code immediately reads ctx.accounts.mint.supply to update global_account.max_supply. However, the in-memory state of the mint account is not refreshed after the CPI call, so it still reflects the pre-mint supply. This means the updated supply value is stale, and the comparison to update max_supply may be incorrect.\nThe root cause is the failure to reload the mint account after the CPI mint operation, which is required in Solana to reflect state changes from cross-program invocations.\nAn attacker could potentially exploit timing or supply miscalculations to manipulate yield calculations or governance mechanisms that depend on accurate max_supply values.\nThe impact is incorrect tracking of the total minted supply, which can lead to inaccurate yield distribution, flawed economic modeling, and potential long-term discrepancies in system state.\n",
+            "severity": "low",
+            "files": [
+                "programs/earn/src/instructions/earn_authority/claim_for.rs"
+            ],
+            "location": [
+                "ClaimFor.handler#mint_tokens"
+            ]
+        }
+    ]
+}

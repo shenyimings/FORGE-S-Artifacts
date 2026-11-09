@@ -1,0 +1,136 @@
+{
+    "project": "neodyme_drift_vaults.pdf.json",
+    "files": [
+        "dataset/contracts/neodyme_drift_vaults.pdf.json/programs/drift_vaults/src/instructions/redeem_tokens.rs",
+        "dataset/contracts/neodyme_drift_vaults.pdf.json/programs/drift_vaults/src/instructions/initialize_insurance_fund_stake.rs",
+        "dataset/contracts/neodyme_drift_vaults.pdf.json/programs/drift_vaults/src/instructions/initialize_vault.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.16666666666666666,
+        "recall": 0.25,
+        "f1": 0.2
+    },
+    "cwe_ground_truth": [
+        "CWE-1076",
+        "CWE-1099",
+        "CWE-1078",
+        "CWE-710"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-573",
+        "CWE-435",
+        "CWE-1068",
+        "CWE-710",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Vault Token Accounts: Naming and Seeds",
+            "description": "Three types of token accounts are referred to as \"vault token accounts\", with the first two using similar seed prefixes: `[b\"vault_token_account\", vault.key()]` and `[b\"vault_token_account\", vault.key(), market_index.to_le_bytes()]`. Although the probability of a PDA collision is negligible due to the uniqueness of the full seeds, the reuse of the same prefix increases the risk of confusion and potential future bugs if new account types are added with similar patterns. This could lead to incorrect assumptions in client code or during audits. Additionally, the naming is ambiguous, making it harder to distinguish between different account purposes. While no immediate security impact exists, this could lead to unsafe design decisions in future updates. The team acknowledged the finding but chose not to change the seeds due to the breaking changes it would require, which Neodyme agreed was acceptable given the low severity.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "Review focused on the provided instructions and their Anchor account constraints/CPIs, mapped to the given CWE root causes. The main risk areas are (1) ambiguous/unchecked optional account handling (especially “legacy vs protocol” switching) driven by remaining accounts deserialization, (2) reliance on external program invariants (Drift PDAs/types) without enforcing PDA address derivations in this program, and (3) forwarding remaining accounts into CPIs without local validation, which can create unsafe cross-program interactions if the callee uses optional accounts. A smaller issue is a naming/coding-standard mismatch that can lead to integration mistakes.\n",
+            "findings": [
+                {
+                    "title": "Ambiguous vault protocol selection via optional deserialization of remaining account",
+                    "description": "In `redeem_tokens`, the vault protocol is selected using a backwards-compatible pattern:\n- `let mut vp = ctx.vault_protocol();`\n- Comment: “if last rem acct does not deserialize into [`VaultProtocol`] then it's a legacy vault.”\n\nThis makes the protocol selection dependent on whether the caller supplies a remaining account that successfully deserializes. A malicious caller can intentionally pass a non-deserializable account (or omit the expected one) to force the code down the “legacy” path (`vp.is_none()`), potentially bypassing protocol-specific validations/logic that would apply to modern/protocol-enabled vaults (fees, equity computation mode, required account sets, etc.), depending on what `vault.validate_vault_protocol(&vp)?` enforces for a given vault configuration.\n\nEven if independent components behave correctly (the vault logic and Drift map loading), this integration pattern can produce incorrect behavior when combined: the set of accounts loaded (`ctx.load_maps(..., vp.is_some())`) and the equity/share math path can change based on attacker-controlled optional account parsing.\n",
+                    "category": "CWE-707",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Unchecked forwarding/usage of remaining accounts can lead to unsafe Drift optional-account resolution",
+                    "description": "Two places rely on `remaining_accounts` without local validation:\n\n1) `redeem_tokens`: `ctx.load_maps(clock.slot, Some(spot_market_index), vp.is_some())?` typically loads market/oracle accounts from remaining accounts. If the Drift loader has any optional-account or fallback behaviors, a caller may be able to influence which oracle/market accounts are used for `vault.calculate_equity(...)`, producing a mis-priced `vault_equity` and therefore incorrect share conversion in `redeem_tokens`/`transfer_shares`.\n\n2) `initialize_insurance_fund_stake`: the CPI context explicitly forwards `remaining_accounts` into Drift:\n   `CpiContext::new_with_signer(...).with_remaining_accounts(self.remaining_accounts.into());`\n   If Drift uses remaining accounts for optional accounts resolution, an attacker can inject unexpected accounts. While Drift may validate internally, this program provides no defense-in-depth checks to ensure the forwarded accounts match expected keys for the given `market_index`/vault configuration.\n\nThis is an integration weakness: two entities may be correct in isolation, but composing them with unvalidated remaining accounts can introduce incorrect behavior.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Missing PDA/address constraints for key Drift accounts in initialize_vault (trusting only field comparisons)",
+                    "description": "In `initialize_vault`, some Drift-related accounts are only weakly constrained:\n- `drift_spot_market` is constrained by `market_index == params.spot_market_index` and its mint matches, but there is no `seeds = [...]` + `seeds::program = drift_program.key()` constraint like in `initialize_insurance_fund_stake`.\n- `drift_state`, `drift_user`, and `drift_user_stats` are `AccountInfo` with `/// CHECK: checked in drift cpi` and no local owner/PDA checks.\n\nIf any of these accounts are not the canonical Drift PDAs (or if a Drift-owned account with crafted data could satisfy the field checks), the vault could be initialized against unintended Drift accounts. This becomes security-relevant because the vault persists these pubkeys (`vault.user`, `vault.user_stats`) and later instructions (e.g., `redeem_tokens`) gate behavior based on them.\n\nWhile Drift CPI likely enforces its own seeds for `initialize_user`/`initialize_user_stats`, the lack of explicit PDA/address validation here is a protection mechanism gap and increases blast radius if upstream assumptions change (e.g., program upgrades, alternate deployments, or unexpected account layouts).\n",
+                    "category": "CWE-693",
+                    "severity": "medium",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "InitializeUserCPI method naming mismatch (user vs user_stats) increases risk of integration mistakes",
+                    "description": "In `initialize_vault.rs`, the trait methods appear swapped:\n- `drift_initialize_user` builds `InitializeUserStats` and calls `drift::cpi::initialize_user_stats`\n- `drift_initialize_user_stats` builds `InitializeUser` and calls `drift::cpi::initialize_user`\n\nThe current caller invokes them in the same order, so behavior may still be correct, but this violates clarity/coding standards and increases the chance a future refactor or reuse calls the wrong CPI (especially because both functions take the same `(name, bump)` parameters and both are required for correct setup).\n",
+                    "category": "CWE-710",
+                    "severity": "low",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The reviewed instructions are generally structured and include several important invariants (e.g., share conservation in `redeem_tokens`). The main issues found are rooted in (1) incorrectly named CPI helper methods that do not match the behavior they perform, creating a high risk of integration/maintenance mistakes, and (2) relying on external CPI programs (Drift) to validate critical “unchecked” accounts without locally enforcing key derivations/ownership for those accounts. These issues align to the provided CWE root causes around incorrect specification adherence and inconsistencies between implementation and design/expectations.\n",
+            "findings": [
+                {
+                    "title": "CPI helper methods are swapped/misnamed in InitializeUserCPI implementation",
+                    "description": "In `initialize_vault.rs`, the trait `InitializeUserCPI` is implemented such that:\n- `drift_initialize_user(...)` actually calls `drift::cpi::initialize_user_stats(...)`\n- `drift_initialize_user_stats(...)` actually calls `drift::cpi::initialize_user(...)`\n\nThis is an implementation/design mismatch: the method names imply the opposite behavior of what they perform. Even though `initialize_vault()` calls these two functions in an order that may still “work” today, this mismatch is brittle:\n- Future refactors may reorder calls based on names, breaking initialization.\n- Auditors/integrators may assume incorrect side effects.\n- If either CPI adds preconditions (e.g., requiring user_stats initialized before user) the wrong call sequencing could be introduced accidentally.\n",
+                    "category": "CWE-1068",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "InitializeVault does not locally constrain Drift accounts (user/user_stats/state) beyond 'CHECK', relying on external CPI validation",
+                    "description": "In `initialize_vault.rs`, these accounts are declared as `AccountInfo` with `/// CHECK: checked in drift cpi`:\n- `drift_user_stats`\n- `drift_user`\n- `drift_state`\n\nThere are no local constraints ensuring these are the expected Drift PDAs (or even owned by the Drift program) for the vault authority being used. This relies on Drift CPI to reject incorrect accounts.\n\nImpact:\n- Misbinding/DoS risk: the vault can be initialized pointing at unintended Drift accounts, potentially rendering the vault unusable or incorrectly configured.\n- Safety relies on Drift’s current validation behavior remaining strict; any regression or partial validation in Drift could allow unintended writes/initializations to Drift-owned accounts.\n\nEven if the Drift CPI currently validates correctly, the caller-side contract is not following the “defense in depth” expectation for critical account wiring in Solana/Anchor.\n",
+                    "category": "CWE-573",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "InitializeInsuranceFundStake similarly relies on unchecked Drift accounts and forwards remaining_accounts without local specification enforcement",
+                    "description": "In `initialize_insurance_fund_stake.rs`, multiple Drift-related accounts are `AccountInfo` with `/// CHECK: checked in drift cpi`:\n- `insurance_fund_stake`\n- `drift_user_stats`\n- `drift_state`\n\nAdditionally, the CPI context forwards arbitrary `remaining_accounts` directly into the Drift CPI:\n`with_remaining_accounts(self.remaining_accounts.into())`.\n\nWhile this pattern is common, it increases caller responsibility to strictly follow the callee program’s account specification. Without local constraints (owner checks, PDA derivation checks, expected account list filtering), the instruction’s correctness and safety are tightly coupled to Drift’s validation and the exact remaining-accounts layout.\n\nImpact:\n- Greater chance of misconfiguration and unexpected failures (DoS).\n- Increased risk if downstream CPI validation is ever incomplete for certain optional/remaining accounts.\n",
+                    "category": "CWE-573",
+                    "severity": "low",
+                    "confidence": 0.72
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-758",
+            "CWE-1061",
+            "CWE-573",
+            "CWE-571",
+            "CWE-1092",
+            "CWE-1044",
+            "CWE-1126",
+            "CWE-1164",
+            "CWE-477",
+            "CWE-684",
+            "CWE-1177",
+            "CWE-1101",
+            "CWE-570",
+            "CWE-1059",
+            "CWE-1065",
+            "CWE-1209",
+            "CWE-1048",
+            "CWE-1041",
+            "CWE-1127",
+            "CWE-1357",
+            "CWE-1076",
+            "CWE-1093",
+            "CWE-1120",
+            "CWE-657",
+            "CWE-1066",
+            "CWE-1068"
+        ]
+    ]
+}

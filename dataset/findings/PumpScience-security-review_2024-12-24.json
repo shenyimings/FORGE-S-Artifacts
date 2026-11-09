@@ -1,0 +1,232 @@
+{
+    "path": "reports-without-source/PumpScience-security-review_2024-12-24.md",
+    "project_info": {
+        "url": [
+            "https://github.com/moleculeprotocol/pump-science-contract"
+        ],
+        "commit_id": [
+            "54daf1b93cf6abf955c69f043f73b4df671f97f7"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-12-24",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Lock pool can be DoSed",
+            "description": "The lock_pool instruction uses a lamport balance check (`ctx.accounts.escrow_vault.get_lamports() == 0`) to determine whether to create an Associated Token Account (ATA) for LP tokens. This approach is flawed because an attacker can send SOL to the escrow_vault address before the ATA is created, making the lamport balance non-zero and bypassing the ATA creation logic. Since the presence of SOL does not imply a valid token account, the escrow will lack a proper ATA, preventing LP tokens from being deposited. This breaks the locking mechanism and results in a denial-of-service (DoS) condition for the lock pool functionality.\n",
+            "severity": "critical",
+            "location": [
+                "programs/pump-science/src/instructions/migration/lock_pool.rs#157"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Direct SOL transfers to bonding curve escrow can break protocol invariant",
+            "description": "The bonding curve protocol enforces an invariant that the `real_sol_reserves` state variable must match the actual lamport balance of the `bonding_curve_sol_escrow` account. However, `real_sol_reserves` is only updated during swap operations, while external direct SOL transfers to the escrow can increase its lamport balance without updating the state. This discrepancy causes the invariant check to fail, rendering the protocol unusable until manually fixed. The vulnerability arises from the lack of protection against unsolicited SOL deposits, which breaks a core assumption of the system's state consistency.\n",
+            "severity": "high",
+            "location": [
+                "bonding_curve_sol_escrow"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ],
+                "4": [
+                    "CWE-454"
+                ]
+            },
+            "title": "Bonding Curve DOS through escrow pre-funding",
+            "description": "The `create_bonding_curve` instruction initializes `real_sol_reserves` to 0, but the invariant check requires that this value matches the actual lamport balance in the `sol_escrow` account. Since the PDA address for `sol_escrow` is deterministic, an attacker can pre-send SOL to this address before the bonding curve is created. This causes the invariant check to fail during creation, preventing the bonding curve from being initialized. This denial-of-service attack can block legitimate users from launching new curves, especially if the attacker monitors and targets upcoming launches.\n",
+            "severity": "high",
+            "location": [
+                "create_bonding_curve.rs",
+                "curve.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Unused freeze authority revocation creates token lock risk",
+            "description": "The `revoke_freeze_authority` function in `locker.rs` is defined but not invoked during pool creation. If the freeze authority is not revoked, the bonding curve program retains the ability to freeze user token accounts after migration. This undermines the intended security model where token control should be fully decentralized post-migration. An attacker or malicious actor with access to the freeze authority could freeze user tokens, effectively locking them and preventing transfers, which contradicts the trustless nature of the protocol.\n",
+            "severity": "high",
+            "location": [
+                "locker.rs#L83"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Start slot validation allows past slots",
+            "description": "The validation for `start_slot` in the fee schedule logic only ensures that the provided slot is not in the future (`start_slot <= clock.slot`), allowing creators to set a start slot far in the past. This causes `slots_passed = current_slot - start_slot` to be large from the beginning, skipping early fee phases (e.g., starting at 5% instead of 99%). The intended economic model relies on high initial fees to deter early speculation, so bypassing this undermines the protocol's design. The flaw stems from insufficient bounds checking on the start slot parameter.\n",
+            "severity": "medium",
+            "location": [
+                "CreateBondingCurveParams"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ]
+            },
+            "title": "DOS of CreateBondingCurve",
+            "description": "The `CreateBondingCurve` instruction uses the `init` constraint on `bonding_curve_token_account`, which fails if the associated token account already exists. Since the PDA for this account is predictable, an attacker can front-run the creation by pre-initializing the token account. This prevents the legitimate creator from initializing the bonding curve, resulting in a denial-of-service. The issue arises from using `init` instead of `init_if_needed`, which would allow safe re-initialization or idempotent creation.\n",
+            "severity": "medium",
+            "location": [
+                "CreateBondingCurve"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "The Global Account may be initialized early by the attacker",
+            "description": "The Global Account is initialized using a fixed seed (`Global::SEED_PREFIX`) without binding to the signer's address. Since the initialization function only checks that `global.initialized` is false, any user can preemptively initialize the account and set themselves as the authority. This prevents the legitimate owner from ever initializing the correct configuration, effectively hijacking the protocol's admin controls.\n",
+            "severity": "medium",
+            "location": [
+                "Initialize"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Insufficient SOL balance check ignores rent exemption",
+            "description": "In the swap function, the user's SOL balance is checked using `get_lamports()` against the swap amount, but rent exemption requirements are not considered. This allows a user to proceed with a swap that depletes their account below the rent-exempt threshold. Once below this threshold, the account becomes subject to rent collection and may eventually be purged by the Solana runtime. This can lead to loss of access to remaining funds or unexpected account closure, harming user experience and fund safety.\n",
+            "severity": "low",
+            "location": [
+                "programs/pump-science/src/instructions/curve/swap.rs#L177"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Insufficient validation in global parameter updates",
+            "description": "The `set_params` function accepts a `GlobalSettingsInput` struct with multiple optional fields but does not perform comprehensive validation on the provided values. This could allow setting invalid or harmful parameters, such as zero decimals or inconsistent reserve values, which may destabilize the protocol or lead to unexpected behavior. The lack of input validation increases the risk of misconfiguration, especially if the admin function is called with incorrect data.\n",
+            "severity": "low",
+            "location": [
+                "set_params"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "State Inconsistency Due to Solana Rollback",
+            "description": "The protocol does not account for Solana chain rollbacks, which could result in outdated global configuration parameters being used after a restart. If the `last_updated_slot` is not compared against the `LastRestartSlot` sysvar, the protocol might operate with stale settings, potentially leading to incorrect behavior or vulnerabilities. This is particularly dangerous for time-sensitive or state-dependent operations that assume monotonic progression.\n",
+            "severity": "low",
+            "location": [
+                "Global"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Insufficient Token Account validation in pool initialization",
+            "description": "The `InitializePoolWithConfig` instruction uses `UncheckedAccount` for multiple token accounts, skipping critical validations such as ownership and mint association. This allows potentially invalid or malicious accounts to be passed, leading to incorrect state initialization or token loss. Proper constraints using `Box<Account<TokenAccount>>` with ownership and mint checks should be enforced to ensure type and semantic safety.\n",
+            "severity": "low",
+            "location": [
+                "InitializePoolWithConfig"
+            ],
+            "files": []
+        }
+    ]
+}

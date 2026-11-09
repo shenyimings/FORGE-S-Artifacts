@@ -1,0 +1,366 @@
+{
+    "path": "reports/Clone_Protocol_Solana_Program_Security_Assessment_Report_Halborn_Final.pdf",
+    "project_info": {
+        "url": "https://github.com/Clone-Protocol/clone-protocol",
+        "commit_id": "ec94adf29c9de7bac9461626fe049c1bc259ac8a",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-10-09",
+        "project_path": "contracts/Clone_Protocol_Solana_Program_Security_Assessment_Report_Halborn_Final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "MISCALCULATION DURING LIQUIDITY WITHDRAWAL OF THE COMET",
+            "description": "The WithdrawLiquidityFromComet instruction uses the wrong decimal (clone decimal instead of collateral decimal) during calculation, leading to incorrect updates of pool and user account fields such as collateral_ild, onasset_ild, and their corresponding rebates. This inconsistency affects downstream operations including CollectLpRewards, liquidation, and PayImpermanentLoss instructions which rely on these values. The root cause is the misuse of decimal scaling in arithmetic operations. An attacker could exploit this by withdrawing liquidity in a way that distorts accounting state, potentially leading to incorrect reward distribution or liquidation behavior. The impact includes loss of deposit integrity and incorrect yield calculations, though no direct fund theft is implied.\n",
+            "severity": "low",
+            "files": [
+                "programs/clone/src/instructions/withdraw_liquidity_from_comet.rs"
+            ],
+            "location": [
+                "WithdrawLiquidityFromComet#"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "LIQUIDATING A BORROW POSITION WITH PARTIAL DEBT SETTLEMENT",
+            "description": "The LiquidateBorrowPosition instruction allows partial liquidation of a borrow position without enforcing full debt settlement. If the min_collateral_ratio is too low and price divergence is large, a liquidator may profit from taking most of the collateral while leaving residual debt, creating a disincentive to fully liquidate. This occurs due to missing checks ensuring sufficient collateral recovery relative to outstanding debt. An attacker (or passive liquidator) could exploit this by partially liquidating positions for profit while leaving undercollateralized debt unresolved, forcing the Insurance Fund to cover losses. The impact includes medium risk to deposits and yield due to potential undercollateralization and reliance on protocol treasury to cover shortfalls.\n",
+            "severity": "low",
+            "files": [
+                "programs/clone/src/instructions/liquidate_borrow_position.rs"
+            ],
+            "location": [
+                "LiquidateBorrowPosition#74-193"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "LACK OF AUTHORITY CHECK IN INITIALIZE FUNCTION",
+            "description": "The initialize function in the depository-token program does not validate that the caller is an authorized entity, creating a front-running risk where any user can initialize the settings account with arbitrary token mints and accounts. The root cause is the absence of an authority constraint in the Initialize accounts struct. An attacker could exploit this by front-running the legitimate deployment to set malicious token mints, potentially disrupting protocol functionality or enabling spoofed token interactions. The impact includes low integrity and availability risks, as incorrect initialization could render the program unusable or lead to misrouting of funds.\n",
+            "severity": "low",
+            "files": [
+                "programs/clone/src/instructions/initialize_clone.rs"
+            ],
+            "location": [
+                "Initialize#133-156"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "MISSING SANITY CHECK TO ENSURE THE DEPOSITORY TOKEN MINT DOES NOT MATCH THE DEPOSITING TOKEN MINT",
+            "description": "The initialize function in the depository-token program does not verify that the depository_token_mint and depositing_token_mint are distinct, allowing them to be set to the same token. This could result in nonsensical swap logic or infinite loops in price calculation. The root cause is the lack of a basic inequality check between the two mints. An attacker could exploit this by initializing the program with identical mints, potentially disrupting swap mechanics or enabling unintended behavior in downstream functions. The impact is limited to integrity issues in state initialization, with no direct fund loss but potential operational failure.\n",
+            "severity": "low",
+            "files": [
+                "programs/clone/src/instructions/initialize_clone.rs"
+            ],
+            "location": [
+                "initialize#13-26"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "CHECKED ARITHMETIC MISSING",
+            "description": "Multiple functions across the codebase use unchecked arithmetic operations (addition, multiplication, division), which can lead to integer overflow or underflow. The root cause is the use of standard operators instead of checked variants (e.g., .checked_add()). An attacker could exploit this by crafting inputs that trigger arithmetic overflows, leading to incorrect state updates, such as inflated balances or negative values. The impact includes potential loss of deposit and yield integrity, as well as availability issues due to program panics. While mitigated by later fixes, the original code posed a risk to core financial calculations.\n",
+            "severity": "informational",
+            "files": [
+                "programs/clone/src/math.rs",
+                "programs/clone/src/states.rs",
+                "programs/clone/src/instructions/swap.rs",
+                "programs/clone/src/instructions/liquidate_comet_collateral_ild.rs",
+                "programs/clone/src/instructions/liquidate_comet_onasset_ild.rs",
+                "programs/clone/src/instructions/liquidate_borrow_position.rs",
+                "programs/clone/src/instructions/withdraw_liquidity_from_comet.rs",
+                "programs/clone/src/instructions/withdraw_collateral_from_comet.rs",
+                "programs/clone/src/instructions/pay_impermanent_loss_debt.rs",
+                "programs/clone/src/instructions/collect_lp_rewards.rs",
+                "programs/clone/src/instructions/pay_borrow_debt.rs",
+                "programs/clone/src/instructions/add_collateral_to_borrow.rs",
+                "programs/clone/src/instructions/add_collateral_to_comet.rs",
+                "programs/clone/src/instructions/add_liquidity_to_comet.rs"
+            ],
+            "location": [
+                "maths.rs",
+                "states.rs",
+                "swap#",
+                "liquidate_comet_collateral_ild#",
+                "liquidate_comet_onasset_ild#",
+                "liquidate_borrow_position#125",
+                "withdraw_liquidity_from_comet#",
+                "withdraw_collateral_from_comet#",
+                "pay_impermanent_loss_debt#",
+                "collect_lp_rewards#",
+                "pay_borrow_debt#",
+                "add_collateral_to_borrow#",
+                "add_collateral_to_comet#",
+                "add_liquidity_to_comet#"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "ORACLE CHECKS MISSING",
+            "description": "The update_oracles instruction does not validate the ownership or correctness of oracle accounts being added or modified. The root cause is the lack of verification that the provided oracle account is legitimate or owned by a trusted source. An attacker with admin privileges (or a compromised admin) could exploit this by injecting a malicious oracle with fake price data, leading to incorrect valuation of assets. The impact includes high risk to availability and deposit/yield integrity, as price manipulation could trigger incorrect liquidations or reward distributions. However, since only admins can call this function, the exploitability is limited to privileged actors.\n",
+            "severity": "informational",
+            "files": [
+                "programs/clone/src/instructions/update_oracles.rs"
+            ],
+            "location": [
+                "update_oracles#42-85"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "ADMINISTRATOR ADDRESS CANNOT BE TRANSFERRED",
+            "description": "The program does not support transferring the administrator role to a new address, meaning if the current admin key is lost or compromised, the protocol loses critical governance functionality. The root cause is the lack of a two-step ownership transfer mechanism. An attacker who compromises the admin key could permanently disrupt governance, or the team might be forced to redeploy the entire program if the key is lost. The impact is medium integrity risk due to inability to rotate credentials, though operational continuity is maintained via external tools like Squads. This limits the severity to informational.\n",
+            "severity": "informational",
+            "files": [
+                "programs/clone/src/instructions/initialize_clone.rs"
+            ],
+            "location": [
+                "InitializeClone#83-122"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "OVERCOLLATERAL RATIOS CHECK MISSING",
+            "description": "The AddPool and UpdatePoolParameters instructions allow the administrator to set critical parameters min_overcollateral_ratio and max_liquidation_overcollateral_ratio without any validation. The root cause is the absence of input validation in the instruction handler, which could allow both values to be set to zero or for the max value to be lower than the min value. An attacker with admin privileges could exploit this by setting invalid ratios, potentially leading to liquidity inconsistencies and incorrect borrowing position settlements. The impact includes system instability and potential financial loss due to incorrect liquidation or borrowing logic.\n",
+            "severity": "informational",
+            "files": [
+                "programs/clone/src/instructions/add_pool.rs"
+            ],
+            "location": [
+                "AddPool.execute#67-68"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "POTENTIAL DUPLICATION OF AUTHORITIES",
+            "description": "The UpdateCloneParameters instruction allows administrators to add new authorities to the Clone account but does not check for duplicate addresses. The cause is the lack of a uniqueness check before inserting a new authority into the auth array. An attacker or administrator could accidentally add the same authority multiple times, which would require multiple removal calls to fully eliminate, increasing operational complexity and risk of misconfiguration. The impact is primarily on usability and administrative reliability, with no direct financial loss, but it could complicate governance operations.\n",
+            "severity": "informational",
+            "files": [
+                "programs/clone/src/instructions/update_clone_parameters.rs"
+            ],
+            "location": [
+                "UpdateCloneParameters.execute#33-44",
+                "UpdateCloneParameters.execute#59-63"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "ZERO AMOUNT CHECK MISSING",
+            "description": "Instructions such as AddCollateralToBorrow, BorrowMore, and WithdrawCollateralFromComet do not validate that the provided amount is non-zero. The root cause is the absence of a basic input validation check on the amount parameter. An attacker could exploit this by submitting zero-amount transactions, which may consume compute units and degrade performance without achieving any meaningful state change. The impact is inefficient use of resources and potential denial-of-service through unnecessary computation, though there is no direct financial loss.\n",
+            "severity": "informational",
+            "files": [
+                "programs/clone/src/instructions/add_collateral_to_borrow.rs",
+                "programs/clone/src/instructions/borrow_more.rs",
+                "programs/clone/src/instructions/add_collateral_to_comet.rs",
+                "programs/clone/src/instructions/withdraw_collateral_from_comet.rs"
+            ],
+            "location": [
+                "add_collateral_to_borrow.rs",
+                "borrow_more.rs",
+                "add_collateral_to_comet.rs",
+                "withdraw_collateral_from_comet.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "MISSING CARGO OVERFLOW CHECKS",
+            "description": "The project's Cargo.toml files do not include the overflow-checks=true flag in release builds, meaning integer overflows may go undetected. The cause is a missing configuration in the build profile, which disables runtime overflow checks in optimized builds. While checked arithmetic functions are used, silent overflows could still lead to unexpected behavior in edge cases. An attacker could potentially trigger arithmetic overflows that result in incorrect state transitions or miscalculations. The impact is moderate, as it could lead to logic errors, though no direct exploit path was identified.\n",
+            "severity": "informational",
+            "files": [
+                "programs/clone/Cargo.toml",
+                "programs/clone-staking/Cargo.toml"
+            ],
+            "location": [
+                "programs/clone/Cargo.toml",
+                "programs/clone-staking/Cargo.toml"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "POSSIBLE RUST PANICS DUE TO UNSAFE UNWRAP USAGE",
+            "description": "The codebase extensively uses the unwrap() method on Option and Result types, which can cause program panics if the value is None or Err. The root cause is the use of unsafe error handling practices in production code. An attacker could potentially manipulate inputs or system state to trigger a None or Err condition, leading to a program crash and denial of service. The impact includes reduced reliability and availability of the program, with potential cascading effects on dependent transactions and user experience.\n",
+            "severity": "informational",
+            "files": [
+                "programs/clone/src/instructions/update_clone_parameters.rs",
+                "programs/clone/src/instructions/update_prices.rs",
+                "programs/clone/src/instructions/initialize_clone.rs",
+                "programs/clone/src/instructions/withdraw_collateral_from_borrow.rs",
+                "programs/clone/src/instructions/swap.rs",
+                "programs/clone/src/instructions/collect_lp_rewards.rs",
+                "programs/clone/src/instructions/withdraw_liquidity_from_comet.rs",
+                "programs/clone/src/instructions/add_liquidity_to_comet.rs",
+                "programs/clone/src/instructions/initialize_borrow_position.rs",
+                "programs/clone/src/instructions/add_collateral_to_borrow.rs",
+                "programs/clone/src/instructions/pay_borrow_debt.rs",
+                "programs/clone/src/instructions/wrap_asset.rs",
+                "programs/clone/src/instructions/liquidate_comet_collateral_ild.rs",
+                "programs/clone/src/instructions/borrow_more.rs",
+                "programs/clone/src/instructions/liquidate_comet_onasset_ild.rs",
+                "programs/clone/src/instructions/liquidate_borrow_position.rs",
+                "programs/clone/src/instructions/pay_impermanent_loss_debt.rs",
+                "programs/clone/src/math.rs",
+                "programs/clone/src/states.rs"
+            ],
+            "location": [
+                "update_clone_parameters.rs#43",
+                "update_clone_parameters.rs#62",
+                "update_prices.rs#44",
+                "update_prices.rs#46",
+                "update_prices.rs#57",
+                "update_prices.rs#58",
+                "initialize_clone.rs#54",
+                "withdraw_collateral_from_borrow.rs#115",
+                "swap.rs#93",
+                "swap.rs#99",
+                "swap.rs#131",
+                "swap.rs#132",
+                "swap.rs#177",
+                "swap.rs#178",
+                "swap.rs#240",
+                "swap.rs#241",
+                "swap.rs#298",
+                "swap.rs#299",
+                "swap.rs#331",
+                "swap.rs#347",
+                "collect_lp_rewards.rs#91",
+                "collect_lp_rewards.rs#117",
+                "withdraw_liquidity_from_comet.rs#74",
+                "withdraw_liquidity_from_comet.rs#96",
+                "withdraw_liquidity_from_comet.rs#112",
+                "withdraw_liquidity_from_comet.rs#116",
+                "add_liquidity_to_comet.rs#68",
+                "add_liquidity_to_comet.rs#70",
+                "add_liquidity_to_comet.rs#75",
+                "add_liquidity_to_comet.rs#109",
+                "add_liquidity_to_comet.rs#128",
+                "initialize_borrow_position.rs#140",
+                "initialize_borrow_position.rs#150",
+                "initialize_borrow_position.rs#152",
+                "add_collateral_to_borrow.rs#63",
+                "add_collateral_to_borrow.rs#66",
+                "pay_borrow_debt.rs#80",
+                "wrap_asset.rs#59",
+                "liquidate_comet_collateral_ild.rs#100",
+                "liquidate_comet_collateral_ild.rs#106",
+                "borrow_more.rs#108",
+                "borrow_more.rs#113",
+                "liquidate_comet_onasset_ild.rs#118",
+                "liquidate_comet_onasset_ild.rs#132",
+                "liquidate_comet_onasset_ild.rs#148",
+                "liquidate_borrow_position.rs#128",
+                "liquidate_borrow_position.rs#166",
+                "liquidate_borrow_position.rs#182",
+                "liquidate_borrow_position.rs#183",
+                "liquidate_borrow_position.rs#197",
+                "pay_impermanent_loss_debt.rs#90",
+                "pay_impermanent_loss_debt.rs#119",
+                "pay_impermanent_loss_debt.rs#149",
+                "math.rs#97",
+                "math.rs#178",
+                "math.rs#181",
+                "math.rs#192",
+                "math.rs#194",
+                "math.rs#205",
+                "math.rs#206",
+                "states.rs#121",
+                "states.rs#126",
+                "states.rs#231"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,582 @@
+{
+    "path": "reports-without-source/Saffron-security-review_2026-03-06.md",
+    "project_info": {
+        "url": [
+            "https://github.com/saffron-finance/orca-saffron"
+        ],
+        "commit_id": [
+            "56b254ac8c19a640318e40b8b40e0240b36e5c9f"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-03-06",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "[H-01] `deposit_fixed` does not validate tick range against vault's `tick_lower` and `tick_upper`",
+            "description": "The vulnerability lies in the `deposit_fixed` function, which fails to validate that the tick range of the deposited Orca liquidity position matches the originally created vault's `tick_lower` and `tick_upper` values. These tick boundaries define the expected fee generation level for the variable side, which pays a premium based on the advertised range. However, the function only overwrites the vault's stored tick values with those from the deposited position, without any validation. This allows a malicious fixed depositor to deposit a position with a significantly wider or out-of-range tick spread, resulting in lower fee generation than expected. An attacker could exploit this by depositing a position far from the current price, generating little to no fees, while the variable depositor has already paid the full premium based on the original, tighter tick range. This constitutes a direct theft of the variable depositor's premium due to misrepresented vault economics, undermining the core value proposition of the fixed-income product.\n",
+            "severity": "high",
+            "location": [
+                "deposit_fixed.rs#268",
+                "deposit_fixed.rs#273"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "[H-02] Fixed deposit allows unauthorized premium capture and tolerance bypass",
+            "description": "The `deposit_fixed` function does not enforce the fixed-side economic commitments (liquidity amount, tick range, tolerance) set during vault initialization and creation. Instead, it allows any valid Orca position from the same pool to be deposited, overwriting the vault's `fixed_side_capacity` and tick values, and immediately minting the sole claim token to the depositor. This enables an attacker to deposit a minimal or dust liquidity position after the variable side has paid the full premium, thereby claiming the entire premium upon calling `claim`. The unused `deposit_tolerance_bps` parameter further misleads integrators into believing there is protection against such attacks. The root cause is the lack of validation in `deposit_fixed` against the committed `fixed_side_capacity` and tick range, combined with the auto-start mechanism that triggers once both NFTs exist. This allows for direct premium theft from the variable depositor, breaking the economic model and enabling repeatable exploitation across vaults.\n",
+            "severity": "high",
+            "location": [
+                "initialize.rs#140",
+                "create.rs#186",
+                "vault.rs#243",
+                "deposit_variable.rs#122",
+                "deposit_fixed.rs#230",
+                "deposit_fixed.rs#243",
+                "deposit_fixed.rs#268",
+                "deposit_fixed.rs#273",
+                "deposit_fixed.rs#307",
+                "claim.rs#31",
+                "claim.rs#123"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "[M-01] Hardcoded `remaining_accounts_info` prevent vault fund transfers",
+            "description": "The Saffron Vault program hardcodes the `remaining_accounts_info` parameter as `None` when making CPI calls to Orca Whirlpool's V2 instructions (e.g., `collect_fees_v2`, `increase_liquidity_v2`). This prevents the passing of extra accounts required by the Token-2022 Transfer Hook extension. Since Orca Whirlpool supports pools with Transfer Hook-enabled tokens (given a TokenBadge), any vault interacting with such a pool will fail during deposit, fee collection, or liquidity removal. Specifically, `increase_liquidity_v2` will fail on deposit, and `collect_fees_v2` and `decrease_liquidity_v2` will fail on withdrawal, blocking all exit paths. As a result, liquidity and accrued fees become permanently locked in the vault. This issue affects multiple critical functions including `withdraw_fixed`, `early_exit_fixed`, and `admin_withdraw_fixed`, leading to a permanent loss of funds for users if the underlying pool uses Transfer Hook tokens.\n",
+            "severity": "medium",
+            "location": [
+                "cpi/orca.rs#757-759",
+                "withdraw.rs#531",
+                "early_exit.rs#267",
+                "admin.rs#308",
+                "cpi/orca.rs#625",
+                "cpi/orca.rs#688"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "[M-02] User `withdraw_variable` can be called after admin-fixed-withdraw is set",
+            "description": "The `withdraw_variable` function does not check whether the admin has already initiated closure by calling `admin_withdraw_fixed`. After the admin withdraws the fixed side, `admin_fixed_withdrawn` is set to 1, but the user can still call `withdraw_variable`, which only checks that the vault has ended and that `has_position()` is false (which is true after admin withdrawal). This allows the variable depositor to settle and receive 100% of the net earnings before the admin can call `admin_withdraw_variable`. The intended flow requires the admin to collect a 0.5% `ADMIN_CLOSE_FEE_BPS` from the earnings during `admin_withdraw_variable`, but if the user withdraws first, the earnings are already zero, and the protocol loses the fee. This results in an unintended transfer of protocol revenue to the user, undermining the fee model and reducing protocol income.\n",
+            "severity": "medium",
+            "location": [
+                "withdraw.rs#188",
+                "admin.rs#232"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "[M-03] Early_withdraw_fixed incorrectly clears `fixed_side_capacity` and tick value",
+            "description": "The `early_withdraw_fixed` function incorrectly clears critical configuration fields such as `fixed_side_capacity`, `tick_lower`, and `tick_upper`, which were set during vault creation and initialization, not during `deposit_fixed`. These values are essential for maintaining the vault's economic parameters and enabling future re-deposits. Clearing them renders the vault unusable for subsequent deposits, as the reference values for liquidity and tick range are lost. Furthermore, if future logic (e.g., `validate_liquidity_tolerance`) relies on `fixed_side_capacity`, a zero value would invalidate any tolerance checks. This creates a latent hazard where the vault's state becomes corrupted after an early withdrawal, preventing legitimate reuse and potentially breaking future validation logic, leading to operational failure.\n",
+            "severity": "medium",
+            "location": [
+                "early_withdraw.rs#3"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "[M-04] Admin closure relies on outdated depositor address in vault",
+            "description": "The admin closure functions (`admin_withdraw_fixed`, `admin_withdraw_variable`) rely on depositor addresses stored in the vault state at deposit time, rather than verifying the current bearer of the fixed or variable NFT. While user withdrawals are bearer-based (any NFT holder can withdraw), the admin path enforces the original depositor's address, preventing the current NFT holder from receiving funds. This breaks the bearer-token entitlement model, allowing the original depositor to reclaim assets even after selling the NFT. An attacker can deposit, sell the bearer rights, and later reclaim the position or earnings via admin closure, effectively extracting value from the buyer. This inconsistency undermines trust in the secondary market for bearer tokens and enables repeated exploitation per vault.\n",
+            "severity": "medium",
+            "location": [
+                "deposit_fixed.rs#275",
+                "deposit_variable.rs#172",
+                "admin.rs#232",
+                "admin.rs#453",
+                "admin.rs#345",
+                "admin.rs#627",
+                "admin.rs#638",
+                "admin.rs#649",
+                "withdraw.rs#188",
+                "withdraw.rs#367",
+                "withdraw.rs#314",
+                "withdraw.rs#572",
+                "admin.rs#350",
+                "admin.rs#690",
+                "error.rs#191",
+                "admin.rs#731"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "[M-05] Unvalidated token mints in `create_vault` lead to withdrawal failure",
+            "description": "The `create_vault` function accepts `token_mint_a` and `token_mint_b` from the caller without validating that they match the actual token mints of the provided Whirlpool. The function only checks the Whirlpool's owner and tick spacing. Later, during withdrawal or admin operations, the stored (potentially incorrect) mints are passed to Orca CPI calls, which enforce strict consistency between the Whirlpool and its token mints. This causes the CPI to revert, blocking all withdrawal paths. For example, an attacker could create a vault with spoofed mints, allow a legitimate deposit, and then render the vault permanently unusable by causing all `collect_fees_v2` calls to fail. This results in a permanent liveness failure: the fixed side cannot withdraw the position, the variable side cannot withdraw earnings due to dependency on fixed withdrawal, and admin recovery is also blocked, leading to complete fund lockup.\n",
+            "severity": "medium",
+            "location": [
+                "create.rs#120",
+                "create.rs#145",
+                "create.rs#152",
+                "create.rs#178",
+                "deposit_fixed.rs#150",
+                "deposit_fixed.rs#156",
+                "deposit_fixed.rs#231",
+                "withdraw.rs#410",
+                "withdraw.rs#530",
+                "withdraw.rs#536",
+                "withdraw.rs#185",
+                "admin.rs#150",
+                "admin.rs#308",
+                "admin.rs#314",
+                "admin.rs#736",
+                "admin.rs#737",
+                "orca.rs#751",
+                "orca.rs#764",
+                "orca.rs#768"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Admin close cannot complete after early_exit_fixed",
+            "description": "The admin_withdraw_fixed function requires that the vault still holds the position NFT (via vault.has_position()), but after early_exit_fixed is called, the position is already transferred out, causing has_position() to return false. This causes the admin_withdraw_fixed step to fail, which blocks subsequent steps in the admin close process, including admin_withdraw_variable and admin_close_vault.\n\nThe root cause is a dependency on the presence of the position NFT in the vault during the admin withdrawal flow, even though the position may have already been returned during early exit. An attacker or unintended sequence of events where the fixed side exits early and the variable depositor never withdraws can trigger this condition.\n\nAn attacker could exploit this by initiating an early exit, thereby removing the position NFT before the admin attempts to withdraw, intentionally blocking the full admin close sequence. This does not require direct malicious code but leverages incorrect state assumptions in the admin flow.\n\nThe impact is that the remaining fees, penalty amounts, and vault rent become permanently stuck, with no recovery path available. This results in a loss of funds for both users and the protocol, and prevents proper cleanup of the vault.\n",
+            "severity": "low",
+            "location": [
+                "admin_withdraw_fixed",
+                "early_exit_fixed",
+                "has_position()"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Acceptance of unverified pools in Saffron from Whirlpool program",
+            "description": "The create_vault instruction in Saffron accepts any account owned by the official Orca Whirlpool program as a valid pool target without verifying whether the pool belongs to a vetted WhirlpoolsConfig, has sufficient liquidity, or meets any quality threshold. This over-trusts program ownership as a proxy for pool legitimacy.\n\nThe root cause is the lack of on-chain validation for pool configuration, allowing any user to create a new, low-liquidity, or low-fee pool under the official Orca program and route user funds into it without restriction. While the pool is technically valid, it may not meet expected quality standards.\n\nAn attacker could create a malicious or low-quality pool under the official Orca program and use it during vault creation, misleading users or integrators who assume that \"official\" implies vetted or safe. Users may deposit into vaults that route to such pools without being aware of the risks.\n\nThe impact is not direct fund loss, but it significantly widens the trust boundary. Users may be exposed to poor-performing or manipulated pools under the guise of official integration, leading to potential economic loss or degraded user experience. It undermines the expected security model of the integration.\n",
+            "severity": "low",
+            "location": [
+                "programs/saffron-vault/src/instructions/vault/create.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "initialize_factory allows unauthorized address to gain authority",
+            "description": "The initialize_factory instruction allows any signer to become the factory authority by being the first to call it. The instruction uses a PDA with a fixed seed but does not restrict which signer can initialize it, enabling front-running.\n\nThe root cause is the absence of a check binding the authority to a trusted entity such as the program deployer or upgrade authority. The init constraint ensures one-time initialization but does not enforce authorization.\n\nAn attacker can monitor the blockchain for the deployment of the program and front-run the legitimate initialization transaction by submitting their own with higher fees, thereby becoming the permanent factory authority.\n\nThe impact is severe: the attacker gains full control over critical protocol parameters including fee settings, fee receiver address, deposit tolerance, admin withdrawal capabilities, and authority transfer. This enables theft of protocol fees, denial of service, or complete protocol takeover.\n",
+            "severity": "low",
+            "location": [
+                "programs/saffron-vault/src/instructions/factory/initialize.rs",
+                "initialize_factory"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "Frozen depositor ATA permanently blocks admin vault close",
+            "description": "If a depositor's associated token account (ATA) for any of the vault's token mints (token_mint_a, token_mint_b, variable_asset) is frozen by the mint's freeze authority, the admin_withdraw_variable function will fail when attempting to transfer earnings, blocking the entire admin close process.\n\nThe root cause is that the admin withdrawal path hardcodes the destination ATAs based on the depositor's original accounts and does not allow alternative destinations. If any of these ATAs are frozen, the transfer CPI reverts, preventing the admin from completing the withdrawal.\n\nAn attacker with freeze authority (e.g., a centralized stablecoin issuer like Circle freezing a USDC account) could freeze a depositor's ATA, either maliciously or due to external compliance actions, thereby permanently locking vault funds.\n\nThe impact is that all remaining earnings, penalties, and rent in the vault become permanently inaccessible. This results in irreversible fund loss and prevents proper vault closure, leading to resource leakage and user harm.\n",
+            "severity": "low",
+            "location": [
+                "admin_withdraw_variable",
+                "admin_close_vault"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing anchor discriminator validation on manually parsed Orca account",
+            "description": "In create_vault and deposit_fixed, the program manually parses raw account data from Orca Whirlpool and Position accounts. While it validates the account owner, it does not check the 8-byte Anchor discriminator before parsing, which could allow incorrect account types to be misinterpreted.\n\nThe root cause is incomplete deserialization safety. Although the Orca program owns multiple account types, the code assumes correct layout without verifying the account type via discriminator.\n\nAn attacker could potentially construct a malicious account with the same owner but different layout, though practical exploitation is mitigated by subsequent field-level checks (e.g., pubkey matches, NFT ownership). Still, the lack of discriminator check reduces robustness.\n\nThe impact is low due to existing mitigations, but it represents a deviation from secure parsing practices. In rare edge cases, it could lead to incorrect state interpretation or denial of service, though not direct fund loss.\n",
+            "severity": "low",
+            "location": [
+                "create_vault",
+                "deposit_fixed"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "VaultState::get_state() off-by-one at end_time boundary",
+            "description": "The Vault::get_state() function uses `current_time <= self.end_time` to determine if the vault is in the Started state, while withdrawal and admin instructions use `clock.unix_timestamp >= vault.end_time` to allow post-end actions. This creates a discrepancy at the exact end_time.\n\nThe root cause is inconsistent boundary logic: the helper treats end_time as still \"started\", while the rest of the system treats it as ended. This inconsistency affects off-chain clients that rely on get_state().\n\nAn attacker cannot directly exploit this, but a user or indexer relying on get_state() may incorrectly believe the vault is still active at the boundary, leading to incorrect UI state or timing decisions.\n\nThe impact is limited to incorrect state reporting at a single timestamp. It does not affect on-chain logic or fund safety, but may confuse users or indexing services.\n",
+            "severity": "low",
+            "location": [
+                "Vault::get_state()"
+            ],
+            "files": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "admin_close_vault does not close vault ATAs rent locked",
+            "description": "The admin_close_vault function sweeps remaining tokens from the vault's ATAs to the fee receiver but does not close the ATAs themselves. After sweeping, the ATAs remain open with zero balance but still hold rent-exempt lamports.\n\nThe root cause is the omission of ATA closure in the cleanup process. Once the vault PDA is closed, its authority no longer exists, making future closure impossible.\n\nAn attacker cannot exploit this directly, but every vault lifecycle results in stranded rent (approx. 0.006–0.008 SOL), which accumulates over time.\n\nThe impact is economic inefficiency and permanent loss of lamports. While small per vault, this represents a resource leak that degrades network efficiency and increases cost for users.\n",
+            "severity": "low",
+            "location": [
+                "admin_close_vault"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Orca incentive rewards are not attributed",
+            "description": "The program only collects trading fees via collect_fees_v2 and does not call collect_reward_v2 to collect Orca incentive rewards. These rewards remain in the position and are later claimed by the fixed side upon withdrawal.\n\nThe root cause is incomplete integration with Orca's incentive system. The protocol assumes only trading fees are relevant, but ignores additional reward tokens that may accrue.\n\nAn attacker cannot exploit this, but the fixed side benefits from unclaimed incentive rewards that the variable side may expect to receive.\n\nThe impact is misaligned incentives and potential user confusion. The variable side, who provides premium, does not receive all yield generated during the vault period, reducing yield fairness and transparency.\n",
+            "severity": "low",
+            "location": [
+                "collect_fees_v2",
+                "withdraw_fixed"
+            ],
+            "files": []
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Withdraw handlers do not check for admin-withdrawn flags",
+            "description": "The withdraw_fixed function fails late when admin_withdraw_fixed has already been called (due to has_position() check), while withdraw_variable allows execution even after admin_withdraw_variable, resulting in a zero-payout transaction that only burns the bearer token.\n\nThe root cause is missing early validation of admin withdrawal state. The functions do not check whether admin actions have already occurred, leading to inconsistent behavior.\n\nAn attacker could exploit this to force users into paying for failed or zero-value transactions, especially in withdraw_variable, where users burn their bearer token without receiving anything.\n\nThe impact is user experience degradation and unnecessary transaction costs. While not a direct fund loss, it enables griefing and reduces trust in the protocol.\n",
+            "severity": "low",
+            "location": [
+                "withdraw_fixed",
+                "withdraw_variable"
+            ],
+            "files": []
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Claim leaves user claim token ATA open after burn rent not returned",
+            "description": "The claim instruction burns the user's claim token but does not close the associated token account (ATA), leaving rent-exempt lamports locked in the zero-balance account.\n\nThe root cause is the absence of ATA closure after burn. The user must perform a separate transaction to reclaim rent, which is not automated.\n\nAn attacker cannot exploit this directly, but every claim operation results in stranded rent (approx. 0.002 SOL).\n\nThe impact is economic inefficiency and increased cost for users. It represents a minor but widespread resource leak across all claim operations.\n",
+            "severity": "low",
+            "location": [
+                "claim"
+            ],
+            "files": []
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Truncation of remaining_premium undercharges early exit penalty",
+            "description": "The early_exit instruction computes remaining_premium and penalty_payment using integer division, which truncates toward zero, resulting in a lower penalty than mathematically due.\n\nThe root cause is the use of truncating division without rounding up, which systematically underpays the variable side and undercharges the early exiter.\n\nAn attacker can exploit this by exiting early and paying less than the fair penalty amount, especially in edge cases with small time remaining.\n\nThe impact is economic imbalance: the variable side receives less than expected, and the fixed side (early exiter) benefits unfairly. This undermines the penalty mechanism's fairness and predictability.\n",
+            "severity": "low",
+            "location": [
+                "early_exit"
+            ],
+            "files": []
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Tick bounds in Saffron do not match Orca's canonical range",
+            "description": "Saffron defines MIN_TICK and MAX_TICK as ±887272, while Orca uses ±443636. Saffron's bounds are twice as wide, allowing creation of vaults with tick ranges that Orca considers invalid.\n\nThe root cause is incorrect constant definition. Although deposit_fixed overwrites the ticks from the Orca position (which is within bounds), the initial validation is too permissive.\n\nAn attacker could attempt to create a vault with out-of-range ticks, though it would be corrected later. Still, the inconsistency increases risk of future bugs.\n\nThe impact is low, as no invalid state is ultimately sent to Orca. However, it represents a correctness issue and increases maintenance burden and potential for future vulnerabilities.\n",
+            "severity": "low",
+            "location": [
+                "programs/saffron-vault/src/constants.rs",
+                "create_vault",
+                "deposit_fixed"
+            ],
+            "files": []
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Variable asset ATA created in deposit_variable instead of initialize_vault",
+            "description": "The vault's variable asset ATA is created in deposit_variable using init_if_needed, meaning the variable depositor pays rent. All other vault accounts are created in initialize_vault, paid by the vault creator.\n\nThe root cause is inconsistent account creation timing. The variable asset mint is known at initialization, so the ATA could be created then.\n\nAn attacker cannot exploit this, but it results in unfair cost distribution: the variable depositor bears rent cost that should be the creator's responsibility.\n\nThe impact is economic inefficiency and inconsistent UX. It also increases transaction complexity and cost for depositors.\n",
+            "severity": "low",
+            "location": [
+                "deposit_variable",
+                "initialize_vault"
+            ],
+            "files": []
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "Front-running on create_vault",
+            "description": "The expected_vault_id check in create_vault creates a front-running opportunity: an attacker can observe a pending transaction and submit a higher-fee transaction with the same expected ID to claim the vault slot.\n\nThe root cause is the combination of a predictable ID and a race condition in incrementing next_vault_id. The check fails if the ID no longer matches, allowing griefing.\n\nAn attacker can repeatedly front-run legitimate users, forcing them to retry and pay more fees, or preventing vault creation entirely.\n\nThe impact is denial of service and increased cost for users. While not a fund loss, it enables persistent griefing and undermines protocol usability.\n",
+            "severity": "low",
+            "location": [
+                "create_vault",
+                "expected_vault_id"
+            ],
+            "files": []
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Missing ownership verification in withdraw.rs allows unauthorized withdrawal",
+            "description": "The withdraw_variable and withdraw_fixed instructions do not verify that the bearer token ATA is owned by the caller. This allows any delegate of the bearer token to initiate withdrawal and redirect funds to their own accounts.\n\nThe root cause is missing owner == user constraints on the bearer token accounts. Elsewhere in the code, such checks are present, indicating inconsistency.\n\nAn attacker with delegate rights (granted for unrelated reasons) can burn the token and receive the position or earnings, even without owning the account.\n\nThe impact is unauthorized access to vault funds and potential theft of the Orca position or trading fees. This is a real authorization flaw that expands withdrawal rights beyond intent.\n",
+            "severity": "low",
+            "location": [
+                "programs/saffron-vault/src/instructions/vault/withdraw.rs",
+                "withdraw_variable",
+                "withdraw_fixed"
+            ],
+            "files": []
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-390"
+                ]
+            },
+            "title": "Unclaimed premium lost to fixed depositor if claim is not called in time",
+            "description": "If the fixed depositor does not call claim(), they never receive their premium, and the only recovery path (admin close) sends the unclaimed premium to the fee receiver instead of the fixed depositor.\n\nThe root cause is the lack of logic to distinguish between claimed and unclaimed premiums during admin close. The protocol assumes claim was called, but provides no fallback.\n\nAn attacker cannot directly exploit this, but a negligent or offline fixed depositor loses their premium even though they fulfilled their obligation by depositing the position.\n\nThe impact is unfair loss of funds for the fixed depositor. The premium is swept to the protocol as \"dust\", violating economic fairness and user expectations.\n",
+            "severity": "low",
+            "location": [
+                "claim",
+                "admin_close_vault"
+            ],
+            "files": []
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Pre-vault-start fees incorrectly assigned to variable side instead of fixed side",
+            "description": "All collected fees, including those accrued before the vault started, are credited to the variable side. Fees that accrued before start_time should belong to the fixed side, who provided the liquidity.\n\nThe root cause is the absence of a fee snapshot or pre-start collection at vault start. The code collects all fees in one step and attributes them entirely to the variable side.\n\nAn attacker could exploit this by creating a vault with a position that has accumulated significant pre-start fees, thereby transferring those fees to the variable side unfairly.\n\nThe impact is economic misallocation: the fixed side loses rightful fees, and the variable side receives excess yield. This undermines the incentive model and fairness of the protocol.\n",
+            "severity": "low",
+            "location": [
+                "admin_withdraw_fixed",
+                "withdraw_fixed",
+                "early_exit",
+                "deposit_variable",
+                "deposit_fixed"
+            ],
+            "files": []
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Overaccounting early-exit penalty leads to insufficient vault balance",
+            "description": "The early_exit_fixed function records the full penalty_payment amount as penalty_earnings without verifying how much was actually received. With Token-2022 transfer fees, the vault may receive less than the nominal amount.\n\nThe root cause is accounting based on input value rather than observed balance delta. The contract assumes the full amount is received, leading to overstatement of available funds.\n\nAn attacker can use a Token-2022 mint with dynamic fees, activate fees after deposit, and then exit early, causing the vault to record a higher penalty than received. Later, withdraw_variable fails due to insufficient balance.\n\nThe impact is DoS of withdrawal and admin close paths, fund lock, and economic insolvency. The variable side cannot withdraw, and the admin close sequence may be blocked, leading to permanent fund loss.\n",
+            "severity": "low",
+            "location": [
+                "early_exit.rs:243",
+                "early_exit.rs:334",
+                "withdraw.rs:269",
+                "withdraw.rs:303",
+                "admin.rs:616",
+                "admin.rs:645",
+                "admin.rs:679",
+                "deposit_variable.rs:129",
+                "deposit_variable.rs:150"
+            ],
+            "files": []
+        }
+    ]
+}

@@ -1,0 +1,78 @@
+{
+    "path": "reports-without-source/SolanaEndpoint-OAPP-Zellic-23JUL2024.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/LayerZero-Labs/monorepo"
+        ],
+        "commit_id": [
+            "a177aae588eaf0fa9401b86ecb8345c6508fef74"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-06-10",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-179"
+                ]
+            },
+            "title": "Arbitary ULN PDAs can be closed",
+            "description": "1. **Description:** The `reclaim_storage` function closes all accounts passed in `confirmation_accounts`, but `check_verifiable` only validates up to the `optional_dvn_threshold` number of optional DVNs. Any additional accounts in `confirmation_accounts` beyond those verified are not checked and are passed directly to `reclaim_storage`, leading to unintended account closures.\n2. **Cause:** The root cause is a logic flaw in the validation flow: `check_verifiable` returns early upon reaching the threshold, leaving remaining accounts unchecked. These unchecked accounts are then blindly passed to `reclaim_storage`, which proceeds to close them without verifying their legitimacy.\n3. **Exploitation:** An attacker can exploit this by calling the commit verification function with a valid number of verified optional DVNs to meet the threshold, then appending arbitrary ULN PDA accounts as extra `remaining_accounts`. These extra accounts will be closed during the storage reclamation phase.\n4. **Impact:** The vulnerability allows a malicious user to force-close any ULN PDA account, potentially disrupting protocol operations, causing loss of state, or enabling denial-of-service attacks against legitimate participants.\n",
+            "severity": "high",
+            "location": [
+                "programs/uln/src/instructions/dvn/commit_verification.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "OAPP can reassign executor account",
+            "description": "1. **Description:** The `lz_receive` function invoked by an OApp can reassign the owner of the executor account via `system_instruction::assign` because the executor account is passed as both a signer and a writable account.\n2. **Cause:** The root cause is insufficient validation after the CPI call to `lz_receive`. While the balance of the executor is checked post-execution, the ownership of the account is not verified, allowing a malicious OApp to change the account's owner during execution.\n3. **Exploitation:** A malicious OApp can include logic in its `lz_receive` handler to invoke `system_instruction::assign`, transferring ownership of the executor account to itself or another address. This would allow it to drain the account's lamports and permanently disable the executor from performing future operations.\n4. **Impact:** Successful exploitation results in full compromise of the executor account, including loss of funds and denial of service for the executor's ability to process messages, potentially disrupting cross-chain message delivery.\n",
+            "severity": "high",
+            "location": [
+                "programs/executor/src/instructions/execute.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Insufficient remaining_accounts for optional DVNs",
+            "description": "1. **Description:** The `dvns_size` is calculated using `config.optional_dvn_threshold`, but `check_verifiable` iterates over all optional DVNs in the configuration. If fewer accounts are provided than the total number of optional DVNs, an out-of-bounds access occurs, causing a runtime panic.\n2. **Cause:** The root cause is a mismatch between the expected number of accounts (based on threshold) and the actual iteration over the full list of optional DVNs. The code assumes all optional DVNs are present in `remaining_accounts`, but only those that have committed should be included.\n3. **Exploitation:** An OApp with optional DVNs where the number of committed DVNs is less than the threshold will fail to commit due to the panic in `check_verifiable`, even if it attempts a valid transaction.\n4. **Impact:** This leads to a denial-of-service condition for OApps relying on optional DVNs, preventing them from successfully committing messages and thus blocking cross-chain communication.\n",
+            "severity": "medium",
+            "location": [
+                "programs/uln/src/instructions/dvn/commit_verification.rs"
+            ],
+            "files": []
+        }
+    ]
+}

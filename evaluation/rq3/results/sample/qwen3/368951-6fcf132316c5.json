@@ -1,0 +1,198 @@
+{
+    "project": "blocksec_ref_lp_as_collateral_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_lp_as_collateral_v1.0-signed.pdf.json/ref-contracts/ref-exchange/src/shadow_actions.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.23076923076923078,
+        "recall": 0.6,
+        "f1": 0.33333333333333337
+    },
+    "cwe_ground_truth": [
+        "CWE-1339",
+        "CWE-252",
+        "CWE-682",
+        "CWE-703",
+        "CWE-754"
+    ],
+    "cwe_detected": [
+        "CWE-807",
+        "CWE-252",
+        "CWE-435",
+        "CWE-285",
+        "CWE-778",
+        "CWE-284",
+        "CWE-394",
+        "CWE-703",
+        "CWE-754",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Permanently Locked User",
+            "description": "1. **Description:** The `callback_process_shadow_force_close_result()` function is responsible for unlocking an account after a forced closure, but it may panic during execution due to an unchecked arithmetic operation.\n2. **Cause:** Although `internal_shadow_force_close()` verifies that `asset.reversed > amount`, this state is not guaranteed during the callback, leading to potential arithmetic underflow.\n3. **Exploitation:** If the callback panics, the account remains locked indefinitely, even though the liquidation process may have partially executed.\n4. **Impact:** The affected user is permanently locked out of their account, unable to access deposited, borrowed, or collateralized assets, resulting in a denial-of-service condition.\n"
+        },
+        {
+            "title": "Lack of Consistent Precision in on_remove_shadow()",
+            "description": "1. **Description:** The `on_cast_shadow()` function scales the input `amount` by `10**extra_decimals`, but `on_remove_shadow()` uses the raw `amount` without applying the same scaling factor.\n2. **Cause:** Inconsistent handling of decimal precision between two related functions leads to incorrect value calculations.\n3. **Exploitation:** An attacker could exploit the discrepancy during shadow position removal to receive incorrect amounts or manipulate internal balances.\n4. **Impact:** Results in incorrect accounting and potential loss of funds due to miscalculated shares or balances in the system.\n"
+        },
+        {
+            "title": "Potential Drain of Funds due to Early Return of Shares",
+            "description": "1. **Description:** The `FromFarming` and `FromBurrowland` implementations in `ShadowActions` immediately increase the `free_shares` of LP tokens, allowing liquidity to be removed in the same block.\n2. **Cause:** The design allows liquidity removal before confirming the success of `on_remove_shadow()` in dependent contracts.\n3. **Exploitation:** If `on_remove_shadow()` fails in Boost Farming or Burrowland after shares are released, the LP tokens remain staked while liquidity is withdrawn, enabling double use of the same assets.\n4. **Impact:** This can lead to a complete drain of funds from the Boost Farming and Burrowland contracts due to inconsistent state across systems.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code contains several potential security issues related to access control, error handling, and interaction between components. After analyzing the code through the lens of the specified CWEs, the following issues were identified:\n\n1. **CWE-284: Improper Access Control** is present in the `on_burrow_liquidation` function. While it checks that the caller is the `burrowland_id`, it does not validate whether the `liquidation_account_id` is actually in a liquidatable state or if the liquidation is justified (e.g., undercollateralized). This could allow unauthorized or invalid liquidations if the Burrowland contract does not enforce proper preconditions.\n\n2. **CWE-703: Improper Check or Handling of Exceptional Conditions** appears in the `callback_on_shadow` function. It only checks `is_promise_success()` but does not validate the context or arguments beyond that. If the external call fails due to reasons other than reversion (e.g., out of gas), the rollback logic assumes the original action should be reversed, which may not always be safe or correct.\n\n3. **CWE-435: Improper Interaction Between Multiple Correctly-Behaving Entities** is observed in the cross-contract calls to `on_cast_shadow` and `on_remove_shadow`. These calls rely on external contracts (BoostFarm or Burrowland) to behave correctly. If those contracts do not handle the callbacks properly or change behavior, it could lead to inconsistent state despite both contracts being correct in isolation.\n\n4. **CWE-693: Protection Mechanism Failure** is evident because the contract assumes that the `on_cast_shadow` and `on_remove_shadow` callbacks will be handled correctly by external contracts without validating the outcome or enforcing invariants post-callback. There is no mechanism to pause or halt operations if a downstream contract misbehaves.\n",
+            "findings": [
+                {
+                    "title": "Insufficient Validation in on_burrow_liquidation Allows Potential Abuse",
+                    "description": "The function `on_burrow_liquidation` only verifies that the caller is the Burrowland contract but does not validate whether the liquidation is legitimate (e.g., based on collateral ratio). This allows any account to be liquidated as long as Burrowland initiates it, potentially enabling abuse if Burrowland's logic is compromised or incorrectly implemented.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Inadequate Handling of Promise Failures in Callback",
+                    "description": "The `callback_on_shadow` function relies solely on `is_promise_success()` to determine success, without validating the semantic correctness of the external call. This may lead to incorrect state rollbacks if the failure is due to transient issues rather than logical rejection, leading to inconsistent state transitions.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Risk of State Inconsistency Due to External Contract Reliance",
+                    "description": "The contract initiates actions on external systems (BoostFarm, Burrowland) and assumes they will respond appropriately. However, there is no fallback or validation to ensure these systems uphold expected invariants. This creates a risk of state divergence if the external contracts change behavior or fail silently.",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Lack of Circuit Breaker or Protection Against Downstream Contract Failure",
+                    "description": "There is no protection mechanism in place to halt shadow actions if the connected farms or lending protocols start failing repeatedly. This absence increases the attack surface and risk of fund loss during outages or exploits in dependent contracts.",
+                    "category": "CWE-693",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code implements a NEAR blockchain smart contract that manages \"shadow\" actions related to liquidity pools, farming, and burrowland (likely lending/borrowing). The contract interacts with external contracts (e.g., boost farm, burrowland) via cross-contract calls and handles token movements and user balances.\n\nAfter analyzing the code with respect to the provided CWE list, several security issues are identified:\n\n1. **CWE-807: Reliance on Untrusted Inputs in a Security Decision** is present in the `on_burrow_liquidation` function. This function is called by the `burrowland_id` contract, and while it checks that the caller is indeed the `burrowland_id`, it accepts a `shadow_id` from the caller and parses it into a `pool_id` using `shadow_id_to_pool_id`. However, there is no validation that the parsed `pool_id` corresponds to an actual existing pool until after the account records are updated. Although the pool is eventually fetched with `self.pools.get(pool_id)`, the account state (`update_shadow_record`) is modified *before* this check, which could lead to inconsistent state if an invalid or non-existent `pool_id` is provided. This creates a potential for denial-of-service or state corruption if the `burrowland` contract is compromised or misconfigured.\n\n2. **CWE-285: Improper Authorization** is observed in the `callback_on_shadow` function. This function is marked as `#[private]`, meaning it should only be called as a callback from a previous promise. However, NEAR's `#[private]` annotation relies on `env::current_account_id()` matching the caller, which is only safe if the function is invoked as a callback. If this function were to be called directly (e.g., due to a bug in NEAR's runtime or a misconfiguration), it could allow an attacker to manipulate account records (e.g., reversing a shadow action) without proper authorization. While NEAR protects private functions, this is a known pattern vulnerability if the runtime enforcement is ever weakened.\n\n3. **CWE-778: Insufficient Logging** is present in the `callback_on_shadow` function. While it does handle promise failure and reverts state, it only performs state changes without logging the failure reason or the action being reverted. This makes debugging and monitoring difficult. For example, if a cross-contract call fails repeatedly, operators would not be able to detect this easily from logs, increasing the risk of silent failures in critical operations like moving liquidity between systems.\n\n4. **CWE-754: Improper Check for Unusual or Exceptional Conditions** is evident in the `shadow_action` function. When calculating `storage_fee`, it only checks if `prev_storage > env::storage_usage()` before refunding. However, due to NEAR's storage model, storage usage can fluctuate unpredictably due to contract state changes, and the function assumes that any storage reduction directly translates to refundable bytes. It does not handle cases where storage changes might be due to internal mapping reallocations or other side effects, potentially leading to incorrect fee calculations or missed refunds.\n",
+            "findings": [
+                {
+                    "title": "Untrusted Input Parsing Before Validation in on_burrow_liquidation",
+                    "description": "The function `on_burrow_liquidation` parses the `shadow_id` into a `pool_id` and updates the user's shadow record before validating that the corresponding pool exists. This could allow a malicious or compromised burrowland contract to cause invalid state updates if an invalid pool_id is provided. The pool existence check should occur before any state modifications.",
+                    "category": "CWE-807",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Insufficient Authorization in callback_on_shadow",
+                    "description": "The `callback_on_shadow` function relies solely on NEAR's `#[private]` annotation for access control, which depends on the runtime enforcing that only the contract itself can call it. While this is generally safe, it represents improper authorization if the runtime guarantee is ever violated. The function should additionally verify that it is being called as a callback using `env::promise_results_count()` to ensure robustness.",
+                    "category": "CWE-285",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient Logging in callback_on_shadow",
+                    "description": "The `callback_on_shadow` function does not log when a cross-contract call fails and state is reverted. This lack of logging makes it difficult to monitor failures in critical operations like liquidity movement between farming and burrowland systems, potentially hiding denial-of-service attacks or integration issues.",
+                    "category": "CWE-778",
+                    "severity": "low",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Handling of Storage Usage Changes",
+                    "description": "The `shadow_action` and `on_burrow_liquidation` functions assume that a decrease in storage usage directly corresponds to reclaimable bytes for refunds. However, they do not account for potential edge cases where storage changes might not be linear or attributable to the user's action, leading to incorrect storage fee calculations. This could result in underpayment or overpayment of storage refunds.",
+                    "category": "CWE-754",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code interacts with external contracts via cross-contract calls (e.g., `ext_shadow_receiver::on_cast_shadow`, `ext_shadow_receiver::on_remove_shadow`) and uses callbacks to handle the success or failure of these calls. However, in the `on_burrow_liquidation` function, the result of the `ext_shadow_receiver::on_remove_shadow` promise is not checked in the main flow — instead, only the callback `callback_on_burrow_liquidation` logs whether the call succeeded or failed, but no corrective action is taken if the external call fails.\n\nSpecifically, in `on_burrow_liquidation`, after removing liquidity and updating accounts, a call is made to `on_remove_shadow` with a callback. However, if `on_remove_shadow` fails, the system does not revert or adjust the state accordingly. The callback only logs the outcome but does not roll back the earlier state changes (like updating the shadow record and withdrawing shares). This could lead to inconsistent state where shares are deducted but the external action (e.g., unstaking in the farm) did not occur.\n\nThis constitutes CWE-252 (Unchecked Return Value), as the return value (or success status) of the external call is not validated in a way that ensures correctness of state transitions. The use of `is_promise_success()` in the callback is insufficient because it does not allow for state rollback — the state has already been modified prior to the external call.\n\nAdditionally, in the same `on_burrow_liquidation` function, the result of `pool.remove_liquidity` is used directly to deposit tokens to the liquidator, but there is no explicit validation that the returned amounts are consistent with `min_token_amounts`. While this may be handled by the pool implementation, the lack of a check here could expose the contract to manipulation if the pool behaves unexpectedly, which touches on CWE-394 (Unexpected Status Code or Return Value).\n\nFinally, in several places (e.g., `Promise::new(sender_id.clone()).transfer(storage_fee.0);`), NEAR promises are created without verifying their success. While NEAR's `transfer` is fire-and-forget and cannot be checked post-facto, initiating a transfer without ensuring it's safe (e.g., under a condition that the user is still eligible) could be risky, but this is less severe and not directly one of the listed CWEs.\n",
+            "findings": [
+                {
+                    "title": "Unchecked Result of External Call in on_burrow_liquidation",
+                    "description": "The function `on_burrow_liquidation` initiates a call to `on_remove_shadow` via `ext_shadow_receiver`, but does not verify the success of this call in the main execution flow. The callback only logs the result but does not revert state changes made prior to the call. This can lead to inconsistent state if the external call fails, as the shadow record has already been updated and shares removed without confirmation of completion. This is an instance of CWE-252: Unchecked Return Value.",
+                    "category": "CWE-252",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Lack of Validation for remove_liquidity Return Values",
+                    "description": "In `on_burrow_liquidation`, the return value of `pool.remove_liquidity` is used directly to deposit tokens to the liquidator without verifying that the returned amounts meet the expected minimums (`min_token_amounts`). Although the pool is expected to enforce this, the absence of a check in the current contract increases risk if the pool behaves unexpectedly or returns less than required. This constitutes CWE-394: Unexpected Status Code or Return Value.",
+                    "category": "CWE-394",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided code, no instances of CWE-690 (Unchecked Return Value to NULL Pointer Dereference) were found. The code primarily uses safe Rust patterns, including proper error handling via `expect`, `unwrap`, and explicit checks on optionals. The NEAR SDK's `is_promise_success()` is used correctly in callbacks to verify the success of cross-contract calls, and no raw pointers or potential null dereferences are present. All object accesses occur after validation (e.g., `self.pools.get(pool_id).expect(...)` ensures the pool exists before use). Additionally, the use of high-level abstractions like `HashMap`, `Vec`, and `AccountId` reduces the risk of low-level memory issues. Therefore, the specified CWE-690 is not applicable.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-269",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-655",
+            "CWE-345",
+            "CWE-393",
+            "CWE-778",
+            "CWE-654",
+            "CWE-1038",
+            "CWE-807",
+            "CWE-358",
+            "CWE-188",
+            "CWE-1270",
+            "CWE-357",
+            "CWE-436",
+            "CWE-923",
+            "CWE-311",
+            "CWE-1267",
+            "CWE-326",
+            "CWE-757",
+            "CWE-439",
+            "CWE-184",
+            "CWE-228",
+            "CWE-397",
+            "CWE-327",
+            "CWE-424",
+            "CWE-656",
+            "CWE-282",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-330",
+            "CWE-754",
+            "CWE-182",
+            "CWE-755"
+        ],
+        [
+            "CWE-253",
+            "CWE-252",
+            "CWE-273",
+            "CWE-354",
+            "CWE-394"
+        ],
+        [
+            "CWE-690"
+        ]
+    ]
+}

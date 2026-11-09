@@ -1,0 +1,137 @@
+{
+    "project": "rengo-labs.pdf.json",
+    "files": [
+        "dataset/contracts/rengo-labs.pdf.json/CasperLabs-UniswapV2-Router/uniswap_v2_library/uniswap_v2_library/src/uniswap_v2_library.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.1111111111111111,
+        "recall": 1.0,
+        "f1": 0.19999999999999998
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-697",
+        "CWE-190",
+        "CWE-682",
+        "CWE-435",
+        "CWE-284",
+        "CWE-193",
+        "CWE-703",
+        "CWE-369",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "pair_for() Does Not Sort The Tokens Before Fetching a Pair",
+            "description": "1. **Description:** The `pair_for()` function does not sort token addresses before computing the pair address, which may result in inconsistent or incorrect pair lookups.\n2. **Cause:** Lack of deterministic ordering in token pair computation.\n3. **Exploitation:** Users might interact with non-existent or wrong pairs, leading to failed transactions or loss of funds.\n4. **Impact:** User confusion, failed trades, and potential loss of liquidity due to mismatched expectations.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The library contains several issues stemming from the candidate CWEs. The most impactful are: (1) unsafe exceptional-condition handling where invalid `Key`/hash inputs are silently converted to the all-zero `ContractHash` via `unwrap_or_default()`, causing calls to an unintended contract hash (often leading to revert/DoS or misdirected calls); (2) an interaction bug in `get_reserves()` where the pair lookup uses unsorted token order even though `sort_tokens()` is computed, which can cause the factory’s `get_pair(token0,token1)` integration to fail or return an unintended pair; (3) `get_amount_in()` does not validate `amount_out < reserve_out`, allowing underflow/zero-denominator scenarios that can revert or yield incorrect results; (4) arithmetic is performed with U256 without checked/saturating math, so large user-controlled `amount_in/amount_out` values can overflow modulo 2^256 and produce incorrect pricing outputs; (5) a brittle “zero address” check relies on string formatting equality instead of direct hash comparison; and (6) `init()` has no access control/one-time guard, so if exposed as an entrypoint it can be re-invoked to overwrite critical stored hashes.\n",
+            "findings": [
+                {
+                    "title": "Pair lookup uses unsorted token order (factory integration mismatch)",
+                    "description": "In `get_reserves()`, the code computes `(token_0, _) = sort_tokens(token_a, token_b)` but then calls\n`pair_for(factory, token_a, token_b)` instead of using `(token_0, token_1)`.\nIf the factory’s `get_pair` expects `(token0, token1)` sorted (as in Uniswap V2), calling it with unsorted inputs can:\n- return a zero/empty pair,\n- return a different pair than intended (if factory implementation is nonstandard),\n- cause subsequent `get_reserves` calls to revert or return misleading reserves used in pricing.\nThis is a classic integration/interaction failure between correctly-behaving components with different assumptions about parameter normalization.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.87
+                },
+                {
+                    "title": "Silent fallback to zero ContractHash via unwrap_or_default() enables misdirected calls / DoS",
+                    "description": "Multiple locations convert potentially-invalid inputs into the all-zero contract hash instead of rejecting them:\n- `pair_for()`: `ContractHash::from(factory.into_hash().unwrap_or_default())`\n- `get_reserves()`: `pair.into_hash().unwrap_or_default()`\n- `call_contract()`: `from_formatted_str(...).unwrap_or_default()`\nIf `factory`/`pair` is not a hash `Key` (or the formatted string is invalid), the code will call a contract at the zero hash.\nEffects include unexpected reverts (DoS), or in worst cases calling an unintended contract if a zero-hash-like value is ever routable.\nProper handling should revert on `None`/`Err` rather than defaulting.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Improper input validation in get_amount_in(): missing amount_out < reserve_out check",
+                    "description": "`get_amount_in()` computes:\n  denominator = (reserve_out - amount_out) * 997\nbut only checks `reserve_out > 0` and `amount_out > 0`.\nIf `amount_out >= reserve_out`, then:\n- `reserve_out - amount_out` underflows (for unsigned U256) or can trigger unexpected behavior depending on implementation,\n- denominator can become 0, leading to division-by-zero revert/panic,\n- resulting `amount_in` is incorrect and can break slippage/protection logic in callers.\nThis is an exceptional-condition handling gap and can be triggered by user-supplied `amount_out`.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Unchecked U256 arithmetic can overflow and yield incorrect quotes/amounts",
+                    "description": "The library performs pricing math with U256 using direct multiplication/addition:\n- `quote()`: `amount_a * reserve_b`\n- `get_amount_out()`: `amount_in * 997`, `amount_in_with_fee * reserve_out`, `reserve_in * 1000`\n- `get_amount_in()`: `reserve_in * amount_out * 1000`\nSince `amount_in/amount_out` are user-controlled U256, intermediate products can overflow 256-bit arithmetic.\nIn many U256 implementations, overflow wraps modulo 2^256 (no revert), producing incorrect pricing outputs that downstream code may treat as authoritative.\nThis is especially security-relevant if these outputs are used for min/max checks, accounting, or access decisions in other contracts.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Zero-address detection uses formatted-string comparison (brittle and non-canonical)",
+                    "description": "`sort_tokens()` checks for the zero address by comparing:\n  token_0.to_formatted_string() == \"contract-hash-0000....0000\"\nThis is a non-canonical, representation-dependent comparison. If formatting rules change or if an equivalent representation is produced differently, the check may fail unexpectedly.\nA direct comparison against `ContractHash::default()` (or explicit bytes check) is safer and clearer.\n",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "init() lacks access control / one-time initialization guard",
+                    "description": "`init()` writes critical identity fields (`self_hash`, `package_hash`) with no caller authorization check and no “already initialized” guard.\nIf `init()` is exposed as a callable entrypoint (or reachable via an upgrade pattern), any caller could overwrite these values, potentially redirecting later logic that relies on them.\nEven if intended for constructor-only use, the code does not enforce that assumption.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.72
+                }
+            ]
+        },
+        {
+            "reasoning": "The code performs multiple arithmetic operations on fixed-width unsigned integers (U256/U128) without using checked/saturating math, and it also performs a subtraction that can underflow. These issues can cause wraparound results (incorrect outputs) and can also lead to a division-by-zero trap when the computed denominator becomes 0. These behaviors are reachable with attacker-controlled inputs (e.g., amount_out relative to reserve_out), so they constitute security-relevant correctness and availability risks.\n",
+            "findings": [
+                {
+                    "title": "Integer underflow in get_amount_in when amount_out > reserve_out",
+                    "description": "In `get_amount_in`, the denominator is computed as:\n  `denominator = (reserve_out - amount_out) * 997`\nThere is no check that `amount_out < reserve_out`. If `amount_out > reserve_out`, the subtraction `reserve_out - amount_out` underflows for unsigned U256, producing a very large wrapped value. This yields a meaningless denominator and thus an incorrect `amount_in`, potentially enabling callers to receive incorrect quotes and break higher-level invariants relying on this library.\n",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Divide-by-zero in get_amount_in when amount_out == reserve_out",
+                    "description": "In `get_amount_in`, if `amount_out == reserve_out`, then:\n  `reserve_out - amount_out == 0` and `denominator == 0`\nThe subsequent division:\n  `(numerator / denominator) + 1`\nwill attempt to divide by zero, which will trap/revert at runtime (or otherwise cause an execution failure depending on the U256 implementation). This allows a caller to trigger a denial of service for any contract path that relies on `get_amount_in` for routing/quoting by passing `amount_out` equal to the reserve.\n",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.93
+                },
+                {
+                    "title": "Unchecked U256 arithmetic may overflow/wrap in quote/get_amount_out/get_amount_in",
+                    "description": "The following computations multiply and add U256 values without checked arithmetic:\n  - `quote`: `(amount_a * reserve_b) / reserve_a`\n  - `get_amount_out`: `amount_in * 997`, then `* reserve_out`, and `(reserve_in * 1000) + amount_in_with_fee`\n  - `get_amount_in`: `reserve_in * amount_out * 1000`, and `(numerator / denominator) + 1`\nIf intermediate products exceed the U256 maximum, the result can overflow/wrap (depending on the underlying U256 implementation), producing incorrect outputs. While typical AMM reserves/amounts may not approach U256 bounds, these are public functions that accept arbitrary U256 inputs, so overflow is a realistic edge case and can be exploited to force incorrect quotes or unexpected behavior in integrators that assume mathematical correctness.\n",
+                    "category": "CWE-190",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Empty finding field for non-applicable CWE candidates",
+                    "description": "No issues attributable to CWE-193 (off-by-one), CWE-135 (multi-byte string length), CWE-1335 (incorrect bitwise shift), or CWE-1339 (real-number precision) were identified in the provided code.\n",
+                    "category": "CWE-193",
+                    "severity": "info",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-135",
+            "CWE-191",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-1339"
+        ]
+    ]
+}

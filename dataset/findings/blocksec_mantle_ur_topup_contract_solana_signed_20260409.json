@@ -1,0 +1,182 @@
+{
+    "path": "reports-without-source/blocksec_mantle_ur_topup_contract_solana_signed_20260409.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/mantle-xyz/ur-topup-contract-sol"
+        ],
+        "commit_id": [
+            "2d550fd6dd32657106eb3e19e614bacb8be3c2dc"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-04-09",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Shared remaining_accounts causes conflict between Jupiter and LayerZero",
+            "description": "The functions deposit_via_aggregator() and deposit_via_aggregator_sponsored() use the same ctx.remaining_accounts for two different Cross-Program Invocations (CPIs): one to Jupiter for token swaps and another to LayerZero for cross-chain messaging. These CPIs require different sets of remaining accounts, but the contract passes the same list to both, creating a conflict. The root cause is improper separation of account contexts for distinct external calls. An attacker or malformed input could exploit this by providing an account list that satisfies one CPI but breaks the other, leading to transaction failure. The impact is potential denial of service (DoS) or unexpected behavior during deposit flows, disrupting core functionality.\n",
+            "severity": "high",
+            "location": [
+                "programs/my_oapp/src/instructions/deposit_via_aggregator.rs::DepositViaAggregator#211-216",
+                "programs/my_oapp/src/instructions/deposit_via_aggregator.rs::DepositViaAggregatorSponsored#389-395"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Insufficient account space allocation for dynamic data",
+            "description": "The PeerConfig account is initialized using std::mem::size_of::<Self>(), which only measures the fixed-size metadata of the struct and does not account for the heap-allocated data of Vec fields, such as those in EnforcedOptions. The root cause is a misunderstanding of how Rust's size_of function works with dynamically sized types. When data is later written into these Vec fields, the account space is insufficient, leading to an AccountDataTooSmall error during transaction execution. This vulnerability can be exploited by any user attempting to store data in the under-allocated account, resulting in transaction failures and denial of service for legitimate operations involving peer configuration.\n",
+            "severity": "high",
+            "location": [
+                "programs/my_oapp/src/instructions/set_peer_config.rs#14-22",
+                "programs/my_oapp/src/state/peer_config.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Malicious constructed Jupiter swap_data and remaining_accounts might cause payer to lose funds",
+            "description": "The function execute_jupiter_swap() uses user-controlled params.swap_data and ctx.remaining_accounts without validating that the input token originates from the user rather than the payer. In the sponsored flow, both user and payer are signers, and if the remaining_accounts binds Jupiter's authority to the payer's token account, a malicious user can construct a swap that drains the payer’s funds. The root cause is lack of input validation and improper trust in user-provided account lists. An attacker can exploit this by crafting a swap instruction that targets the payer’s token account as the source, leading to unauthorized transfer of the payer’s tokens. The impact is direct financial loss for the payer.\n",
+            "severity": "high",
+            "location": [
+                "programs/my_oapp/src/instructions/deposit_via_aggregator.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Unvalidated evm_output_token in cross chain messages will cause users to lose funds",
+            "description": "The evm_output_token field in cross-chain messages is taken directly from user input without validation. This field determines which token users receive on the destination chain. If it is set to an invalid or non-existent token, users’ deposited USDC on the source chain will not be refunded, and no valid tokens will be minted on the destination. The root cause is missing input validation for critical cross-chain parameters. An attacker can exploit this by initiating a transfer with a malicious or zero-address token, causing irreversible loss of user funds. The impact is permanent loss of deposited assets with no recourse.\n",
+            "severity": "high",
+            "location": [
+                "programs/my_oapp/src/instructions/init_store.rs#80-84",
+                "programs/my_oapp/src/state/peer_config.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Endpoint delegate is not synchronized when store.admin changes",
+            "description": "The LayerZero Endpoint OApp delegate is initially set to store.admin during initialization, but when the admin is changed via accept_admin(), the delegate on the LayerZero endpoint is not updated. This creates a desynchronization between the local admin and the on-chain delegate, leading to authority conflicts. The root cause is incomplete state synchronization during admin transfer. An attacker who gains control of the old admin key (if not properly revoked) could still interact with LayerZero, or the new admin may be unable to manage cross-chain operations. The impact is inconsistent access control and potential loss of governance over cross-chain functionality.\n",
+            "severity": "medium",
+            "location": [
+                "programs/my_oapp/src/instructions/init_store.rs#86-98",
+                "programs/my_oapp/src/instructions/transfer_admin.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "User-controlled fee_amount_via_usdc enables fee circumvention",
+            "description": "In the deposit_via_aggregator_sponsored() function, the fee amount is taken directly from user input via params.fee_amount_via_usdc, with no validation or override by the contract. This allows a user to set the fee to zero and bypass the intended fee mechanism. The root cause is improper trust in user input for a critical financial parameter. An attacker can exploit this by submitting transactions with fee_amount_via_usdc = 0, thereby avoiding any cost for using the sponsored deposit flow. The impact is revenue loss for the protocol and potential abuse of resources, leading to increased costs for the payer.\n",
+            "severity": "low",
+            "location": [
+                "programs/my_oapp/src/instructions/deposit_via_aggregator.rs#411-425"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Lack of validation for user_input_token_account.mint versus swap input token",
+            "description": "The input token mint is derived from user_input_token_account.mint and used in cross-chain messages, but the contract does not verify that this mint matches the actual token being swapped via Jupiter. The root cause is missing consistency checks between user-provided accounts and swap data. An attacker can exploit this by providing a mismatched token account (e.g., a fake token) while executing a swap with a different real token, causing the contract to send incorrect token information to the destination chain. The impact is incorrect cross-chain messages, potentially leading to wrong tokens being minted or user funds being misrouted.\n",
+            "severity": "low",
+            "location": [
+                "programs/my_oapp/src/instructions/deposit_via_aggregator.rs#217-229"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Lack of option type check in the function init_store()",
+            "description": "The function init_store() accepts default_lz_options without validating that the option type is 3, which is required by the combine_options() function used in message construction. The root cause is missing input validation for critical configuration parameters. If an incorrect option type is set during initialization, the contract’s main cross-chain functionality will fail when attempting to build messages. The impact is denial of service for core deposit and transfer operations, rendering the contract unusable until the configuration is corrected via another admin action.\n",
+            "severity": "low",
+            "location": [
+                "programs/my_oapp/src/instructions/init_store.rs#80-84",
+                "programs/my_oapp/src/state/peer_config.rs"
+            ],
+            "files": []
+        }
+    ]
+}

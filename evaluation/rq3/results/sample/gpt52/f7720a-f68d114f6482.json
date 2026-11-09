@@ -1,0 +1,205 @@
+{
+    "project": "MetaPool_Liquid_Staking_NEAR_Smart_Contract_Security_Audit_Report_Halborn_Final.pdf.json",
+    "files": [
+        "dataset/contracts/MetaPool_Liquid_Staking_NEAR_Smart_Contract_Security_Audit_Report_Halborn_Final.pdf.json/metapool/src/fungible_token_standard.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3333333333333333,
+        "recall": 0.8,
+        "f1": 0.47058823529411764
+    },
+    "cwe_ground_truth": [
+        "CWE-400",
+        "CWE-770",
+        "CWE-1325",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-707",
+        "CWE-664",
+        "CWE-697",
+        "CWE-435",
+        "CWE-771",
+        "CWE-770",
+        "CWE-710",
+        "CWE-610",
+        "CWE-372",
+        "CWE-400",
+        "CWE-789"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "DENIAL OF SERVICE CONDITION DUE TO STORAGE BLOATING",
+            "description": "The MetaPool contract does not require users to make a storage deposit to cover the costs of storing their stNEAR balance. This allows a malicious user to initiate multiple small token transfers to non-existent accounts, which forces the contract to allocate storage for each new account. The contract uses its own balance to pay for this storage, and if the free balance is insufficient, further storage operations will fail, leading to a Denial of Service condition. This would prevent new users from staking, directly impacting the core functionality of the contract. Although the DoS can be reversed by sending more NEAR to the contract, the lack of a proactive storage fee mechanism creates a significant risk.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code largely follows NEP-141 patterns, but it contains several integration and state-management pitfalls that can lead to incorrect behavior or loss of funds in edge cases. The most important issues stem from (1) assumptions about the receiver in `ft_transfer_call` and asynchronous execution ordering, and (2) inconsistent/incorrect state handling for metadata (a `metadata` field exists in contract state but is never used; instead a fresh `LazyOption` is constructed each time with a hard-coded prefix). Additionally, the gas guard uses a strict `>` comparison (edge-case revert) and metadata setters do not validate or bound data, which can cause downstream issues and unexpected storage growth.\n",
+            "findings": [
+                {
+                    "title": "ft_transfer_call can be exploited/misused with non-standard receivers due to async interaction and lack of receiver-type enforcement",
+                    "description": "`ft_transfer_call` performs `internal_st_near_transfer` (moves balance to `receiver_id`) and only then schedules `ft_on_transfer` and a later `ft_resolve_transfer`.\nThe code/documentation claims “if receiver_id is not a contract or ft_on_transfer fails, the transfer is rolled-back”, but there is no mechanism to ensure `receiver_id` is actually a contract, and (more importantly) in an asynchronous model the receiver can transfer tokens away before `ft_resolve_transfer` runs.\nIn NEP-141, the resolver typically attempts to withdraw the refund from the receiver; if the receiver balance is insufficient (because it spent the tokens), the refund becomes partial (or zero) and the transfer effectively cannot be rolled back.\nThis is an interaction weakness: two independently “correct” components (a token contract and an arbitrary receiver account/contract) can combine to produce unexpected fund loss or “sticky” transfers when the receiver is non-compliant or is a plain account.\nThe comment “TODO add a busy lock … to avoid the sender-acc to be deleted while this txn is executing” further indicates known unresolved lifetime/async hazards during the in-flight window.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "In-flight transfer lifetime hazard acknowledged but not mitigated (sender account deletion during ft_transfer_call)",
+                    "description": "The code explicitly notes a missing “busy lock” to prevent the sender account from being deleted while `ft_transfer_call` is in flight.\nIf the broader contract supports unregistering/deleting token accounts, a sender could delete/unregister between the initial transfer and `ft_resolve_transfer`. In that case, refunds of unused tokens may be impossible and the resolver may burn tokens (the code logs burned tokens), producing unexpected loss and potentially violating user expectations of atomicity.\nThis is a resource-lifetime/control issue around balances during async cross-contract execution; the contract does not maintain control over the relevant resources across the full lifecycle of the transfer-call flow.\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Metadata storage is managed inconsistently (state field unused; hard-coded LazyOption prefix recreated each call)",
+                    "description": "The contract state struct defines `metadata: LazyOption<FungibleTokenMetadata>`, but all metadata reads/writes ignore `self.metadata` and instead create a new `LazyOption` each time via `ft_metadata_init_lazy_container()` with a fixed prefix `b\\\"ftmd\\\"`.\nRisks:\n- Confusing/incorrect state management and upgrade hazards: future refactors may assume `self.metadata` is authoritative, while the actual data lives under a hard-coded prefix.\n- Storage key collisions/compatibility issues if this pattern is copied or combined with other modules that also use `b\\\"ftmd\\\"`, or if the contract is composed with other components expecting different prefixes.\nThis is not an immediate theft vector, but it is a correctness and maintainability weakness that can become security-relevant during upgrades/migrations.\n",
+                    "category": "CWE-710",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Gas boundary check uses strict '>' comparison causing avoidable reverts at exact threshold",
+                    "description": "`ft_transfer_call` asserts:\n  `env::prepaid_gas() > GAS_FOR_FT_TRANSFER_CALL + GAS_FOR_RESOLVE_TRANSFER + FIVE_TGAS`\nUsing `>` rather than `>=` causes the call to revert when prepaid gas is exactly equal to the required amount. While not a direct exploit, it is an exceptional-condition handling bug that can cause unexpected failures for integrators and automated systems that compute gas precisely.\n",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.66
+                },
+                {
+                    "title": "ft_metadata_set stores unvalidated/unbounded metadata, enabling downstream issues and potential storage growth",
+                    "description": "`ft_metadata_set` accepts arbitrary `FungibleTokenMetadata` and writes it to storage without validating important invariants (e.g., `spec == FT_METADATA_SPEC`, reasonable string lengths, `decimals` expectations, etc.).\nWhile access is restricted to the owner, this still matters because:\n- If owner credentials are compromised, an attacker can write malicious/oversized metadata (icons/reference fields) leading to storage growth at the contract’s expense and/or misleading metadata shown in wallets/indexers.\n- Even with a benign owner, accidental invalid metadata can break integrators.\nThis is an input neutralization/validation gap for structured data that is security-relevant to users and downstream consumers.\n",
+                    "category": "CWE-707",
+                    "severity": "low",
+                    "confidence": 0.72
+                }
+            ]
+        },
+        {
+            "reasoning": "The code shows multiple resource/state-handling issues centered around how token metadata is managed and how external, user-controlled receiver references are used during `ft_transfer_call`.\n\n1) Metadata is not read/written through the contract’s persisted `metadata: LazyOption<_>` field. Instead, `ft_metadata()` and `ft_metadata_set()` each construct a brand-new `LazyOption` with a hard-coded storage prefix (`b\"ftmd\"`). This creates a high risk of improper initialization / state divergence (e.g., upgrades or initializers that set `self.metadata` won’t be reflected by `ft_metadata()`, and any previously stored metadata under a different prefix becomes “orphaned”). This is an internal state confusion bug and can mislead integrators/wallets about token identity/decimals/symbol.\n\n2) `ft_metadata_set()` allows writing arbitrarily large strings (name, symbol, icon, reference) into on-chain storage without any explicit size bounds. Although owner-gated, this still represents uncontrolled resource consumption of the contract account’s storage balance (a finite resource), potentially leading to failures/DoS once storage is exhausted (especially relevant if ownership is compromised, delegated to a contract, or an operator error occurs).\n\n3) `ft_transfer_call()` uses an externally-controlled `receiver_id` as the promise target without verifying it is a contract that implements `ft_on_transfer`. The comments state this requirement, but the function does not enforce it. The correctness/safety of funds then fully depends on `int_ft_resolve_transfer` (not shown) to unwind/refund. If the resolver logic is incomplete or if edge-cases exist (receiver is not a contract, receiver panics, receiver consumes all gas, sender unregisters mid-flight), tokens may be burned/locked/transferred in unintended ways.\n",
+            "findings": [
+                {
+                    "title": "Metadata LazyOption is re-created with a hard-coded key and ignores the persisted `metadata` field",
+                    "description": "The contract struct contains `metadata: LazyOption<FungibleTokenMetadata>`, but `ft_metadata()` and `ft_metadata_set()` do not use `self.metadata`.\nInstead, both functions call `ft_metadata_init_lazy_container()` which constructs a new `LazyOption::new(b\"ftmd\".to_vec(), None)` every time.\n\nImpact:\n- If the contract was initialized/upgraded with metadata stored under `self.metadata` (or any other prefix), `ft_metadata()` can silently return the default metadata, causing inconsistent token identity (symbol/decimals/name) from what the state actually contains.\n- Previously stored metadata may become unreachable (“orphaned”) if a different prefix was used elsewhere.\n- This creates internal state ambiguity where the contract can assume it is in “default metadata” state while another metadata state exists in storage.\n\nRecommended fix:\n- Store and load metadata consistently via `self.metadata` (initialized once in `new()`), or ensure a single canonical prefix is used everywhere and kept in state.\n",
+                    "category": "CWE-665",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "State confusion risk: metadata getter/setter operate on a different logical state than the contract struct suggests",
+                    "description": "Because the on-chain metadata is not accessed through the struct field but through an ad-hoc key (`ftmd`), the contract’s serialized state and the “effective” metadata state can diverge.\nThis is a form of incomplete/incorrect internal state distinction: code paths may behave as if metadata is unset (returning defaults) even when metadata exists elsewhere in storage, or vice versa after upgrades/refactors.\n\nThis can be security-relevant for FT metadata because wallets/indexers rely on it for correct display/interpretation (e.g., decimals, symbol).\n",
+                    "category": "CWE-372",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unbounded metadata size can exhaust contract storage balance",
+                    "description": "`ft_metadata_set()` writes user-provided `FungibleTokenMetadata` to storage with no explicit bounds on string sizes (e.g., `icon` data URLs can be very large).\nEven though `assert_owner_calling()` gates the function, this still enables uncontrolled consumption of a limited resource (the contract account’s storage/NEAR balance), potentially causing:\n- future state writes to fail,\n- operational DoS for other methods that need to write state,\n- unexpected need to top up the contract balance.\n\nRecommended fix:\n- Enforce reasonable maximum lengths for `name`, `symbol`, `reference`, `icon` (and/or reject large base64/data URLs).\n- Optionally require an attached deposit proportional to added storage, even for owner operations.\n",
+                    "category": "CWE-400",
+                    "severity": "low",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "`ft_transfer_call` relies on externally-controlled receiver reference without enforcing 'receiver is a contract' requirement",
+                    "description": "The comments claim `receiver_id` must be a contract implementing `ft_on_transfer`, but `ft_transfer_call()` does not verify this and proceeds to:\n1) transfer balances internally, then\n2) issue a promise call to `receiver_id`.\n\nThe receiver address is fully user-controlled (even though syntactically valid), so the contract is depending on downstream behavior (`ft_on_transfer` existence/success) and the correctness of `int_ft_resolve_transfer` (not shown) to avoid token loss.\nIf resolver logic is buggy/incomplete, or edge cases occur (non-contract receiver, receiver panics, etc.), this can lead to unintended transfer/burn/lock outcomes.\n\nRecommended fix:\n- Consider verifying `receiver_id` is a contract account before executing transfer_call (where feasible on NEAR), and/or ensure `int_ft_resolve_transfer` strictly follows NEP-141 refund semantics for all failure modes.\n",
+                    "category": "CWE-610",
+                    "severity": "medium",
+                    "confidence": 0.55
+                }
+            ]
+        },
+        {
+            "reasoning": "The reviewed code is a NEAR FT implementation fragment. From the provided CWE root causes, the main realistic issues relate to (a) unbounded storage allocation via metadata writes and (b) “orphaned/untracked” state due to not using the struct’s `metadata` field and instead repeatedly instantiating a `LazyOption` with a hardcoded key. Logging and gas forwarding patterns were checked for amplification/excessive logging; the only log is a short numeric line and gas is reserved for resolve, so no strong CWE-405/CWE-779 issue is evident. No meaningful instances of CWE-1246/CWE-1235/CWE-920 were found in this snippet.\n",
+            "findings": [
+                {
+                    "title": "Unbounded metadata storage writes can grow contract state without limits",
+                    "description": "`ft_metadata_set` allows the owner to persist `FungibleTokenMetadata` without enforcing any size/length limits on fields such as `icon`, `reference`, `name`, or `symbol`.\nSince NEAR storage is paid for, repeatedly setting very large strings (e.g., a huge data-URL `icon`) can cause unbounded state growth and increased storage costs, potentially exhausting the contract’s storage budget/balance and impacting availability of other methods.\n\nWhile access is restricted to the owner, this is still a security/operational risk (owner key compromise, mistakes, or malicious governance) because the method allocates on-chain resources without throttling or bounds.\n",
+                    "category": "CWE-770",
+                    "severity": "medium",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Metadata state is not anchored to the Contract struct, risking orphaned/untracked storage",
+                    "description": "The `Contract` struct contains a `metadata: LazyOption<FungibleTokenMetadata>`, but the implementation never uses `self.metadata`.\nInstead, both `ft_metadata()` and `ft_metadata_set()` create a new `LazyOption` each time via `ft_metadata_init_lazy_container()` with a hardcoded storage prefix (`b\\\"ftmd\\\".to_vec()`).\n\nThis pattern can cause “missing reference to active allocated resource” style issues:\n- If initialization elsewhere used `self.metadata` with a different prefix, metadata written under `ftmd` becomes effectively detached/untracked by the struct (and vice-versa), leaving state that is difficult to reason about or reclaim.\n- Future refactors that change prefixes can strand previously written metadata in storage.\n\nOn-chain, this manifests as unreachable/orphaned state rather than a classic memory leak, but it is still an untracked allocated resource problem.\n",
+                    "category": "CWE-771",
+                    "severity": "low",
+                    "confidence": 0.66
+                }
+            ]
+        },
+        {
+            "reasoning": "The reviewed code does not allocate file descriptors/handles (so CWE-774 is not applicable). It also does not create obvious groups of per-object heap allocations in loops that would indicate improperly controlled *sequential* memory allocations (CWE-1325) within the provided snippet.\n\nHowever, it does accept attacker-controlled `String` parameters (`msg` in `ft_transfer_call`, and `memo` in both `ft_transfer` and `ft_transfer_call`) that are Borsh/JSON-deserialized by the NEAR runtime into in-memory `String`s before any contract-side checks. Because the code does not enforce any upper bound on these string lengths, an attacker can supply very large inputs to force the contract to allocate memory proportional to the provided size, potentially triggering out-of-memory / excessive memory usage and causing a denial of service (contract panic) for that call. This is a classic “allocate based on untrusted size” issue (CWE-789). While the protocol imposes some upper bounds on transaction/call payload size, the contract itself does not impose tighter, application-appropriate bounds, so the root cause remains.\n",
+            "findings": [
+                {
+                    "title": "Unbounded `msg` string allocation in `ft_transfer_call` (input-controlled memory growth)",
+                    "description": "`ft_transfer_call(receiver_id, amount, memo, msg)` takes an attacker-controlled `msg: String`.\nThe NEAR runtime must deserialize this into a Rust `String`, allocating memory proportional\nto the supplied length before the contract can apply any validation. The implementation\ndoes not enforce a maximum `msg` length, so a caller can provide an excessively large `msg`\nto inflate memory usage and potentially cause the contract execution to panic/OOM (DoS for that call).\n",
+                    "category": "CWE-789",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Unbounded `memo` string allocation in `ft_transfer` / `ft_transfer_call` (even though unused)",
+                    "description": "Both `ft_transfer(..., memo: Option<String>)` and `ft_transfer_call(..., memo: Option<String>, ...)`\naccept an attacker-controlled `memo` that is marked `#[allow(unused)]` but still must be deserialized.\nBecause the code does not bound `memo` length, a caller can submit a very large memo to force\nexcessive memory allocation during argument parsing/deserialization, potentially leading to\nout-of-memory/panic and denial of service for that invocation.\n",
+                    "category": "CWE-789",
+                    "severity": "medium",
+                    "confidence": 0.74
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-669",
+            "CWE-913",
+            "CWE-1229",
+            "CWE-400",
+            "CWE-665",
+            "CWE-410",
+            "CWE-668",
+            "CWE-580",
+            "CWE-221",
+            "CWE-1329",
+            "CWE-662",
+            "CWE-666",
+            "CWE-118",
+            "CWE-404",
+            "CWE-704",
+            "CWE-610",
+            "CWE-496",
+            "CWE-501",
+            "CWE-706",
+            "CWE-673",
+            "CWE-911",
+            "CWE-487",
+            "CWE-922",
+            "CWE-372",
+            "CWE-495"
+        ],
+        [
+            "CWE-1246",
+            "CWE-771",
+            "CWE-779",
+            "CWE-405",
+            "CWE-1235",
+            "CWE-920",
+            "CWE-770"
+        ],
+        [
+            "CWE-774",
+            "CWE-1325",
+            "CWE-789"
+        ]
+    ]
+}

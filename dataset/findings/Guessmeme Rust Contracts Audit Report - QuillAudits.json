@@ -1,0 +1,190 @@
+{
+    "path": "reports/Guessmeme Rust Contracts Audit Report - QuillAudits.pdf",
+    "project_info": {
+        "url": "https://github.com/sardar-khan/guess-meme-contracts/tree/main/Solana",
+        "commit_id": "716bdbd47cc3f1d896eb678f0fda0b288f26dfc1",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-04-21",
+        "project_path": "contracts/Guessmeme Rust Contracts Audit Report - QuillAudits.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ],
+                "4": [
+                    "CWE-454"
+                ]
+            },
+            "title": "The create instruction is susceptible to unlimited minting attack and pump/dump scenario",
+            "description": "1. **Description:** The create instruction allows for the creation of tokens, but due to reliance on an admin to finalize metadata via the meta function, there is a window where users could potentially exploit the system for unlimited minting before finalization. Additionally, the price at token creation can be manipulated, enabling a pump-and-dump scheme.\n2. **Cause:** The vulnerability arises because there is no on-chain enforcement or state tracking to prevent multiple mints or to lock metadata immediately upon creation. The system depends on a delayed administrative action, creating a trust gap.\n3. **Exploitation:** An attacker could create a token and manipulate initial parameters to mint excessive supply before the admin finalizes metadata, or manipulate pricing to artificially inflate value and dump tokens for profit.\n4. **Impact:** This could lead to an uncontrolled supply of tokens, devaluing the ecosystem, enabling fraudulent schemes, and damaging user trust in the protocol.\n",
+            "severity": "high",
+            "files": [
+                "Solana/lib.rs"
+            ],
+            "location": [
+                "create#"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Zero Token Withdrawal Risk: Complete Status Only Triggered After Last Token Sale",
+            "description": "1. **Description:** The bonding curve's \"complete\" status, which enables the withdraw function, is only triggered when the last token is sold. However, once all tokens are sold, there are no tokens left to withdraw alongside SOL, rendering the withdrawal of remaining tokens impossible.\n2. **Cause:** The logic ties completion strictly to the exhaustion of token reserves (real_token_reserves = 0), without preserving a portion of tokens for withdrawal by the admin.\n3. **Exploitation:** While not directly exploitable by attackers, this design flaw can be triggered naturally if all tokens are sold, leading to an inconsistent state where withdrawal is enabled but tokens to withdraw no longer exist.\n4. **Impact:** The admin cannot withdraw leftover tokens, leading to loss of expected assets and reduced transparency in fund management.\n",
+            "severity": "high",
+            "files": [
+                "Solana/lib.rs"
+            ],
+            "location": [
+                "buy#",
+                "withdraw#"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Possible lock of funds due to the tendency of complete status remaining active",
+            "description": "1. **Description:** Funds in the bonding curve can become permanently locked if not all tokens are sold, as the complete status (required for withdrawal) is only set when real_token_reserves reaches zero.\n2. **Cause:** The system does not allow withdrawal unless 100% of tokens are sold, with no fallback mechanism or time-based release. This creates a deadlock risk if market conditions prevent full sell-out.\n3. **Exploitation:** No active exploitation is needed; the issue manifests organically if demand is insufficient to sell all tokens.\n4. **Impact:** SOL funds could be permanently inaccessible, resulting in financial loss for the admin and reduced reliability of the protocol.\n",
+            "severity": "high",
+            "files": [
+                "Solana/lib.rs"
+            ],
+            "location": [
+                "buy#"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Missing Token Account Owner Validation Check",
+            "description": "1. **Description:** The buy and sell functions do not validate that the provided token accounts belong to the expected owner (i.e., the signer of the transaction).\n2. **Cause:** There is no ownership check during account deserialization or within the function logic, allowing potentially arbitrary token accounts to be passed in.\n3. **Exploitation:** An attacker could pass a token account they do not own, potentially causing tokens to be transferred to or from incorrect accounts, leading to loss or theft.\n4. **Impact:** Risk of token misdirection, unauthorized transfers, and potential theft, undermining the integrity of user balances.\n",
+            "severity": "high",
+            "files": [
+                "Solana/lib.rs"
+            ],
+            "location": [
+                "buy/sell#"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Unchecked SOL Balance in Sell Function: Risk of Failed Transfers Due to Insufficient Balance",
+            "description": "1. **Description:** The sell function updates internal state before verifying that the bonding curve holds sufficient SOL to complete the transfer, violating the checks-effects-interactions pattern.\n2. **Cause:** The function assumes that real_sol_reserves accurately reflect the actual SOL balance, without performing a runtime check against the account's actual lamports.\n3. **Exploitation:** If the actual SOL balance is lower than expected (e.g., due to external transfers), the transfer will fail after state update, leaving the system in an inconsistent state.\n4. **Impact:** Failed transactions, inconsistent state, and potential denial of service for legitimate users attempting to sell.\n",
+            "severity": "medium",
+            "files": [
+                "Solana/lib.rs"
+            ],
+            "location": [
+                "sell#"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Rent set aside for storage is never redeemed",
+            "description": "1. **Description:** When the withdraw function is called and the bonding curve is completed, the account data is cleared but the rent-exempt reserve SOL is not refunded to the admin.\n2. **Cause:** The program does not close the account or transfer the rent balance, leaving funds locked in a now-unused account.\n3. **Exploitation:** No active exploitation, but the design leads to permanent loss of rent funds.\n4. **Impact:** Economic inefficiency and loss of rent funds that could otherwise be reclaimed, reducing the net proceeds for the admin.\n",
+            "severity": "medium",
+            "files": [
+                "Solana/lib.rs"
+            ],
+            "location": [
+                "withdraw#"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "max_allowed_amount will be bypassed by users",
+            "description": "1. **Description:** The max_allowed_amount check is based on the user's current token balance rather than the total tokens sold, allowing users to bypass the supply cap by transferring out their balance, buying more, and transferring back.\n2. **Cause:** The validation uses associated_user.amount + famount <= max_allowed_amount, which only checks per-user holdings, not cumulative sales.\n3. **Exploitation:** A user can circumvent the max supply restriction by manipulating their account balance via transfers before and after purchasing.\n4. **Impact:** Exceeding intended token supply limits, leading to inflation, unfair distribution, and potential manipulation of the bonding curve.\n",
+            "severity": "medium",
+            "files": [
+                "Solana/lib.rs"
+            ],
+            "location": [
+                "buy#"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "No event emission for the withdraw operation",
+            "description": "1. **Description:** The withdraw function does not emit any event when SOL or tokens are withdrawn, making it difficult to track admin actions off-chain.\n2. **Cause:** Lack of event emission mechanism in the withdraw instruction.\n3. **Exploitation:** While not directly exploitable, the absence of logs enables stealthy withdrawals, reducing transparency.\n4. **Impact:** Hinders monitoring, auditing, and analytics; reduces accountability and user trust in admin operations.\n",
+            "severity": "low",
+            "files": [
+                "Solana/lib.rs"
+            ],
+            "location": [
+                "withdraw#"
+            ]
+        }
+    ]
+}

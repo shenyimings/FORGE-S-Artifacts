@@ -1,0 +1,361 @@
+{
+    "path": "reports-without-source/12_04_2024_Glow_V1-MR.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/Blueprint-Finance/glow-v1"
+        ],
+        "commit_id": [
+            "108ca01"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-11-07",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Anybody can create an issuer, since there’s no access control to airspace_permit_issuer_create_handler()",
+            "description": "The `airspace_permit_issuer_create_handler()` function allows any user to create a new issuer for an airspace without verifying that the signer is the authorized authority of that airspace. \nThe root cause is the lack of access control: the function accepts a signer account labeled as 'authority' but does not validate that this account matches the actual authority stored in the Airspace account. \nAn attacker can exploit this by calling the function with any signer to create an issuer for any airspace, even if they are not authorized. \nThis leads to unauthorized issuance of permits, undermining the trust and security model of the airspace system, potentially allowing malicious actors to grant themselves or others unauthorized access.\n",
+            "severity": "high",
+            "location": [
+                "programs/airspace/src/instructions/airspace_permit_issuer_create.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Bad debt isn’t socialized, causing issues for lenders",
+            "description": "The protocol lacks a mechanism to socialize bad debt across lenders when a loss occurs due to undercollateralized positions or unrepaid loans. \nThe cause is the absence of a loss-proportional redistribution mechanism; instead, losses are borne entirely by the last withdrawing lenders. \nAn attacker or market condition could trigger a sudden price drop, leading to bad debt, which would then cause a rush among lenders to withdraw funds to avoid bearing the full loss. \nThe impact is systemic instability: lenders are incentivized to exit early, reducing liquidity and potentially rendering the lending pool unusable, harming the protocol's sustainability.\n",
+            "severity": "high",
+            "location": [
+                "programs/margin/src/instructions/liquidator_invoke.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Liquidator can steal funds from the user without repaying anything",
+            "description": "During liquidation, the liquidator can borrow additional funds from the liquidated account without repaying any debt, as long as the equity loss does not exceed 4% of the liability. \nThe root cause is insufficient restrictions on liquidator actions, allowing them to manipulate the account's state freely within the 4% threshold. \nAn attacker can repeatedly borrow up to 4% of the liability in a single transaction or across multiple transactions, effectively draining the account and the underlying pool. \nThe impact is severe financial loss for both the borrower and lenders, as the borrowed amount becomes bad debt, potentially emptying the entire pool.\n",
+            "severity": "high",
+            "location": [
+                "programs/margin/src/instructions/liquidator_invoke.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-191"
+                ]
+            },
+            "title": "Attacker can send lamports to metadata accounts, causing an underflow during account expansion",
+            "description": "When expanding a metadata account via `metadata.set_entry()`, the rent calculation subtracts the current lamports from the required minimum balance without checking for underflow. \nThe cause is the use of `checked_sub()` without handling the possibility that an attacker could have sent additional lamports to the account, making the current balance exceed the required balance. \nAn attacker can exploit this by sending lamports to a metadata account before the `set_entry()` call, causing the subtraction to underflow and revert the transaction. \nThe impact is a denial-of-service, preventing legitimate updates to metadata accounts, which could disrupt protocol operations.\n",
+            "severity": "medium",
+            "location": [
+                "programs/metadata/src/lib.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Under-estimation of reallocation size would revert the tx in metadata.set_entry()",
+            "description": "The `metadata.set_entry()` function incorrectly calculates the new account size during reallocation by only considering the data length and ignoring the offset where the data is written. \nThis leads to insufficient memory allocation, causing the transaction to revert when attempting to write data beyond the current account size. \nAn attacker or legitimate user trying to update a field at a high offset will fail, even with correct parameters. \nThe impact is a denial-of-service for metadata updates, preventing proper operation of components relying on dynamic metadata storage.\n",
+            "severity": "medium",
+            "location": [
+                "programs/metadata/src/lib.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Borrow doesn’t write adapter results, allowing liquidator to fake repayment",
+            "description": "The margin-pool program fails to communicate balance changes back to the margin program when a borrow occurs (in both v1 and v2). \nThe cause is the omission of adapter result writing in the borrow instructions, breaking the expected feedback loop. \nA liquidator can exploit this by repaying a debt and then borrowing the same amount back, making it appear as though a net repayment occurred. \nThe impact is fraudulent liquidation fees, where the liquidator receives a reward without actually reducing the debt, leading to financial loss for the borrower.\n",
+            "severity": "medium",
+            "location": [
+                "programs/margin-pool/src/instructions/margin_borrow.rs",
+                "programs/margin-pool/src/instructions/margin_borrow_v2.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Liquidation filters out borrow and token decrease from changes calculation, allowing user to fake liquidation",
+            "description": "The `liquidator_invoke_handler()` function filters out borrow and external token decrease events when calculating fee-relevant changes, meaning these outflows are not subtracted from the total increases. \nThis allows a liquidator to repay and then borrow back the same amount, making it appear as a net repayment. \nThe root cause is incorrect filtering logic in the fee calculation, which only includes external increases and repayments but does not properly account for reversals. \nThe impact is the same as M-03: fraudulent liquidation fees and economic loss due to fake repayments.\n",
+            "severity": "medium",
+            "location": [
+                "programs/margin/src/instructions/liquidator_invoke.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Revoking permit implementation doesn’t match the code comment",
+            "description": "The code comment states that permits can be revoked by the airspace authority, the issuing regulator, or any address if the airspace is restricted and the regulator license is revoked. \nHowever, the actual implementation only allows revocation by the airspace authority or the issuer, and further restricts revocation if the airspace is unrestricted, the issuer is not revoked, or the permit was issued by the airspace itself. \nThe cause is a discrepancy between documented intent and implemented logic. \nThe impact is reduced flexibility and potential inability for legitimate revocation under intended conditions, weakening the permission model.\n",
+            "severity": "medium",
+            "location": [
+                "programs/airspace/src/instructions/airspace_permit_revoke.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Liquidator can inflate the repayment amount by borrowing and repaying again",
+            "description": "While borrowing and repayment are netted within a single liquidation invocation, a liquidator can perform these actions across multiple invocations to inflate the apparent repayment amount. \nThe cause is the lack of cumulative tracking of borrow and repay events across invocations within a single liquidation session. \nAn attacker can repay in one invocation, borrow in another, and repay again, making it seem like a larger net repayment occurred. \nThe impact is inflated liquidation fees and potential manipulation of the liquidation process for financial gain.\n",
+            "severity": "medium",
+            "location": [
+                "programs/margin/src/instructions/liquidator_invoke.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "Signed accounts aren’t tracked for changes, even though they might be owned by the margin program",
+            "description": "The adapter invocation logic skips tracking balance changes for accounts that are signed, assuming they are not token accounts owned by the margin program. \nHowever, external programs might allow users to provide their own token accounts as long as the owner is the margin account, leading to signed token accounts that should be tracked. \nThe cause is an incorrect assumption in the tracking logic. \nThe impact is incorrect balance change reporting during liquidation, potentially leading to miscalculated fees or incorrect liquidation outcomes.\n",
+            "severity": "low",
+            "location": [
+                "programs/margin/src/adapter.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ],
+                "3": [
+                    "CWE-837"
+                ]
+            },
+            "title": "Liquidator can DoS liquidation by repeatedly registering themselves as the liquidator and not doing anything",
+            "description": "A liquidator can call 'begin liquidation' and then repeatedly renew the liquidation window by ending and restarting before timeout, without performing any actual liquidation. \nThe cause is the lack of a penalty or deposit requirement for initiating liquidation. \nAn attacker can exploit this to monopolize the liquidation process and prevent others from liquidating an account, even if they have no intention to act. \nThe impact is denial of service for liquidation, allowing unhealthy positions to persist and increasing systemic risk.\n",
+            "severity": "low",
+            "location": [
+                "programs/margin/src/instructions/liquidate_begin.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Exchange rate might be zero if only uncollected fees remain in the pool",
+            "description": "The deposit note exchange rate calculation uses `total_value()` clamped to at least 1, but subtracts uncollected fees afterward. If only uncollected fees remain and their value is ≥1, the numerator becomes zero or negative, resulting in a zero exchange rate. \nThe cause is incorrect ordering of operations in the calculation. \nA user depositing funds when the pool has only uncollected fees would receive zero deposit notes, effectively losing their deposit. \nThe impact is loss of user funds and loss of trust in the protocol.\n",
+            "severity": "low",
+            "location": [
+                "programs/margin-pool/src/state.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Liquidator can repay non past-due positions",
+            "description": "When an account is liquidated due to a past-due position, the protocol allows the liquidator to repay any position, including those that are not past due, and still claim a fee. \nThe cause is the absence of a check to restrict repayment to only the triggering (past-due) position. \nA liquidator can exploit this to repay a large, healthy position and claim a fee without addressing the actual risk. \nThe impact is unfair fee extraction and unnecessary repayment of healthy debt, harming the borrower economically.\n",
+            "severity": "low",
+            "location": [
+                "programs/margin/src/instructions/liquidator_invoke.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Liquidator can repay more than necessary to make the account healthy",
+            "description": "The protocol does not limit the amount a liquidator can repay, allowing them to repay the entire debt even when only a small amount is needed to restore solvency. \nThe cause is the lack of a cap on repayment based on the minimum required to make the account healthy. \nA liquidator can exploit this to maximize their liquidation fee by repaying more than necessary. \nThe impact is excessive fee extraction and inefficient liquidation, leading to unnecessary capital movement and borrower loss.\n",
+            "severity": "low",
+            "location": [
+                "programs/margin/src/instructions/liquidator_invoke.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1099"
+                ]
+            },
+            "title": "Rename parameter named ‘test’ to a meaningful name",
+            "description": "The `configure_permit()` function in the margin program uses a parameter named 'test' that controls whether a permission flag is added or removed. \nThe cause is poor naming that obscures the parameter's purpose. \nWhile this does not introduce a security vulnerability, it reduces code readability and increases the risk of developer error during maintenance or auditing. \nThe impact is reduced code maintainability and potential for misinterpretation, which could lead to bugs in the future.\n",
+            "severity": "informational",
+            "location": [
+                "programs/margin/src/instructions/configure/configure_permit.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "When registering position revert if position already exists",
+            "description": "The 'register position' instruction silently succeeds if the position already exists, without applying any new configuration. \nThe cause is the absence of a check for existing positions. \nThis can mislead users into believing that updated token configurations have been applied when they have not. \nThe impact is user confusion and potential incorrect assumptions about position state, leading to operational errors.\n",
+            "severity": "informational",
+            "location": [
+                "programs/margin/src/instructions/register_position.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ]
+            },
+            "title": "It’s best practice to assign ownership to system program when closing account",
+            "description": "The `metadata.remove_entry()` instruction closes an account by zeroing the discriminator and transferring lamports but does not reallocate the account to zero size or transfer ownership to the system program. \nWhile functional, this deviates from best practices followed by frameworks like Anchor. \nThe cause is incomplete account cleanup. \nThe impact is non-standard account state after closure, which could lead to compatibility issues or confusion in tooling and audits.\n",
+            "severity": "informational",
+            "location": [
+                "programs/metadata/src/lib.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-191"
+                ]
+            },
+            "title": "Uncollected fees might lead to underflow if they’re lost due to bad debt",
+            "description": "The `deposit_note_exchange_rate()` function subtracts `total_uncollected_fees()` from `total_value()` without ensuring the result is non-negative. \nIf bad debt causes `total_value()` to drop below `total_uncollected_fees()`, the subtraction would underflow. \nThe cause is missing underflow protection in the calculation. \nThe impact is a potential denial-of-service for deposits if the function reverts, disrupting protocol functionality when implementing bad debt socialization.\n",
+            "severity": "informational",
+            "location": [
+                "programs/margin-pool/src/state.rs"
+            ],
+            "files": []
+        }
+    ]
+}

@@ -1,0 +1,326 @@
+{
+    "path": "reports/composable_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/ComposableFi/emulated-light-client",
+        "commit_id": "ae55a30",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-04-23",
+        "project_path": "contracts/composable_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ]
+            },
+            "title": "Ability To Initialize Multiple Times",
+            "description": "The `Initialize` instruction uses `init_if_needed` when initializing the staking parameters, which allows the parameters to be reinitialized multiple times by any caller. This lack of one-time initialization enforcement means that an attacker can repeatedly call the `Initialize` instruction with malicious parameters, thereby altering critical staking configurations such as reward settings or admin controls. The root cause is the use of `init_if_needed` instead of `init`, which does not enforce idempotency. An attacker could exploit this by reinitializing the staking parameters to redirect rewards or disable security checks. The impact includes full compromise of protocol integrity, potential fund loss, and unauthorized control over staking logic.\n",
+            "severity": "critical",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "Initialize#lib.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Discrepancies In Deposit Functionality",
+            "description": "The `deposit` function uses `remaining_accounts` to perform a Cross-Program Invocation (CPI) to `solana_ibc::cpi::set_stake`, but it lacks explicit validation of these accounts. This means that an attacker could pass in arbitrary or malicious accounts, leading to unintended behavior or security breaches. Additionally, the `set_stake` CPI call does not include the mint address of the staked token, which is critical because tokens on Solana can have different decimal precisions. Without specifying the mint, there is a risk of incorrect scaling of the staked amount, potentially leading to miscalculations or loss of funds. The root cause is missing account validation and omission of mint parameter in CPI. Exploitation could involve passing fake accounts or manipulating token decimals to inflate stakes. The impact includes incorrect stake tracking, fund loss, and potential protocol instability.\n",
+            "severity": "critical",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "deposit#lib.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing Receipt Token Balance Check",
+            "description": "In the `set_service` instruction, the code sets the service for a stake that was deposited before guest chain initialization but does not verify that the depositor's `receipt_token_account` has a non-zero balance. The function assumes the account has sufficient balance without explicit validation, which creates a discrepancy between expected and actual state. The root cause is the absence of a balance check before proceeding with service assignment. An attacker could exploit this by triggering the `set_service` instruction for accounts with zero receipt tokens, potentially leading to invalid state transitions or denial of service for legitimate users. The impact includes inconsistent state, potential fund lockup, and reduced trust in the system's correctness.\n",
+            "severity": "critical",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "set_service#lib.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ],
+                "4": [
+                    "CWE-940"
+                ]
+            },
+            "title": "Lack Of Instruction Sysvar Validation",
+            "description": "1. **Description:** The `instruction` sysvar account is passed to both `deposit` and `set_service` instructions but is not validated in `validate_remaining_accounts` or `set_stake`. This lack of validation opens the door for manipulation of the instruction sysvar.\n2. **Cause:** The code uses `///CHECK:` comment for the `instruction` account without performing actual validation, assuming it is trustworthy without verifying its address.\n3. **Exploitation:** An attacker could replace or manipulate the `instruction` sysvar account to inject unauthorized instructions into CPI calls, potentially leading to arbitrary logic execution.\n4. **Impact:** This could result in unauthorized state changes, fund loss, or other malicious behavior if the manipulated sysvar influences CPI call outcomes.\n",
+            "severity": "high",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "Deposit.instruction",
+                "SetService.instruction"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Inaccurate Reward Calculation",
+            "description": "1. **Description:** In the `withdrawal_request` function, the `last_received_rewards_height` parameter in `vault_params` is not updated after rewards are calculated and transferred.\n2. **Cause:** The omission of updating the `last_received_rewards_height` field leads to stale data being used in subsequent reward calculations.\n3. **Exploitation:** A user who cancels a withdrawal request and later re-requests it will have rewards miscalculated based on outdated height information, potentially receiving fewer or more rewards than deserved.\n4. **Impact:** This results in incorrect reward distribution, undermining the fairness and economic model of the staking system.\n",
+            "severity": "high",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "withdrawal_request#"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Potential Fund Lockup",
+            "description": "1. **Description:** The `deposit` instruction accepts an optional `service` parameter of type `Option<Service>`, which is later used as a condition during withdrawal. If `None` is passed during deposit, the withdrawal logic may fail due to an assumption that `service.is_some()` is always true.\n2. **Cause:** The withdrawal logic assumes the presence of a service, but the deposit allows it to be `None`, creating a mismatch in state assumptions.\n3. **Exploitation:** A user depositing without specifying a service (`None`) may be unable to withdraw funds later if the withdrawal function requires a service to be present.\n4. **Impact:** This can lead to permanent or temporary lockup of user funds, resulting in loss of access and trust in the protocol.\n",
+            "severity": "low",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "deposit.service",
+                "withdraw"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "Incorrect Error Type in get_packet_commitment",
+            "description": "1. **Description:** The `get_packet_commitment` function returns the wrong error type when a packet commitment is not found. Instead of returning `PacketCommitmentNotFound`, it incorrectly returns `PacketReceiptNotFound`.\n2. **Cause:** The error mapping in the match expression uses an incorrect error variant, likely due to copy-paste or oversight during implementation.\n3. **Exploitation:** An attacker could potentially exploit this confusion in error handling to mislead monitoring systems or trigger incorrect fallback behaviors in client applications relying on precise error codes.\n4. **Impact:** This may result in degraded observability, incorrect client-side logic decisions, or complicate debugging and incident response during operation.\n",
+            "severity": "low",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "validation_context.get_packet_commitment#-"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unnecessary Account Passed to withdrawal_request and cancel_withdrawal_request",
+            "description": "1. **Description:** The `nft_metadata` account is included in the instruction accounts for both `withdrawal_request` and `cancel_withdrawal_request`, despite not being used in the logic of these functions.\n2. **Cause:** The account was likely included out of habit or due to a copy-paste from another instruction where it is required.\n3. **Exploitation:** This does not pose a direct security risk but increases the transaction complexity and account validation overhead.\n4. **Impact:** Unnecessary accounts increase the size of transactions, raise compute costs, and may contribute to hitting Solana's transaction size or compute limits unnecessarily.\n",
+            "severity": "informational",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "withdrawal_request#-",
+                "cancel_withdrawal_request#-"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Context Signer Correction",
+            "description": "1. **Description:** The `CpiContext::new_with_signer` method is used to create CPI contexts in the `deposit` function, which implies signed invocation with seeds for signature verification.\n2. **Cause:** This method is used even when the target instruction (`set_stake`) may not require signed invocation or seed-based verification, leading to unnecessary complexity and potential misuse.\n3. **Exploitation:** If the target program does not validate the seeds or signer, this could allow misuse of the CPI context or complicate future upgrades.\n4. **Impact:** While not directly exploitable, it introduces unnecessary risk and complexity; using `CpiContext::new` would be safer and simpler if signing is not required.\n",
+            "severity": "informational",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "deposit#CpiContext::new_with_signer"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ],
+                "4": [
+                    "CWE-1188"
+                ],
+                "5": [
+                    "CWE-453"
+                ]
+            },
+            "title": "Enforce Mandatory Service Assignment",
+            "description": "1. **Description:** The `vault_params.service` field is currently defined as `Option<Service>`, allowing it to be `None` even when `guest_chain_program_id.is_some()`, which contradicts the intended logic.\n2. **Cause:** The optional type allows users to bypass service assignment even after the guest chain is initialized.\n3. **Exploitation:** Users may set `service` to `None`, undermining the expected behavior that a service must be assigned once the chain is active.\n4. **Impact:** This weakens the protocol's state consistency and may lead to edge cases in logic handling or future vulnerabilities.\n",
+            "severity": "informational",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "deposit.service"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-563"
+                ]
+            },
+            "title": "Code Redundancy",
+            "description": "1. **Description:** There are multiple instances of redundant or unnecessary code, such as storing `max_validators` in both `Config` and `Candidates` (only the latter is used), including unused fields like `associated_token_program` in `InitMint`, and unnecessary bit manipulation logic in `bit::fmt`.\n2. **Cause:** Poor code hygiene and lack of refactoring lead to bloat and confusion.\n3. **Exploitation:** While not directly exploitable, redundant code increases audit surface and maintenance burden, potentially hiding real vulnerabilities.\n4. **Impact:** Reduces code clarity, increases risk of bugs, and complicates future development and audits.\n",
+            "severity": "informational",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "InitMint.associated_token_program",
+                "bit::fmt"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-657"
+                ],
+                "3": [
+                    "CWE-250"
+                ]
+            },
+            "title": "Code Optimisation",
+            "description": "1. **Description:** Unnecessary signing and seed usage occur in `token::transfer` calls within the `deposit` instruction, where signed invocation is not required.\n2. **Cause:** Overuse of `CpiContext::new_with_signer` when `CpiContext::new` would suffice.\n3. **Exploitation:** Increases transaction complexity and cost without security benefit.\n4. **Impact:** Higher gas costs and reduced efficiency; potential for misuse if seeds are incorrectly managed.\n",
+            "severity": "informational",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "deposit.token::transfer"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ]
+            },
+            "title": "Inefficient Proof Inclusion in trie.get",
+            "description": "1. **Description:** The `get` function in the trie module calls `get_impl` with the `include_proof` parameter set to true, indicating that a Merkle proof should be generated. However, the resulting proof is discarded and not used in the subsequent logic.\n2. **Cause:** The function unnecessarily sets `include_proof` to true when the caller does not require the proof data.\n3. **Exploitation:** While not directly exploitable for malicious gain, this inefficiency increases computational overhead and resource usage for every call.\n4. **Impact:** This leads to unnecessary performance costs and higher compute usage on the Solana network, potentially increasing transaction fees or contributing to compute limit exhaustion under heavy usage.\n",
+            "severity": "informational",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "trie.get#-",
+                "trie.get_impl#-"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Misleading Documentation for RawNode Key Array Size",
+            "description": "1. **Description:** The documentation for the `RawNode` structure states that the `<key>` field is a 36-byte array, but fails to clarify that only 34 bytes are used for the actual key extension, with the first two bytes reserved for metadata (key length and bits to skip).\n2. **Cause:** Incomplete or outdated documentation that does not reflect the actual binary layout and usage of the key array.\n3. **Exploitation:** Developers relying on the documentation may misinterpret the structure layout, leading to incorrect parsing or serialization logic in client or cross-program interactions.\n4. **Impact:** This could result in interoperability issues, deserialization bugs, or security vulnerabilities in dependent systems that misinterpret the node format.\n",
+            "severity": "informational",
+            "files": [
+                "solana/restaking/programs/restaking/src/lib.rs"
+            ],
+            "location": [
+                "nodes.RawNode#-"
+            ]
+        }
+    ]
+}

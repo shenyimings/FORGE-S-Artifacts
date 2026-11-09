@@ -1,0 +1,86 @@
+{
+    "path": "reports/Audit_Report.pdf",
+    "project_info": {
+        "url": "https://github.com/OrderlyNetwork/solana-vault",
+        "commit_id": "bd8b6dbeb3300319fd9dad262298ec0cd1152344",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-10-27",
+        "project_path": "contracts/Audit_Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-349"
+                ]
+            },
+            "title": "Missing validation of deposit token in solana_vault::deposit",
+            "description": "1. **Description:** The deposit function in the solana-vault program does not validate that the token being deposited (deposit_token) matches the allowed token (e.g., USDC) configured in the vault. This allows an attacker to deposit any token while claiming it is the allowed token.\n2. **Cause:** The Deposit struct and associated functions (deposit and apply) lack a constraint or check to enforce that deposit_token.key() equals allowed_token.mint_account. Additionally, deposit_params.token_hash is user-controlled and not tied to the actual mint of the deposited token.\n3. **Exploitation:** An attacker can call the deposit function with a worthless or low-value token (e.g., WIF or a custom memecoin), while setting deposit_params.token_hash to the hash of USDC. The system accepts this and records a USDC deposit.\n4. **Impact:** The attacker receives USDC on the destination chain equivalent to the deposited amount, while the vault holds nearly worthless tokens. This leads to direct financial loss for the protocol and potential draining of the vault.\n",
+            "severity": "high",
+            "files": [
+                "packages/solana/contracts/programs/solana-vault/src/instructions/vault_instr/deposit.rs"
+            ],
+            "location": [
+                "solana_vault::deposit",
+                "deposit.rs::apply",
+                "Deposit struct#22"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Shared PDA signing authority allows unauthorized withdrawals",
+            "description": "1. **Description:** The vault uses a shared PDA (vault_authority_seeds) across all users in the OAppLzReceive instruction, enabling any user to trigger withdrawals for another user's account.\n2. **Cause:** The signing authority is not scoped per user, and there is no validation that the recipient of the withdrawal matches the intended user in the withdrawal message payload. The system only verifies the message sender (peer.address), not the end beneficiary.\n3. **Exploitation:** If User B initiates a withdrawal, User A can observe the valid withdrawal message and call the function first with the same parameters, thereby stealing User B's funds before User B can.\n4. **Impact:** Users can have their entire withdrawal amount stolen by other users without any cryptographic or logical barrier preventing such an attack. This results in direct loss of user funds.\n",
+            "severity": "high",
+            "files": [
+                "packages/solana/contracts/programs/solana-vault/src/instructions/oapp_instr/oapp_lz_receive.rs"
+            ],
+            "location": [
+                "OAppLzReceive#113-114",
+                "oapp_lz_receive()"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Missing LayerZero ordered execution option for orderly chain messages",
+            "description": "1. **Description:** The SolConnector contract on Ethereum does not enable LayerZero's ordered execution option when sending withdrawal messages, which can result in out-of-order message delivery on the Solana side.\n2. **Cause:** The withdraw function in SolConnector.sol uses only gas and value options in the LayerZero message configuration, omitting the ordered execution flag. Without this, LayerZero does not guarantee message ordering.\n3. **Exploitation:** When multiple withdrawals occur in quick succession, messages may arrive out of order at the Solana vault. The vault rejects out-of-order messages with an InvalidInboundNonce error, even though the Orderly Chain ledger has already updated balances.\n4. **Impact:** Users experience state inconsistency\u2014funds are deducted on Orderly Chain but not released on Solana. This can lead to effective fund loss and require manual administrative intervention to resolve.\n",
+            "severity": "medium",
+            "files": [
+                "packages/solana/contracts/programs/solana-vault/src/instructions/oapp_instr/oapp_lz_receive.rs"
+            ],
+            "location": [
+                "SolConnector.sol#92"
+            ]
+        }
+    ]
+}

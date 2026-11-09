@@ -1,0 +1,99 @@
+{
+    "path": "reports/Pyth2Wormhole - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": "https://github.com/pyth-network/pyth2wormhole",
+        "commit_id": "b41708e8631c1c1f3d0173a8fe717029a93337d0",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-04-27",
+        "project_path": "contracts/Pyth2Wormhole - Zellic Audit Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Possible usage of stale price information",
+            "description": "1. **Description:** The attestation and consumer contracts on Solana, Ethereum, and Terra do not perform sufficient validation on the publication timestamp of price data, allowing stale price information to be attested and consumed across chains.\n2. **Cause:** The attest function on Solana does not check the publish_time of the price, and the Ethereum and Terra consumer contracts only validate the attestation timestamp (when Wormhole relayed the data), not the actual price publication time. Additionally, the documentation fails to advise users to check the publication timestamp.\n3. **Exploitation:** An attacker could submit outdated price data through the attester, which would then be accepted by consumer contracts on Ethereum and Terra, especially since users are not guided to perform their own timestamp checks.\n4. **Impact:** This could lead to critical disruptions in DeFi applications relying on Pyth prices, such as incorrect liquidations, unfair trades, or loss of funds due to reliance on stale market data.\n",
+            "severity": "critical",
+            "files": [
+                "solana/pyth2wormhole/program/src/attest.rs",
+                "ethereum/contracts/pyth/Pyth.sol",
+                "terra/contracts/pyth-bridge/src/contract.rs"
+            ],
+            "location": [
+                "attest.rs.attest",
+                "Pyth.sol.queryPriceFeed",
+                "pyth-bridge.query_price_info"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "IPyth interface and implementation do not follow the recommended best practices",
+            "description": "1. **Description:** The IPyth interface on Ethereum does not allow consumers to verify the number of publishers contributing to a price, which contradicts the documented best practices that recommend using prices from at least three active publishers.\n2. **Cause:** The IPyth interface only exposes functions that return Price structs, which lack publisher count information. Although queryPriceFeed returns a PriceFeed struct that includes this data, the internal newPriceInfo function does not populate the numPublishers and maxNumPublishers fields from the attestation.\n3. **Exploitation:** Developers using the IPyth interface may unknowingly consume price data from an insufficient number of publishers, increasing the risk of price manipulation or inaccuracies.\n4. **Impact:** Consumers may rely on unreliable price data, undermining the security and robustness of applications built on Pyth, especially in high-value financial contexts.\n",
+            "severity": "low",
+            "files": [
+                "ethereum/contracts/pyth/Pyth.sol"
+            ],
+            "location": [
+                "Pyth.sol.IPyth",
+                "Pyth.sol.newPriceInfo"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Limited test-suite and code coverage",
+            "description": "1. **Description:** The Solana attester contract has minimal test coverage, with only a single test for the main attest function, leaving other functionality and edge cases untested.\n2. **Cause:** The codebase lacks a comprehensive testing strategy, resulting in insufficient validation of correctness and resilience under various conditions.\n3. **Exploitation:** Undetected bugs could persist in the attester logic, potentially leading to incorrect attestations or failures during operation, especially after future updates.\n4. **Impact:** Low test coverage increases the risk of undiscovered vulnerabilities and regressions, reducing confidence in the reliability and security of the attester program.\n",
+            "severity": "low",
+            "files": [
+                "solana/pyth2wormhole/client/tests/test_attest.rs"
+            ],
+            "location": [
+                "pyth2wormhole/client/tests/test_attest.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Missing access control on initializer function",
+            "description": "1. **Description:** The initialize function in the Pyth.sol contract is public and lacks access control modifiers, making it theoretically callable by any address.\n2. **Cause:** The function is intended to be overridden by a secure version (PythUpgradable.initialize), but the base function remains exposed and dangerous if ever directly invoked due to code changes or refactoring.\n3. **Exploitation:** If the function were to become callable (e.g., via a future code change), an attacker could reinitialize the contract, setting arbitrary Wormhole parameters and enabling submission of fake price data.\n4. **Impact:** This could lead to full contract takeover, allowing an attacker to feed fraudulent price attestations and disrupt all dependent systems.\n",
+            "severity": "informational",
+            "files": [
+                "ethereum/contracts/pyth/Pyth.sol"
+            ],
+            "location": [
+                "Pyth.sol.initialize"
+            ]
+        }
+    ]
+}

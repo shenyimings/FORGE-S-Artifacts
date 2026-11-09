@@ -1,0 +1,247 @@
+{
+    "path": "reports-without-source/DesciLaunchpad-security-review_2025-02-07.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/merklelabshq/desci-launchpad"
+        ],
+        "commit_id": [
+            "7167b472dd4e1c1a45ed2d49f00cd1dfadad0fcd"
+        ],
+        "address": [
+            "BtUNgrRufngrdEbXMnqUQjWP5LhKGGkz89U75k5tuaSj"
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-02-07",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Unclaimed tokens locked in stats_token causing permanent fund loss",
+            "description": "1. **Description:** In the `claim_token` function, users receive a proportional amount of tokens based on `claimed_supply` rather than the full `sale_supply`. If `claimed_supply` is less than `sale_supply`, the difference remains in the `stats_token` account.\n2. **Cause:** The contract fails to return or reallocate the unclaimed portion of `sale_supply` after distribution. The `adjusted_tokens` calculation only distributes a fraction, leaving residual tokens locked.\n3. **Exploitation:** After a token sale concludes with less than full participation, users claim their proportional share, but the leftover tokens in `stats_token` cannot be accessed by any party.\n4. **Impact:** This results in permanent loss of funds, as the unclaimed tokens are irretrievably locked in the `stats_token` account, reducing the total value available to the protocol or project team.\n",
+            "severity": "critical",
+            "location": [
+                "claim_token::claim_token_handler",
+                "deposit_token::deposit_token_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "withdraw_tokens fails to adjust claimed_supply locking tokens permanently",
+            "description": "1. **Description:** The `withdraw_tokens` function allows users to reclaim payment tokens if the minimum threshold is not met, but it does not adjust the `claimed_supply` or return `tokens_purchased` to the authority.\n2. **Cause:** The function marks the user's status as claimed but does not reverse the accounting of `tokens_purchased`, leading to a mismatch between actual and recorded supply.\n3. **Exploitation:** An attacker or regular user can withdraw their payment tokens while still being marked as having claimed tokens, effectively double-dipping or causing a permanent lock of tokens that cannot be claimed by others.\n4. **Impact:** Tokens corresponding to the withdrawn amount remain permanently locked in the system, reducing the total available supply and potentially causing fund loss or distribution issues.\n",
+            "severity": "high",
+            "location": [
+                "withdraw_token::withdraw_token_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "claim_revenue lets admin block user withdrawals below min threshold",
+            "description": "1. **Description:** The `claim_revenue` function can be called by the admin immediately after the sale ends, which prevents users from withdrawing their payment tokens even if the revenue is below the `min_threshold`.\n2. **Cause:** The `withdraw_token` function requires `revenue < min_threshold` to allow withdrawals, but if the admin calls `claim_revenue` first, this condition becomes false, blocking user withdrawals.\n3. **Exploitation:** A malicious or miscoordinated admin can withdraw revenue prematurely, denying users their right to reclaim funds, effectively freezing their deposits.\n4. **Impact:** Users are unable to withdraw their funds, leading to loss of trust, potential fund loss, and denial of access to their assets, undermining the fairness and functionality of the launchpad.\n",
+            "severity": "high",
+            "location": [
+                "claim_revenue::claim_revenue_handler",
+                "withdraw_token::withdraw_token_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Prevent token claims if the minimum threshold is not surpassed",
+            "description": "1. **Description:** Users can claim tokens even if the minimum revenue threshold is not met, while others may attempt to withdraw their payments, creating a state where funds are partially locked.\n2. **Cause:** There is no enforcement that token claims are only allowed when the `min_threshold` is met, leading to inconsistent state handling.\n3. **Exploitation:** Some users claim tokens while others withdraw, resulting in uncollected payments and stranded tokens, making it impossible to finalize the sale state cleanly.\n4. **Impact:** This can lead to fund loss and operational issues, as the contract cannot properly resolve the final state of the sale, potentially leaving tokens and funds in limbo.\n",
+            "severity": "medium",
+            "location": [
+                "claim_token::claim_token_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "Incorrect check for > 0 buy amt",
+            "description": "1. **Description:** The `buy_token` function incorrectly checks `token_amount > 0` instead of `buy_amount > 0`, allowing purchases with zero value.\n2. **Cause:** The validation uses `token_amount` instead of `buy_amount`, which is the actual amount being paid. This allows a user to bypass the intended economic check.\n3. **Exploitation:** An attacker can trigger a purchase with zero payment, potentially minting tokens without paying, or manipulating internal state such as `tokens_purchased`.\n4. **Impact:** This could lead to unfair token distribution, state corruption, or inflation of user balances without corresponding revenue, affecting protocol integrity.\n",
+            "severity": "low",
+            "location": [
+                "buy_token::buy_token_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing maximum cooldown duration validation",
+            "description": "1. **Description:** The `cooldown_duration` parameter is assigned directly from user input without bounds checking.\n2. **Cause:** No validation is performed on `args.cooldown_duration`, allowing arbitrarily long values to be set.\n3. **Exploitation:** A malicious user or admin could set an extremely long cooldown, effectively freezing the contract or delaying operations indefinitely.\n4. **Impact:** This harms protocol usability and fairness, potentially leading to denial of service or governance manipulation through excessive delays.\n",
+            "severity": "low",
+            "location": [
+                "create_token::create_token_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-563"
+                ]
+            },
+            "title": "Unused is_lp_created flag",
+            "description": "1. **Description:** The `is_lp_created` flag in `token_stats` is set to true in `update_token_handler` but is never read or used elsewhere.\n2. **Cause:** The flag was likely intended for future use but is currently redundant.\n3. **Exploitation:** While not directly exploitable, it increases storage costs and may confuse developers or auditors about the intended logic flow.\n4. **Impact:** Wasted storage space and potential for logic errors if the flag is later assumed to have meaning, leading to bugs or incorrect assumptions in future development.\n",
+            "severity": "low",
+            "location": [
+                "update_token::update_token_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-758"
+                ]
+            },
+            "title": "Missing toolchain version in Anchor.toml",
+            "description": "1. **Description:** The `Anchor.toml` file lacks specified versions for `anchor_version` and `solana_version` under the `[toolchain]` section.\n2. **Cause:** Version specifications are missing, leading to non-deterministic builds across different environments.\n3. **Exploitation:** Different developers or CI/CD systems may use incompatible versions, resulting in build failures or subtle runtime differences.\n4. **Impact:** This can cause deployment inconsistencies, compatibility issues, and potential security risks due to untested version combinations.\n",
+            "severity": "low",
+            "location": [
+                "Anchor.toml"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Use of transfer instead of transfer_checked",
+            "description": "1. **Description:** The `transfer` instruction is used instead of `transfer_checked` in functions like `buy_token_handler`, which does not validate mint or decimals.\n2. **Cause:** The code uses the unchecked version of the SPL token transfer instruction.\n3. **Exploitation:** An attacker could pass a token account with a different mint or decimal count, leading to incorrect transfers or loss of funds due to miscalculated amounts.\n4. **Impact:** This could result in loss of user funds or incorrect token transfers, especially in multi-token environments or when dealing with tokens of different decimal precision.\n",
+            "severity": "low",
+            "location": [
+                "buy_token::buy_token_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "All administrative keys are identical",
+            "description": "1. **Description:** The constants `DEV_PUBKEY`, `ADMIN_PUBKEY`, and `MINT_AUTHORITY_PUBKEY` are all set to the same public key.\n2. **Cause:** A single key controls multiple critical roles, violating the principle of least privilege and role separation.\n3. **Exploitation:** If the shared key is compromised, an attacker gains full control over development, administration, and minting functions.\n4. **Impact:** Complete compromise of the protocol is possible, including unauthorized token minting, configuration changes, and fund theft, significantly increasing systemic risk.\n",
+            "severity": "low",
+            "location": [
+                "constants.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "State inconsistency due to solana rollback",
+            "description": "1. **Description:** The protocol does not handle state consistency in the event of a Solana chain rollback, which could result in outdated configuration being used.\n2. **Cause:** There is no mechanism to detect if the current state was affected by a rollback or if configuration parameters are stale.\n3. **Exploitation:** After a rollback, the protocol may operate with old settings, leading to incorrect behavior or vulnerabilities.\n4. **Impact:** This could cause system malfunction, incorrect token distributions, or security breaches due to reliance on outdated or invalid state.\n",
+            "severity": "low",
+            "location": [
+                "Global configuration state"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing validation for start_time and end_time",
+            "description": "1. **Description:** The `create_token_handler` function does not validate that `start_time` and `end_time` are in the future relative to the current timestamp.\n2. **Cause:** No checks are performed using `Clock::get()?` to compare input times against the current time.\n3. **Exploitation:** An attacker or misconfigured call could set past timestamps, causing the sale to start or end immediately, bypassing the intended sale window.\n4. **Impact:** This leads to unintended behavior such as immediate token claims or failed sales, disrupting the launch process and potentially causing financial loss or user confusion.\n",
+            "severity": "low",
+            "location": [
+                "create_token::create_token_handler"
+            ],
+            "files": []
+        }
+    ]
+}

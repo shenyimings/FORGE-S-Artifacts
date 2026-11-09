@@ -1,0 +1,221 @@
+{
+    "path": "reports/2025-01-zetachain-solana-gateway-security-review.pdf",
+    "project_info": {
+        "url": "https://github.com/zeta-chain/protocol-contracts-solana",
+        "commit_id": "2c186833030720cde8f01761dda6245b93504a5f",
+        "address": [
+            "ZETAjseVjuFsxdRxo6MmTCvqFwb3ZHUx56Co3vCmGis"
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-01-24",
+        "project_path": "contracts/2025-01-zetachain-solana-gateway-security-review.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ]
+            },
+            "title": "Rent payer account can be drained",
+            "description": "The withdraw_spl_token instruction creates an associated token account if it does not exist and reimburses the signer for the rent. However, the recipient of the funds can close the newly created associated token account and reclaim the rent lamports. This action can be repeated multiple times by the recipient, allowing them to drain the rent-payer account continuously.\n\nThe root cause is the lack of safeguards to prevent the recipient from closing the associated token account after it is funded. The instruction assumes the recipient will not act maliciously, but no technical enforcement prevents abuse.\n\nAn attacker can exploit this by repeatedly calling withdraw_spl_token with a non-existent associated token account, receiving the funds, and then closing the account to reclaim rent. This cycle can be repeated for each transaction, enabling continuous extraction of lamports from the rent-payer account.\n\nThe impact is financial loss to the ZetaChain gateway, as the rent-payer account is drained over time. At a rate of one transaction per block (0.4 seconds), the attacker could extract approximately 216,000 USD per day, depending on lamport value.\n",
+            "severity": "high",
+            "files": [
+                "programs/protocol-contracts-solana/src/lib.rs"
+            ],
+            "location": [
+                "withdraw_spl_token#383-402",
+                "withdraw_spl_token#411-414"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-182"
+                ]
+            },
+            "title": "Hash collision risks",
+            "description": "Multiple instructions (withdraw, withdraw_spl_token, validate_whitelist_tss_signature) perform hashing without a consistent or well-defined message format. This increases the risk of hash collisions with messages from other protocols or other ZetaChain gateways on different blockchains.\n\nThe root causes include: absence of a ZetaChain-specific prefix in hashed messages; inconsistent ordering of fields (e.g., nonce appears as the third or fourth element); variable-length fields not being delimited; and the chain_id field being placed after variable-length data, reducing its effectiveness in preventing cross-chain collisions.\n\nAn attacker could craft a message on one blockchain (e.g., X) that, due to structural similarity and lack of proper delimiters, produces the same hash as a legitimate message on Solana. If a user signs the message on chain X, the attacker could replay it on Solana.\n\nThe impact is unauthorized withdrawal of funds from a user's account on Solana, as the gateway would accept the replayed signature as valid, leading to loss of user assets.\n",
+            "severity": "informational",
+            "files": [
+                "programs/protocol-contracts-solana/src/lib.rs"
+            ],
+            "location": [
+                "withdraw#285-290",
+                "validate_whitelist_tss_signature#474-478"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "update_authority does not use a two-step transfer process",
+            "description": "The update_authority instruction allows the current authority to transfer control to a new address in a single step, without requiring the new authority to accept the role. This creates a risk of accidental or irreversible loss of control if the new address is mistyped or invalid.\n\nThe root cause is the lack of a two-step ownership transfer mechanism. The function directly assigns the new authority without validating that the recipient is valid or willing to assume the role.\n\nAn attacker could exploit human error by social engineering the current authority into transferring control to a malicious or invalid address. Alternatively, a simple typo could result in the same outcome.\n\nThe impact is permanent loss of administrative control over the gateway, necessitating redeployment of the entire contract and migration of all dependent systems, resulting in operational disruption and potential security risks during transition.\n",
+            "severity": "informational",
+            "files": [
+                "programs/protocol-contracts-solana/src/lib.rs"
+            ],
+            "location": [
+                "update_authority#80-91"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Requirement that recipients be System-owned is unjustified",
+            "description": "The withdraw_spl_token instruction enforces that the recipient account must be owned by the System Program, which unnecessarily restricts the types of accounts that can receive funds. This requirement limits interoperability with other Solana programs.\n\nThe root cause is an unjustified constraint in the account validation logic. The instruction uses SystemAccount<'info> for the recipient, which is not required for SPL token transfers, as token accounts can be owned by the Token Program and used by any program.\n\nAn attacker could exploit this limitation indirectly by forcing users to build complex workarounds, increasing the attack surface. More directly, legitimate users are hindered from using program-controlled wallets or smart contracts as recipients.\n\nThe impact is reduced usability and increased cost for developers integrating with the gateway, potentially leading to insecure workarounds or abandonment of the protocol.\n",
+            "severity": "informational",
+            "files": [
+                "programs/protocol-contracts-solana/src/lib.rs"
+            ],
+            "location": [
+                "WithdrawSPLToken#550-574"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "Receivers lack null address checks",
+            "description": "The deposit, deposit_and_call, deposit_spl_token, and deposit_spl_token_and_call instructions accept a 20-byte receiver address but do not validate that it is non-zero. This allows funds to be deposited to a null address, resulting in permanent loss.\n\nThe root cause is the absence of input validation for the receiver field. Since zero is a common default value in uninitialized data, this omission increases the risk of accidental fund loss.\n\nAn attacker could exploit software bugs or user errors that result in a zeroed-out receiver field during transaction construction. Even without malice, routine errors could trigger this issue.\n\nThe impact is irreversible loss of user funds deposited to the null address, which are effectively unrecoverable, leading to financial loss and reduced trust in the protocol.\n",
+            "severity": "informational",
+            "files": [
+                "programs/protocol-contracts-solana/src/lib.rs"
+            ],
+            "location": [
+                "deposit#173-177",
+                "deposit_spl_token#"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "Ineffective use of log messages",
+            "description": "Only 5 out of 13 instructions emit log messages, and some of the existing logs lack useful information. For example, \"deposit spl token successfully\" provides no context about the amount, recipient, or transaction outcome.\n\nThe root cause is inconsistent logging practices and lack of a logging policy. Important administrative actions (e.g., update_authority, initialize) produce no logs, hindering monitoring and debugging.\n\nAn attacker could exploit the lack of logs to obscure malicious activity, making detection and forensic analysis more difficult. Even benign operations become harder to audit.\n\nThe impact is reduced observability, making it harder for developers and users to verify transaction outcomes, debug issues, or detect anomalies, potentially delaying response to real attacks.\n",
+            "severity": "informational",
+            "files": [
+                "programs/protocol-contracts-solana/src/lib.rs"
+            ],
+            "location": [
+                "deposit_spl_token#219-250"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-405"
+                ],
+                "4": [
+                    "CWE-1176"
+                ]
+            },
+            "title": "Bump seeds not stored in PDAs",
+            "description": "The gateway recomputes the bump seed for PDAs (e.g., Pda, WhitelistEntry, RentPayerPda) every time they are used, rather than storing the bump in the account data. This can lead to high computational costs if the bump seed requires many iterations to find.\n\nThe root cause is failure to follow Anchor best practices. Recomputing the bump seed on every invocation wastes compute units and increases transaction costs unnecessarily.\n\nAn attacker could exploit this by forcing repeated PDA derivations in a single transaction or encouraging deployments with unfavorable program IDs, increasing gas costs for users.\n\nThe impact is higher transaction fees and potential denial-of-service through resource exhaustion, especially in edge cases where bump seed derivation is computationally expensive.\n",
+            "severity": "informational",
+            "files": [
+                "programs/protocol-contracts-solana/src/lib.rs"
+            ],
+            "location": [
+                "Pda#654-667"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Untested code",
+            "description": "Several code paths, including error handling for nonce mismatch and ECDSA signature verification, are not covered by unit tests. This increases the risk of undetected bugs in critical security logic.\n\nThe root cause is incomplete test coverage. Important edge cases and failure modes are not validated through automated testing.\n\nAn attacker could discover and exploit untested code paths that contain logic errors or incorrect assumptions, especially in cryptographic validation routines.\n\nThe impact is potential execution of unintended behavior, such as accepting invalid signatures or processing transactions with incorrect nonces, leading to fund loss or protocol manipulation.\n",
+            "severity": "informational",
+            "files": [
+                "programs/protocol-contracts-solana/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#281-284",
+                "lib.rs#469-472",
+                "lib.rs#297-300",
+                "lib.rs#343-346",
+                "lib.rs#485-488"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Tests may not fail as intended",
+            "description": "Several tests use a pattern where a failing instruction is wrapped in a try-catch block, but the test passes as long as no uncaught exception occurs\u2014even if the expected error is not thrown. This allows tests to pass when they should fail.\n\nThe root cause is incorrect test structure. The expectation is placed inside the catch block, but there is no assertion that an error must be caught, so successful execution bypasses the check.\n\nAn attacker could introduce a vulnerability that bypasses a validation check, and the existing tests would still pass, giving a false sense of security.\n\nThe impact is reduced reliability of the test suite, increasing the likelihood that regressions or security flaws go undetected during development and deployment.\n",
+            "severity": "informational",
+            "files": [
+                "tests/protocol-contracts-solana.ts"
+            ],
+            "location": [
+                "protocol-contracts-solana.ts#414-425"
+            ]
+        }
+    ]
+}

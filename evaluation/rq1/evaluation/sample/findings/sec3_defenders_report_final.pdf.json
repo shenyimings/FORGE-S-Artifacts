@@ -1,0 +1,324 @@
+{
+    "path": "reports/sec3_defenders_report_final.pdf",
+    "project_info": {
+        "url": "https://github.com/metaplex-foundation/mpl-bubblegum",
+        "commit_id": "5b3cdfc6b236773be70dc1f0b0cb84badf881248",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-03-05",
+        "project_path": "contracts/sec3_defenders_report_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Unconstrained new leaf owners and delegates",
+            "description": "The lock and unlock functionalities for compressed NFTs use the 'Transfer' instruction from the bubblegum program, where the existing leaf node is replaced by a new one. The vulnerability arises because the `new_leaf_owner` account in `lock_cnft()` is not constrained, allowing it to be set to the same as the current owner or delegate, effectively bypassing the locking mechanism. Additionally, in `unlock_cnft()`, both `leaf_owner` and `leaf_delegate` accounts are not properly constrained, enabling unauthorized self-transfers and manipulation of lock states. This lack of validation allows attackers to manipulate the ownership flow without actually locking or unlocking assets. The impact includes potential bypass of security controls and incorrect state transitions.\n",
+            "severity": "critical",
+            "files": [],
+            "location": [
+                "LockCompressedNft.new_leaf_owner#953",
+                "UnlockCompressedNft.leaf_owner#970",
+                "UnlockCompressedNft.leaf_delegate#992",
+                "lock_cnft#181",
+                "unlock_cnft#290"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Unconstrained compressed NFT mint",
+            "description": "During the lock and unlock operations of compressed NFTs, the `nft_1` mint account is not validated against the merkle tree leaf hash, which means it cannot be verified by the bubblegum contract. Since the mint is not initialized until decompression, attackers can provide an arbitrary mint key and create a `lock_state` for any NFT they do not own. This issue also exists in the `unlock_cnft()` function, where `nft_1` remains unconstrained. The root cause is the absence of validation logic that ties the provided mint to the actual compressed NFT on the merkle tree. This could allow spoofing of NFT ownership and unauthorized locking/unlocking of non-owned assets, leading to state corruption and potential financial loss.\n",
+            "severity": "critical",
+            "files": [],
+            "location": [
+                "LockCompressedNft.nft_1#930",
+                "UnlockCompressedNft.nft_1#984",
+                "lock_cnft#181",
+                "unlock_cnft#290"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Unconstrained dest_ata token account owner",
+            "description": "In the `lock_spl` function, the destination token account (`dest_ata`) owner is not validated to be the expected `user_state` PDA. This allows an attacker to specify a different owner, potentially performing a self-transfer that bypasses locking logic or sending funds to an unintended account. The lack of ownership check undermines the integrity of the locking mechanism for SPL tokens. Although a fix was implemented to check the owner, it is also recommended to validate the delegate and delegated amount to prevent withdrawal by unauthorized parties. The impact includes loss of funds or incorrect token locking behavior.\n",
+            "severity": "medium",
+            "files": [],
+            "location": [
+                "lock_spl#63"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-191"
+                ]
+            },
+            "title": "Unchecked amount in lock_solana and unlock_solana",
+            "description": "The `lock_solana` and `unlock_solana` functions do not validate the amount being transferred, which could result in transferring more lamports than available, potentially draining the rent-exempt balance of the `user_state` or `user_wallet` accounts. If the balance drops below rent exemption, the account may be closed unexpectedly, leading to loss of state and user funds. The vulnerability stems from missing arithmetic checks on the transfer amount before modifying account balances. This could be exploited to force account closure and disrupt service for users.\n",
+            "severity": "medium",
+            "files": [],
+            "location": [
+                "lock_solana#80",
+                "unlock_solana#99"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Bypass the TOTP",
+            "description": "The TOTP (Time-based One-Time Password) public key is not constrained during the initialization of the `user_state` account. While the `totp` account is required to be a signer, there is no validation that it matches a trusted backend-controlled key. This allows users to initialize their `user_state` with a TOTP key they fully control, effectively bypassing the intended two-party approval mechanism. The intended design requires the TOTP to be signed by the defender’s backend, but this vulnerability allows users to self-sign, reducing security. The team acknowledged this as intentional to allow custom authentication setups, but it increases risk if users do not follow secure practices.\n",
+            "severity": "low",
+            "files": [],
+            "location": [
+                "InitUserState.totp#845",
+                "init_user_state#33"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Integer overflow",
+            "description": "Arithmetic operations in the contract do not have overflow checks enabled. Without enabling `overflow-checks = true` in the release profile or using safe math operations like `checked_add`, arithmetic computations could overflow, leading to unexpected and potentially exploitable state changes. For example, incrementing a balance or counter could wrap around to zero or a very small number, enabling replay attacks or balance manipulation. This is a common vulnerability in Rust programs when safety checks are disabled for performance. The impact could range from incorrect state updates to complete loss of funds depending on context.\n",
+            "severity": "low",
+            "files": [],
+            "location": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-252"
+                ]
+            },
+            "title": "CPI error handling",
+            "description": "In the `unlock_spl` function, the `anchor_spl::token::transfer` CPI call does not use the `?` operator to propagate errors. While the transaction will still fail if the CPI fails (due to Solana's error handling model), the absence of explicit error propagation is inconsistent with other CPI calls in the codebase and may lead to confusion or missed error handling in future modifications. This is a best practice issue rather than a critical security flaw, but maintaining consistency improves code reliability and auditability. The impact is minimal but could affect maintainability and debugging.\n",
+            "severity": "informational",
+            "files": [],
+            "location": [
+                "unlock_spl#57"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-253"
+                ]
+            },
+            "title": "Transaction unconfirmed, causing users unable to lock/unlock",
+            "description": "The frontend determines transaction success solely based on the result of `sendRawTransaction`, without calling `confirmTransaction`. This means a transaction may be considered successful even if it hasn't been confirmed on-chain, leading to false success notifications. Users may believe their lock/unlock operation succeeded when it did not, preventing further actions due to inconsistent state. The vulnerability lies in the frontend logic in `AuthCodePopup.tsx`, where confirmation is skipped. This can result in user confusion, loss of trust, and functional blocking of features.\n",
+            "severity": "medium",
+            "files": [],
+            "location": [
+                "AuthCodePopup.sendRawTransaction#98"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Missing confirmTransaction check in lockUnlockToken",
+            "description": "The `lockUnlockToken` function in the frontend sends a transaction using `sendRawTransaction` but does not wait for confirmation before updating the UI and showing a success toast. This can lead to a situation where the UI reflects a successful operation even if the transaction fails or is not confirmed. The lack of `confirmTransaction` check introduces race conditions and unreliable state updates. This issue affects user experience and can lead to incorrect assumptions about transaction outcomes.\n",
+            "severity": "medium",
+            "files": [],
+            "location": [
+                "AuthCodePopup.lockUnlockToken#420"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Use NFT whitelist to reduce security risks",
+            "description": "The frontend functions `getNfts` and `getCnfts` retrieve NFTs from a user's wallet and automatically fetch data from the `json_uri` without any validation or whitelisting. This exposes users to potential phishing or malware attacks if an attacker sends an NFT with a malicious URI. The lack of input sanitization and origin validation allows arbitrary code or content execution in the user's browser. This is a client-side security risk that could compromise user accounts or devices. Implementing a whitelist or sandboxing external content would mitigate this risk.\n",
+            "severity": "low",
+            "files": [],
+            "location": [
+                "transactions.getCnfts#146"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "Incorrect error handling In linkAuthAccountToWallet",
+            "description": "The `linkAuthAccountToWallet` function calls `fetch` and parses the response as JSON, but does not validate the structure of the returned data before using `txRes.data` to reconstruct a transaction. If the backend returns an error message where `data` is a string (e.g., \"Failed to send transaction.\"), the `Transaction.from()` call will fail with a parsing error. This exception is not caught, leading to a potential crash. The issue stems from assuming the shape of the response without proper type checking. This could disrupt user onboarding and authentication flows.\n",
+            "severity": "low",
+            "files": [],
+            "location": [
+                "ImagePopup.linkAuthAccountToWallet#70"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Sanity check in the lock or unlock endpoints",
+            "description": "The frontend sends a `mints` array to the Hellomoon RPC lock/unlock endpoints without the backend performing basic validation such as checking for empty arrays or duplicate entries. Although testing showed no DoS impact, allowing duplicates may lead to inefficient processing or unexpected behavior. The lack of input validation increases the attack surface and could be exploited in combination with other issues. Proper input sanitization and validation should be enforced on the server side to ensure robustness.\n",
+            "severity": "low",
+            "files": [],
+            "location": [
+                "defendersHandler.lock#POST"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "Uncaught control flow",
+            "description": "The frontend code does not handle all possible error conditions. For example, in `transactions.ts`, only 'Not Found' is checked when determining if a user is registered, but 'Forbidden' responses are not handled, leading to potential runtime exceptions when accessing .length on undefined arrays. Additionally, the `json()` call in `defendersHandler/[wallet].ts` lacks a try-catch block, which could result in uncaught promise rejections. These unhandled control flows can cause application crashes and degraded user experience.\n",
+            "severity": "informational",
+            "files": [],
+            "location": [
+                "transactions.ts#54",
+                "defendersHandler/[wallet].ts#100"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "Hellomoon RPC should throw error friendly",
+            "description": "When the Hellomoon RPC encounters an error, it returns HTTP 204 (No Content) instead of a proper error code like 500. This prevents the frontend from displaying meaningful error messages to users. Additionally, there is no .catch handler for network errors in the fetch chain. This lack of proper error signaling reduces debuggability and user experience. The recommendation is to return appropriate HTTP status codes and handle network exceptions gracefully.\n",
+            "severity": "informational",
+            "files": [],
+            "location": [
+                "defendersHandler/[wallet].ts#102"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-684"
+                ],
+                "3": [
+                    "CWE-451"
+                ]
+            },
+            "title": "Typos",
+            "description": "There are several typographical errors in the frontend code. In `AuthCodePopup.tsx`, `successCount--` is used instead of `errorCount++` when a transaction confirmation fails. Additionally, in the success toast message, `errorCount` is incorrectly used instead of `successCount`, leading to misleading user notifications. These are minor issues but can confuse users and developers during debugging.\n",
+            "severity": "informational",
+            "files": [],
+            "location": [
+                "AuthCodePopup.tsx#124",
+                "AuthCodePopup.tsx#260",
+                "AuthCodePopup.tsx#282"
+            ]
+        }
+    ]
+}

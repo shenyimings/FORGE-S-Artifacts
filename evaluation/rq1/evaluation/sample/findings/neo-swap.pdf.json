@@ -1,0 +1,320 @@
+{
+    "path": "reports/neo-swap.pdf",
+    "project_info": {
+        "url": "https://github.com/neoswap-ai/solana-multiway-swap",
+        "commit_id": "5d14610",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-03-15",
+        "project_path": "contracts/neo-swap.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Sol Deposit Can only Be Cancelled/Claimed by the Initializer",
+            "description": "1. **Description:** The cancel_sol() and claim_sol() functions restrict the ability to cancel or claim SOL deposits to the initializer of the swap, unlike NFT deposits which users can manage themselves. This creates an inconsistent user experience and introduces unnecessary dependency on the initializer for fund recovery.\n\n2. **Cause:** The functions enforce that the signer must be the initializer, which is not aligned with the expected functionality where users should be able to self-manage their deposits. Additionally, the functional documentation contradicts the code, indicating a specification mismatch.\n\n3. **Exploitation:** An attacker could exploit this by initiating a swap and then refusing to cooperate with the initializer to cancel or claim funds, effectively locking user funds until the initializer acts. Malicious or unavailable initializers could thus prevent users from retrieving their SOL.\n\n4. **Impact:** Users may lose access to their deposited SOL if the initializer is uncooperative or unavailable, leading to potential loss of funds and reduced trust in the protocol.\n",
+            "severity": "medium",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Does Not Check Expected Item Count",
+            "description": "1. **Description:** The validate_initialize() function fails to verify the total number of expected items in a swap, only checking that non-NFT item amounts sum to zero. This allows validation of incomplete swaps where some NFT entries are missing.\n\n2. **Cause:** The absence of a field in the SwapData struct to track the expected number of items means there is no mechanism to ensure all required items are present during initialization.\n\n3. **Exploitation:** An attacker could initialize a swap with missing NFT entries, potentially leading to unbalanced trades or incomplete execution, which could be exploited to receive assets without fulfilling obligations.\n\n4. **Impact:** This could result in invalid or unfair swaps being processed, undermining the integrity of the trading mechanism and potentially causing financial loss to participants.\n",
+            "severity": "low",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Instructions Can Inaccurately Return Success on Failure",
+            "description": "1. **Description:** Several functions (e.g., deposit_nft, claim_sol) use a loop with an item_id iterator and a transfered flag to ensure an action is performed once. However, the failure condition checks item_id == items.len() && !transfered, which is never true because item_id only goes up to items.len() - 1.\n\n2. **Cause:** The loop condition uses an off-by-one error in the failure detection logic, making it impossible for the function to detect when no item matched the condition.\n\n3. **Exploitation:** An attacker could call these functions with invalid parameters, causing them to return Ok(()) even though no action was taken, leading to false success signals in the calling application.\n\n4. **Impact:** This could result in silent failures where transactions appear successful but no actual state change occurs, leading to user confusion, incorrect application state, and potential fund loss due to assumed but unexecuted actions.\n",
+            "severity": "low",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Not Documenting Unchecked Accounts",
+            "description": "1. **Description:** The codebase uses multiple unchecked accounts without proper /// CHECK: annotations to justify why they are safe, requiring the use of --skip-lint to compile.\n\n2. **Cause:** Lack of documentation for manual account checks increases the risk of unverified account usage, which could lead to security vulnerabilities such as unauthorized access or data corruption.\n\n3. **Exploitation:** An attacker could exploit improperly verified accounts by passing malicious accounts that bypass expected constraints, potentially leading to unauthorized state changes.\n\n4. **Impact:** This weakens the overall security posture of the program and makes audits more difficult, increasing the likelihood of undetected vulnerabilities.\n",
+            "severity": "low",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Automatically Closing Associated Token Accounts Never Works",
+            "description": "1. **Description:** The claim_nft() and cancel_nft() functions attempt to close associated token accounts if they hold no tokens, but the check occurs before reloading account data after a CPI transfer, so it always fails.\n\n2. **Cause:** The account state is not reloaded after the token transfer, so the program reads stale data indicating the account still holds tokens.\n\n3. **Exploitation:** While not directly exploitable for gain, this flaw prevents automatic cleanup of empty token accounts, leaving behind rent-exempt accounts that waste resources.\n\n4. **Impact:** Accumulation of unnecessary token accounts increases on-chain bloat and user costs, reducing efficiency and scalability.\n",
+            "severity": "low",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Anybody Can Retrieve Rent Exemption Amount From Cancelled Swaps",
+            "description": "1. **Description:** The validate_cancel() function allows any caller to close a cancelled swap's data account and claim the rent-exempt SOL, despite documentation stating the signer should be the initializer.\n\n2. **Cause:** Missing access control check on the caller identity in the validate_cancel() function.\n\n3. **Exploitation:** An attacker can monitor for cancelled swaps and front-run legitimate initializers to close the account and steal the rent refund.\n\n4. **Impact:** Loss of rent-exempt funds for legitimate users, incentivizing MEV-like behavior and reducing user trust.\n",
+            "severity": "low",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Swap Status Not Always Changed to Cancelled when Cancelling an NFT",
+            "description": "1. **Description:** In cancel_nft(), the swap status is only updated to Cancelled in the else-if block, not in the first if block, leading to inconsistent state updates.\n\n2. **Cause:** Conditional logic fails to update the general swap status in all code paths where an item is cancelled.\n\n3. **Exploitation:** An attacker could trigger a code path that cancels an item without updating the swap status, potentially allowing further unintended operations on a partially cancelled swap.\n\n4. **Impact:** Inconsistent state could lead to logic errors, failed validations, or unexpected behavior in dependent functions, risking fund loss or denial of service.\n",
+            "severity": "low",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing Input Validation",
+            "description": "1. **Description:** The functions init_initialize() and initialize_add() lack proper input validation, allowing invalid states such as zero amounts, same owner and destination addresses, negative amounts for NFTs, and positive Sol deposits for fee items.\n\n2. **Cause:** Absence of comprehensive validation logic to enforce business rules and prevent malformed inputs.\n\n3. **Exploitation:** An attacker could craft malicious inputs to create invalid swaps, potentially leading to unexpected behavior, fund loss, or protocol manipulation.\n\n4. **Impact:** Reduced robustness and reliability of the system, increased risk of human or automated errors leading to financial loss.\n",
+            "severity": "low",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Confusing Enum Usage",
+            "description": "1. **Description:** The TradeStatus enum is used for both swap-level and item-level statuses, and its values do not always reflect the actual operation (e.g., Deposited used for fee items with negative amounts).\n\n2. **Cause:** Overloading a single enum for multiple purposes without clear documentation leads to ambiguity and potential misinterpretation.\n\n3. **Exploitation:** Developers or external systems relying on status values may misinterpret the state, leading to incorrect actions or logic errors.\n\n4. **Impact:** Increased risk of bugs, reduced code maintainability, and potential for incorrect state handling in client applications.\n",
+            "severity": "low",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Mixing Anchor Constrains and Manual Checks",
+            "description": "1. **Description:** The code mixes Anchor's declarative constraints (e.g., account validations) with manual require! checks, making security analysis more complex.\n\n2. **Cause:** Inconsistent use of security mechanisms leads to checks being scattered across different parts of the code.\n\n3. **Exploitation:** An attacker could exploit gaps in validation if manual checks are overlooked or incorrectly implemented, especially during code changes.\n\n4. **Impact:** Reduced code clarity and increased risk of missing or duplicated checks, weakening overall security assurance.\n",
+            "severity": "informational",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Wrong Equality Check for Sol Amount",
+            "description": "1. **Description:** The claim_sol() and cancel_sol() functions use > instead of >= when checking if an account has sufficient lamports, which could theoretically allow underflow if balances exactly match.\n\n2. **Cause:** Incorrect comparison operator used in balance validation logic.\n\n3. **Exploitation:** While unlikely due to rent-exempt balances, an attacker could potentially trigger a failure in edge cases where exact balance matching occurs, leading to failed transactions or incorrect reverts.\n\n4. **Impact:** Minor reliability issue that could cause unexpected transaction failures in rare cases.\n",
+            "severity": "informational",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Comparing Hardcoded Value Instead of Enum",
+            "description": "1. **Description:** Functions like deposit_sol() and claim_nft() compare item statuses using hardcoded numeric values instead of enum variants, making the code fragile to future changes.\n\n2. **Cause:** Direct use of raw numbers instead of type-safe enum comparisons.\n\n3. **Exploitation:** If enum values are later changed, these hardcoded checks will break silently, leading to incorrect logic execution.\n\n4. **Impact:** Increased maintenance burden and risk of undetected bugs after refactoring.\n",
+            "severity": "informational",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant Sol Transfer",
+            "description": "1. **Description:** Functions validate_claimed() and validate_cancel() manually transfer remaining SOL to the signer, but the close = signer annotation on the account already handles this automatically.\n\n2. **Cause:** Duplicate logic due to misunderstanding of Anchor's account closing behavior.\n\n3. **Exploitation:** No direct exploit, but unnecessary instructions increase compute usage and transaction cost.\n\n4. **Impact:** Wasted compute units and higher fees for users, reducing efficiency.\n",
+            "severity": "informational",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ],
+                "3": [
+                    "CWE-680"
+                ]
+            },
+            "title": "Possible Overflow when Calculating the Size of [SwapData]",
+            "description": "1. **Description:** The size of SwapData is calculated using unchecked arithmetic: SwapData::LEN + (nb_items as usize * NftSwapItem::LEN), which could overflow for large nb_items.\n\n2. **Cause:** Use of raw arithmetic operations without overflow protection.\n\n3. **Exploitation:** An attacker could provide a large nb_items value to cause an integer overflow, leading to incorrect memory allocation or panic.\n\n4. **Impact:** Potential denial of service or program crash due to arithmetic overflow.\n",
+            "severity": "informational",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ]
+            },
+            "title": "Error Descriptions Not Aligned with the Emission Context",
+            "description": "1. **Description:** Error messages in claim_sol() and other functions are misleading; for example, SumNotNull is used when lamports are insufficient, and UnexpectedState refers to \"given\" status even when reading on-chain data.\n\n2. **Cause:** Poorly chosen error messages that do not reflect the actual failure context.\n\n3. **Exploitation:** While not directly exploitable, misleading errors hinder debugging and monitoring.\n\n4. **Impact:** Increased difficulty in troubleshooting and incident response, potentially delaying fixes during critical failures.\n",
+            "severity": "informational",
+            "files": [
+                "programs/neoSwap/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        }
+    ]
+}

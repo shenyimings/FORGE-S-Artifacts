@@ -1,0 +1,154 @@
+{
+    "path": "reports/Raydium%20AMM%20V3%20Audit%20Report.pdf",
+    "project_info": {
+        "url": "https://github.com/raydium-io/raydium-amm-v3",
+        "commit_id": "4fe73c7",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-12-09",
+        "project_path": "contracts/Raydium%20AMM%20V3%20Audit%20Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Unchecked Type Casting",
+            "description": "1. **Description:** The vulnerability exists in the `get_delta_amount_0_signed` and `get_delta_amount_1_signed` functions, where an unchecked cast from `u64` to `i64` is performed. Since `i64` has a smaller maximum value than `u64`, this can result in incorrect signed value interpretation.\n2. **Cause:** The root cause is the direct casting of a potentially large `u64` value (returned from `get_delta_amount_0_unsigned`) into an `i64` without bounds checking, especially in the positive branch of the function.\n3. **Exploitation:** An attacker could exploit this by providing inputs that cause the `u64` value to exceed `i64::MAX`, leading to an incorrect negative value after casting, which could manipulate liquidity calculations.\n4. **Impact:** This could result in incorrect accounting of token amounts during liquidity operations, potentially leading to loss of funds, particularly in the burn liquidity instruction as demonstrated by the provided proof of concept.\n",
+            "severity": "high",
+            "files": [
+                "programs/amm/src/libraries/liquidity_math.rs"
+            ],
+            "location": [
+                "liquidity_math.get_delta_amount_0_signed#228-245",
+                "liquidity_math.get_delta_amount_1_signed"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Closing Personal Positions Is Not Gated",
+            "description": "1. **Description:** The `ClosePosition` instruction does not verify ownership of the associated NFT that should represent ownership of the position, unlike other position-modifying instructions.\n2. **Cause:** The lack of an ownership check (e.g., via `is_authorized_for_token` or an Anchor constraint on the token amount) allows any user to call the instruction with a spoofed or empty NFT account.\n3. **Exploitation:** An attacker can create a fake NFT account with zero balance and invoke `ClosePosition`, thereby closing a real position and capturing the rent-exempt lamports.\n4. **Impact:** This leads to direct theft of lamports used for rent from legitimate position owners, resulting in loss of funds.\n",
+            "severity": "medium",
+            "files": [
+                "programs/amm/src/instructions/close_position.rs"
+            ],
+            "location": [
+                "close_position.ClosePosition"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Arbitrary AMM Config Possible Usage",
+            "description": "1. **Description:** The `SwapRouterBaseIn` instruction does not validate that the provided `amm_config` matches the one associated with the `PoolState`, unlike the standard `Swap` instruction.\n2. **Cause:** Missing anchor constraint or explicit key comparison allows an arbitrary `amm_config` to be passed, which controls fee rates.\n3. **Exploitation:** An attacker could route swaps through `SwapRouterBaseIn` using a maliciously configured `amm_config` with altered fee rates, potentially zeroing out fees or redirecting them.\n4. **Impact:** This could result in loss of protocol and liquidity provider fees, undermining the economic model and leading to financial loss.\n",
+            "severity": "medium",
+            "files": [
+                "programs/amm/src/instructions/swap_router_base_in.rs"
+            ],
+            "location": [
+                "swap_router_base_in.SwapRouterBaseIn"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ],
+                "4": [
+                    "CWE-226"
+                ]
+            },
+            "title": "Accounts Are Incorrectly Closed",
+            "description": "1. **Description:** The program uses a custom account closure mechanism that only transfers lamports without overwriting the account discriminator, making it unsafe.\n2. **Cause:** The manual close logic fails to disable the account properly, relying solely on lamport transfer instead of using Anchor\u2019s `close` constraint.\n3. **Exploitation:** A closed account might remain accessible for a short time, allowing potential re-initialization or state reuse attacks if the same address is reused.\n4. **Impact:** This poses a security risk of state corruption or denial of service, especially if accounts are recreated with inconsistent state.\n",
+            "severity": "low",
+            "files": [
+                "programs/amm/src/instructions/close_position.rs"
+            ],
+            "location": [
+                "close_position.close_account"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "Closing Active Accounts Is Dangerous",
+            "description": "1. **Description:** Admin-gated instructions such as `ClosePool`, `ClosePersonalPosition`, `CloseProtocolPosition`, and `CloseTickArray` can close active accounts without checking if they are still in use.\n2. **Cause:** The absence of pre-closure validation allows admins to destroy accounts that are still referenced by other positions or liquidity records.\n3. **Exploitation:** An admin (or compromised admin key) could close a pool while personal positions still reference it, leading to a mismatched state when the pool is recreated.\n4. **Impact:** This could result in an invalid protocol state, loss of liquidity tracking, and potential denial of service for users trying to modify their positions.\n",
+            "severity": "low",
+            "files": [
+                "programs/amm/src/instructions/admin/close_pool.rs",
+                "programs/amm/src/instructions/admin/close_personal_position.rs",
+                "programs/amm/src/instructions/admin/close_protocol_position.rs",
+                "programs/amm/src/instructions/admin/close_tick_array.rs"
+            ],
+            "location": [
+                "admin.ClosePool",
+                "admin.ClosePersonalPosition",
+                "admin.CloseProtocolPosition",
+                "admin.CloseTickArray"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Rewards State DOS",
+            "description": "1. **Description:** Due to rounding differences, `reward_total_emissioned` can lag behind actual emissions, causing a discrepancy that may prevent users from claiming rewards or decreasing liquidity.\n2. **Cause:** The field is updated per instruction call, while individual user rewards are calculated in aggregate, leading to potential underflow or incorrect state checks.\n3. **Exploitation:** An attacker could repeatedly call `update_reward_infos` at specific intervals to keep `reward_total_emissioned` at zero while `reward_growth_global_x64` increases, eventually causing `check_unclaimed_reward` to panic.\n4. **Impact:** This results in a denial of service for users trying to decrease liquidity, increasing their risk of impermanent loss and reducing protocol usability.\n",
+            "severity": "low",
+            "files": [
+                "programs/amm/src/states/pool.rs"
+            ],
+            "location": [
+                "pool_state.update_reward_infos",
+                "decrease_liquidity.check_unclaimed_reward"
+            ]
+        }
+    ]
+}

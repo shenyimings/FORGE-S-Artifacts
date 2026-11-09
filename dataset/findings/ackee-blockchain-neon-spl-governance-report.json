@@ -1,0 +1,198 @@
+{
+    "path": "reports/ackee-blockchain-neon-spl-governance-report.pdf",
+    "project_info": {
+        "url": "https://github.com/neonlabsorg/neon-spl-governance",
+        "commit_id": "f13d7e7c1507819306797688ce0bb1f6950a5038",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-07-22",
+        "project_path": "contracts/ackee-blockchain-neon-spl-governance-report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Possibility to manipulate a voting process while using the fixed weights addin",
+            "description": "1. **Description:** The SetVotePercentage instruction in the addin-fixed-weights program lacks validation to restrict the vote_percentage parameter. This allows a caller to set a value exceeding 10,000, which represents more than 100% voting power.\n2. **Cause:** Missing input validation in the SetVotePercentage instruction, specifically the absence of a check ensuring vote_percentage \u2264 10000.\n3. **Exploitation:** An attacker who is a member of governance can set their vote percentage to an extremely high value, enabling them to unilaterally approve any proposal.\n4. **Impact:** The attacker gains unilateral control over governance decisions, leading to a complete compromise of the voting system's integrity and fairness.\n",
+            "severity": "critical",
+            "files": [
+                "addin-fixed-weights/program/src/instruction.rs",
+                "addin-fixed-weights/program/src/processor.rs",
+                "governance-lib/src/addin_fixed_weights.rs"
+            ],
+            "location": [
+                "SetVotePercentage"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "When using the addin-vesting (for realm), the first user will be able to decide on any proposal after his deposit",
+            "description": "1. **Description:** In the Deposit instruction of the addin-vesting program, the first user's deposit sets the max_voter_weight record, giving them 100% voting weight since no prior total exists.\n2. **Cause:** The logic for initializing max_voter_weight does not account for fair distribution; it defaults to the first deposit amount, creating an imbalance.\n3. **Exploitation:** The first depositor can immediately create and approve any proposal due to having 100% voting weight, especially if early tipping is enabled.\n4. **Impact:** This allows a single user to take full control of governance at launch, undermining decentralization and enabling malicious proposals.\n",
+            "severity": "critical",
+            "files": [
+                "addin-vesting/program/src/instruction.rs",
+                "addin-vesting/program/src/processor.rs"
+            ],
+            "location": [
+                "Deposit"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Possibility to decide on a proposal without a sufficient voting weight",
+            "description": "1. **Description:** Users may be able to influence or pass proposals without holding the required voting weight. Switching from fixed-weight-addin to vesting-addin while active proposals exist can alter the max_voter_weight, changing the relative percentage of votes already cast.\n2. **Cause:** The system may not correctly validate the minimum voting weight needed to create or approve a proposal. Additionally, the system does not freeze or validate active proposals during addin transitions, leading to inconsistent vote thresholds.\n3. **Exploitation:** An attacker with low or no voting weight could exploit this to submit or approve proposals illegitimately. A proposal that previously lacked sufficient support could suddenly meet the approval threshold after the switch due to recalculated weights.\n4. **Impact:** Undermines the integrity of the governance process, potentially leading to malicious governance outcomes. Proposals may pass without legitimate community support, compromising the legitimacy and security of the governance process.\n",
+            "severity": "medium",
+            "files": [
+                "addin-vesting/program/src/instruction.rs",
+                "addin-vesting/program/src/processor.rs"
+            ],
+            "location": [
+                "Deposit"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Possibility of a DoS attack that prevents the creation of a valid maintenance record",
+            "description": "1. **Description:** A denial-of-service vulnerability exists that could block the creation of valid maintenance records. The create_maintenance instruction can be called by anyone, allowing an attacker to preemptively create a maintenance record for a target program with themselves as authority.\n2. **Cause:** The maintenance program may lack proper safeguards against blocking conditions or invalid state transitions. Specifically, lack of access control in the create_maintenance instruction, which fails to restrict calls to the program's current upgrade authority.\n3. **Exploitation:** An attacker could trigger a state or input condition that prevents legitimate maintenance operations. For example, by identifying a target program ID and creating a maintenance PDA, blocking the legitimate upgrade authority from using it.\n4. **Impact:** This could halt critical upgrade or maintenance functions, leading to system stagnation or loss of availability. The legitimate owner cannot use the intended upgrade path, forcing redeployment with a new address, resulting in service disruption and potential loss of trust.\n",
+            "severity": "medium",
+            "files": [
+                "maintenance/program/src/instruction.rs",
+                "maintenance/program/src/processor.rs"
+            ],
+            "location": [
+                "CreateMaintenance"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-405"
+                ],
+                "4": [
+                    "CWE-407"
+                ]
+            },
+            "title": "Using find_program_address instead of create_program_address",
+            "description": "1. **Description:** The code uses `find_program_address` where `create_program_address` should be used, potentially leading to address derivation issues. The program uses find_program_address during runtime, which performs iterative hashing to derive a PDA, consuming a variable and potentially excessive amount of compute budget.\n2. **Cause:** Incorrect choice of address derivation function, possibly leading to predictability or collision risks. Using a trial-and-error based function on-chain without caching the bump seed, leading to unpredictable compute usage.\n3. **Exploitation:** An attacker might exploit inconsistent address generation to impersonate accounts or disrupt program logic. While not directly exploitable for fund theft, an attacker could trigger this in a loop or high-frequency context to increase transaction costs or cause failures under tight compute limits.\n4. **Impact:** Could result in security weaknesses or runtime failures during account validation. Increased risk of transaction failure due to compute budget exhaustion, affecting reliability and efficiency of the program.\n",
+            "severity": "low",
+            "files": [
+                "addin-vesting/program/src/voter_weight.rs",
+                "addin-vesting/program/src/max_voter_weight.rs",
+                "addin-vesting/program/src/token_owner_record.rs"
+            ],
+            "location": [
+                "Deposit",
+                "CreateVoterWeightRecord"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unused account",
+            "description": "1. **Description:** Some accounts are included in instruction contexts but are not actually used in the program logic. The Deposit and CreateVoterWeightRecord instructions accept the governance_program account but do not invoke any of its instructions, making the account redundant.\n2. **Cause:** Oversight during development or refactoring, leaving redundant account inputs. Likely due to oversight or copy-paste error.\n3. **Exploitation:** While not directly exploitable, it increases transaction complexity and attack surface. Not directly exploitable, but increases transaction size and cost unnecessarily.\n4. **Impact:** Reduces code clarity and may lead to confusion or future vulnerabilities during maintenance. Higher transaction fees and bloated transaction data, reducing efficiency and user experience.\n",
+            "severity": "informational",
+            "files": [
+                "addin-vesting/program/src/processor.rs"
+            ],
+            "location": [
+                "Deposit",
+                "CreateVoterWeightRecord"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Misleading docs",
+            "description": "1. **Description:** Documentation or comments in the codebase do not accurately reflect the actual implementation. Documentation in the maintenance program contains incorrect or outdated comments, likely due to copy-paste from another project.\n2. **Cause:** Documentation was not updated after code changes or was written imprecisely. Failure to update documentation after code adaptation, leading to confusion for auditors and developers.\n3. **Exploitation:** Developers or auditors may misunderstand the system behavior, leading to incorrect assumptions. Could mislead future developers or auditors into making incorrect assumptions about program behavior.\n4. **Impact:** Increases risk of integration errors or missed vulnerabilities during audits. Reduced code maintainability and increased risk of introducing bugs during future development.\n",
+            "severity": "informational",
+            "files": [
+                "maintenance/program/src/processor.rs"
+            ],
+            "location": [
+                "instruction.rs#17"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Hanging accounts",
+            "description": "1. **Description:** Accounts are not properly closed after use, leaving them dangling on-chain. VoterWeightRecord accounts cannot be closed, meaning the lamports used for rent exemption remain locked indefinitely.\n2. **Cause:** Missing or incorrect account closure logic in program instructions. Missing account closure functionality in the program logic.\n3. **Exploitation:** Attackers could hoard rent-exempt balances or bloat the on-chain state. Not directly exploitable, but contributes to chain bloat and inefficient resource usage.\n4. **Impact:** Leads to unnecessary resource consumption and increased costs for the network or users. Permanent occupation of on-chain storage, leading to wasted resources and increased network load over time.\n",
+            "severity": "informational",
+            "files": [
+                "addin-vesting/program/src/voter_weight.rs"
+            ],
+            "location": [
+                "VoterWeightRecord"
+            ]
+        }
+    ]
+}

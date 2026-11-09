@@ -1,0 +1,174 @@
+{
+    "path": "reports/blocksec_memefarming_v1.0-signed.pdf",
+    "project_info": {
+        "url": "https://github.com/ref-finance/boost-farm/tree/meme-farming",
+        "commit_id": "8520aa714b8451fdbbc77d814359c86decfef555",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-02-27",
+        "project_path": "contracts/blocksec_memefarming_v1.0-signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Lack of Check in storage_unregister()",
+            "description": "1. **Description:** The function `storage_unregister()` allows users to unregister their accounts and withdraw the deposited storage fee. It checks that no staked tokens or rewards remain in the internal account before removal but fails to verify the `withdraws` field.\n2. **Cause:** The function does not include a validation step to ensure that the `withdraws` field of the account is empty before proceeding with account removal.\n3. **Exploitation:** An attacker could leave funds in the `withdraws` field, unregister the account, and permanently lose access to those funds due to the lack of validation.\n4. **Impact:** Users may lose funds that are left in the `withdraws` field upon account unregistration, leading to irreversible loss of assets.\n",
+            "severity": "high",
+            "files": [
+                "contracts/boost-farming/src/storage_impl.rs"
+            ],
+            "location": [
+                "storage_impl.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Improper Decreasing Logic of farmer_count",
+            "description": "1. **Description:** The `farmer_count` field tracks the number of non-empty `FarmerSeed` entries in the `Seed`. However, when removing a `FarmerSeed`, the logic does not verify whether the entry was previously non-empty.\n2. **Cause:** The function `unlock_and_unstake_seed()` allows unstaking zero tokens, which may correspond to an already empty `farmer_seed`. The count is decremented regardless of the prior state.\n3. **Exploitation:** A user could repeatedly call the function with zero amount, causing `farmer_count` to be incorrectly decremented even when no actual removal occurs.\n4. **Impact:** The `farmer_count` becomes an inaccurate representation of the actual number of active farmers, potentially affecting metrics or logic that depend on this count.\n",
+            "severity": "low",
+            "files": [
+                "contracts/boost-farming/src/actions_of_farmer_seed.rs"
+            ],
+            "location": [
+                "actions_of_farmer_seed.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Incorrect Timestamp in Roll Back Logic",
+            "description": "1. **Description:** In `callback_withdraw_seed()`, when a withdrawal promise fails, the system rolls back the state using `add_withdraw_seed()`. However, during rollback, the `apply_timestamp` is set to the current block timestamp.\n2. **Cause:** The function `add_withdraw_seed()` always sets `apply_timestamp = env::block_timestamp()` regardless of whether this is a new withdrawal or a rollback of a failed one.\n3. **Exploitation:** After a failed withdrawal, the timestamp is reset, forcing the user to wait another full `delay_withdraw_sec` period before retrying, even though the original delay had already elapsed.\n4. **Impact:** Users experience unnecessary delays in withdrawing funds after a failed attempt, degrading user experience and potentially affecting liquidity.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/boost-farming/src/actions_of_farmer_seed.rs"
+            ],
+            "location": [
+                "actions_of_farmer_seed.rs#78-88"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect Calculation of decreased_seed_power",
+            "description": "1. **Description:** In `unlock_and_unstake_seed()`, the `decreased_seed_power` logged in the `SeedUnlock` event only accounts for the unlocking portion of the operation and ignores the unstaking component.\n2. **Cause:** The calculation logic fails to aggregate both the unlocked and unstaked amounts when computing the total reduction in seed power.\n3. **Exploitation:** An attacker cannot directly exploit this, but it misrepresents the actual change in seed power in emitted events.\n4. **Impact:** Off-chain systems relying on the `SeedUnlock` event for analytics or UI updates will display incorrect data, leading to potential misinterpretation of user actions.\n",
+            "severity": "low",
+            "files": [
+                "contracts/boost-farming/src/actions_of_farmer_seed.rs"
+            ],
+            "location": [
+                "actions_of_farmer_seed.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Lack of Duration Check",
+            "description": "1. **Description:** The function `stake_lock_seed()` validates that `duration_sec` is within the allowed range defined by `min_locking_duration_sec` and `config.maximum_locking_duration_sec`. However, `modify_locking_policy()` does not ensure that `maximum_locking_duration_sec` remains greater than the minimum required by any existing seed.\n2. **Cause:** There is no validation during configuration updates to prevent `maximum_locking_duration_sec` from being set below the `min_locking_duration_sec` of active seeds.\n3. **Exploitation:** An admin could accidentally or maliciously set a maximum duration that invalidates existing seeds, preventing users from locking tokens in those seeds.\n4. **Impact:** Users may be unable to stake in certain seeds if the global maximum is set too low, effectively disabling functionality for specific seed types.\n",
+            "severity": "low",
+            "files": [
+                "contracts/boost-farming/src/management.rs"
+            ],
+            "location": [
+                "management.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Redundant Check in storage_withdraw()",
+            "description": "1. **Description:** The function `storage_withdraw()` contains checks for `assert_one_yocto()` and `assert_contract_running()`, but the function immediately panics with `env::panic_str(E005_NOT_IMPLEMENTED)` after these checks.\n2. **Cause:** Since the function is effectively disabled, the preliminary checks serve no practical purpose and are never meaningfully executed.\n3. **Exploitation:** No direct exploit exists, but the redundant code may confuse auditors or developers into believing the function is partially functional.\n4. **Impact:** Code clarity and maintainability are reduced due to unnecessary and misleading assertions.\n",
+            "severity": null,
+            "files": [
+                "contracts/boost-farming/src/storage_impl.rs"
+            ],
+            "location": [
+                "storage_impl.rs#49-57"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Lack of assert_one_yocto Check",
+            "description": "1. **Description:** The function `withdraw_seed()` performs a token transfer but does not include a `assert_one_yocto()` check to ensure the caller has attached at least one yoctoNEAR, which is a common pattern to prevent unauthorized calls in NEAR-based contracts. (Note: This may be less relevant on Solana, but the audit appears to reference NEAR patterns.)\n2. **Cause:** The absence of a mandatory small payment check could allow unauthorized or replayed calls if not otherwise protected.\n3. **Exploitation:** If the function relies on `assert_one_yocto()` as an access control mechanism and it is missing, an attacker might invoke the function without proper authorization.\n4. **Impact:** Potential for unauthorized execution if the function depends on payment attachment for security, though the project notes that earnings stop after withdrawal, reducing risk.\n",
+            "severity": null,
+            "files": [
+                "contracts/boost-farming/src/actions_of_farmer_seed.rs"
+            ],
+            "location": [
+                "actions_of_farmer_seed.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Lack of Minimum Deposit Check",
+            "description": "1. **Description:** The function `unlock_and_unstake_seed()` does not verify that the remaining `free_amount` and `locked_amount` in `farmer_seed` are above `seed.min_deposit` after the operation.\n2. **Cause:** Missing validation logic to prevent leaving dust amounts that fall below the minimum deposit threshold.\n3. **Exploitation:** Users could leave negligible balances in their `farmer_seed`, fragmenting state and potentially violating the design principle of maintaining meaningful deposits.\n4. **Impact:** Accumulation of dust balances increases state bloat and contradicts the intended design of the staking mechanism, possibly affecting efficiency and gas costs.\n",
+            "severity": null,
+            "files": [
+                "contracts/boost-farming/src/actions_of_farmer_seed.rs"
+            ],
+            "location": [
+                "actions_of_farmer_seed.rs"
+            ]
+        }
+    ]
+}

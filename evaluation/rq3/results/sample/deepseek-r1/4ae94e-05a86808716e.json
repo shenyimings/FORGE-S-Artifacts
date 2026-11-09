@@ -1,0 +1,99 @@
+{
+    "project": "blocksec_burrow_margin_trade_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrow_margin_trade_v1.0-signed.pdf.json/contracts/contract/src/fungible_token.rs",
+        "dataset/contracts/blocksec_burrow_margin_trade_v1.0-signed.pdf.json/contracts/contract/src/margin_trading.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.5,
+        "recall": 0.1,
+        "f1": 0.16666666666666669
+    },
+    "cwe_ground_truth": [
+        "CWE-697",
+        "CWE-755",
+        "CWE-284",
+        "CWE-248",
+        "CWE-346",
+        "CWE-703"
+    ],
+    "cwe_detected": [
+        "CWE-284",
+        "CWE-285"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Lack of sender account check when handling SwapReference message",
+            "description": "The function `ft_on_transfer()` does not validate whether the sender of the `SwapReference` message is a legitimate Ref V1 or Ref V2 contract. This lack of authentication allows any arbitrary account to impersonate a trusted exchange contract. An attacker can craft a malicious `SwapReference` message and send it to the contract, tricking it into reducing a user's debt and increasing their assets without any actual token swap occurring. This leads to an inconsistent state where the system records a debt reduction without corresponding economic backing, resulting in financial loss for the protocol due to unauthorized asset minting.\n"
+        },
+        {
+            "title": "Potential panic during handling message SwapReference",
+            "description": "When processing the `SwapReference` message, the function `internal_set_margin_account()` is called to persist account state changes. This function performs storage deposit checks that can cause a panic if the account lacks sufficient balance to cover storage costs. Since the `SwapReference` message is part of a critical path following a token swap, a panic at this stage would leave the system in an inconsistent state: the user may have already received tokens from the exchange, but the debt adjustment fails. This results in a loss of funds for the user and a locked margin position, undermining trust and reliability in the protocol.\n"
+        },
+        {
+            "title": "Unreasonable check of reserves",
+            "description": "In the `on_decrease_trade_return()` function, when covering remaining debt during a force close, the contract checks if reserves are strictly greater than the debt amount. This prevents the closure of positions when reserves are exactly equal to the debt, even though full coverage is possible. As a result, margin positions that should be force-closable are left open, increasing systemic risk. This overly strict comparison reduces the efficiency of liquidation mechanisms and may allow undercollateralized positions to persist, threatening the solvency of the protocol.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract's `ft_on_transfer` function processes a `TokenReceiverMsg::SwapReference` message without verifying that the sender of the tokens has the right to modify the specified margin account. This allows any token sender to manipulate arbitrary margin accounts by crafting a malicious swap reference message.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized Access to Margin Accounts via SwapReference",
+                    "description": "In the `ft_on_transfer` function, when processing a `SwapReference` message, the contract fails to validate that the sender of the tokens (the `sender_id`) is the owner of the margin account specified in the `SwapReference` (or is authorized). This allows an attacker to send tokens to the contract with a crafted `SwapReference` message that points to any margin account, leading to unauthorized modification of that account's state.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.95
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract contains two critical vulnerabilities related to improper privilege management and authorization.\n\n1. In the `ft_on_transfer` function, when processing a `SwapReference` message, the contract does not validate that the `sender_id` (the initiator of the token transfer) is authorized to operate on the margin account specified in `swap_ref.account_id`. This allows any user to manipulate any margin account arbitrarily.\n\n2. In the `on_decrease_trade_return` function, when distributing benefits after a liquidation or force close, the contract uses the `liquidator_id` from the `SwapReference` message (provided by the user) without validation. This allows a malicious user to set the `liquidator_id` to their own account and steal the benefits.\n\nAdditionally, note that the `SwapReference` message is entirely user-controlled, which allows these attacks.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized Access to Margin Accounts via SwapReference",
+                    "description": "The `ft_on_transfer` function in the fungible token receiver implementation processes `TokenReceiverMsg::SwapReference` without verifying that the `sender_id` (the account that initiated the token transfer) is the same as the `account_id` in the `SwapReference` or has any authorization to operate on that account. This allows any user to arbitrarily manipulate any margin account by sending a token transfer with a crafted `SwapReference` message.\n",
+                    "category": "CWE-285",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unauthorized Liquidator Assignment Leading to Theft of Benefits",
+                    "description": "In the `on_decrease_trade_return` function, when the operation type in `SwapReference` is set to \"liquidate\" or \"forceclose\", the contract distributes benefits to a liquidator account specified in the `SwapReference`. However, the `liquidator_id` in `SwapReference` is provided by the user without validation. This allows a malicious user to set the liquidator to their own account and receive the benefits even if they are not the actual liquidator.\n",
+                    "category": "CWE-285",
+                    "severity": "critical",
+                    "confidence": 0.95
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-269",
+            "CWE-749",
+            "CWE-1267",
+            "CWE-287",
+            "CWE-346",
+            "CWE-923",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-282",
+            "CWE-1280",
+            "CWE-286",
+            "CWE-1270"
+        ]
+    ]
+}

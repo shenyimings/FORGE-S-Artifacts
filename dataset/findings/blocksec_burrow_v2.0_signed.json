@@ -1,0 +1,150 @@
+{
+    "path": "reports/blocksec_burrow_v2.0_signed.pdf",
+    "project_info": {
+        "url": "https://github.com/NearDeFi/burrowland",
+        "commit_id": "6fe609bd53d170508366f70eb5d00a7574e2b94b",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-03-19",
+        "project_path": "contracts/blocksec_burrow_v2.0_signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "MAX_NUM_ASSETS cannot be changed without upgrading the contract",
+            "description": "The MAX_NUM_ASSETS constant is hardcoded to 10 and used in an assertion to limit the total number of collateral and borrowed assets per account. This value cannot be modified without deploying a new contract version, which limits future extensibility. The root cause is the use of a compile-time constant instead of a configurable parameter. If a new asset is added that causes the total to exceed MAX_NUM_ASSETS, the assertion will fail and prevent certain functionality from working. This could block user actions such as adding new collateral or borrowing new asset types, leading to a partial denial of service for affected users.\n",
+            "severity": "medium",
+            "files": [
+                "contract/src/actions.rs"
+            ],
+            "location": [
+                "action.rs#135"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Missing check on the returned value",
+            "description": "The shares_to_amount function in the pool module calculates a return value using fixed-point arithmetic but does not validate that the result is less than or equal to self.balance. Due to integer arithmetic rounding and lack of bounds checking, the computed amount can exceed the actual balance of the pool when shares.0 < self.balance and shares.0 > self.shares.0. This occurs because the formula ((U256::from(self.balance) * U256::from(shares.0) + extra) / U256::from(self.shares.0)) can round up to a value greater than self.balance when 'extra' is added. An attacker could exploit this by crafting specific share amounts that trigger over-rounding, potentially withdrawing more tokens than their fair share. This could lead to gradual depletion of the pool's reserves, resulting in financial loss for other depositors.\n",
+            "severity": "medium",
+            "files": [
+                "contract/src/pool.rs"
+            ],
+            "location": [
+                "pool.rs#38-50"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Storage usage is wrong in liquidation action",
+            "description": "During the liquidation process, the contract incorrectly calculates storage usage by including the liquidation account's storage in the available bytes check. Specifically, the logic at line 401 compares available_bytes (belonging to the liquidation account) with required_bytes (computed from the current storage usage minus initial usage), which includes storage from other accounts. This comparison is invalid because it conflates storage usage across different accounts. Furthermore, in line 409, extra_bytes are added to liquidation_storage.initial_storage_usage, which improperly shifts storage costs. The root cause is a flawed understanding of how storage tracking works per account. An attacker could exploit this by manipulating storage usage to force incorrect fee calculations or avoid storage cost penalties. This could lead to unfair distribution of storage costs or denial of service during liquidation, undermining the economic integrity of the protocol.\n",
+            "severity": "medium",
+            "files": [
+                "contract/src/actions.rs"
+            ],
+            "location": [
+                "action.rs#394-417"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Storage usage is wrong in setting users\u2019 storage",
+            "description": "When setting a user's initial storage usage, the contract compares the global contract storage usage (via env::storage_usage()) with a per-account initial_storage_usage value. This is incorrect because env::storage_usage() reflects the total storage used by the entire contract, not just the individual account. As a result, the extra_bytes_used calculation includes storage from unrelated accounts, leading to incorrect accounting. The logic flaw is in comparing aggregate and per-account metrics. This could allow users to underpay or overpay for storage, or cause incorrect enforcement of storage limits. In extreme cases, it could be exploited to manipulate storage accounting and avoid fees, or cause denial of service by triggering false storage limit violations.\n",
+            "severity": "medium",
+            "files": [
+                "contract/src/actions.rs"
+            ],
+            "location": [
+                "actions.rs#78"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Incomplete asset configuration check",
+            "description": "The assert_valid function in AssetConfig performs only partial validation of the configuration. It checks reserve_ratio, target_utilization, and rate bounds, but fails to validate critical fields such as extra_decimal and volatility_ratio. The extra_decimal field must remain unchanged to prevent inconsistencies in token decimal handling, and volatility_ratio should be constrained between 0 and 10000 (basis points). The root cause is an incomplete validation routine. An attacker with owner privileges could update an asset with an altered extra_decimal, causing miscalculations in value conversion, or set an out-of-bounds volatility_ratio, affecting risk parameters. This could lead to incorrect collateral valuations, unfair liquidations, or insolvency of the protocol.\n",
+            "severity": "low",
+            "files": [
+                "contract/src/config.rs",
+                "contract/src/asset_config.rs"
+            ],
+            "location": [
+                "config.rs#80",
+                "asset_config.rs#66-70"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "The freshness of PriceData should be checked",
+            "description": "The contract does not validate the timestamp of PriceData received from the oracle when converting it to Prices. The PriceData struct contains a timestamp and recency_duration_sec field, but these are not used in the From<PriceData> for Prices implementation. This means stale or outdated price data could be accepted without verification. The root cause is missing freshness validation logic. An attacker could manipulate or delay oracle updates to use outdated prices, then perform actions like borrowing or liquidating at favorable rates. This could allow over-borrowing against depreciated collateral or unfair liquidation of positions, leading to significant financial losses for the protocol and users.\n",
+            "severity": "medium",
+            "files": [
+                "contract/src/prices.rs"
+            ],
+            "location": [
+                "prices.rs#19-31"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "The configuration should be checked in init function",
+            "description": "The contract's initialization function (new) does not validate the configuration object before use. While the config has an assert_valid method, it is not called during initialization. This issue was present before version 1.0. The root cause is missing input validation at construction time. An attacker or malicious deployer could initialize the contract with invalid parameters such as out-of-bounds ratios or rates. This could lead to immediate protocol instability, incorrect calculations, or complete failure of core functions like borrowing and liquidation, resulting in denial of service or financial loss.\n",
+            "severity": "low",
+            "files": [
+                "contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        }
+    ]
+}

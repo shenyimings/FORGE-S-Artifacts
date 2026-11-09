@@ -1,0 +1,104 @@
+{
+    "path": "reports/jito_steward_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/jito-foundation/stakenet",
+        "commit_id": "f4ea93a",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-10-28",
+        "project_path": "contracts/jito_steward_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Validator State Desynchronization",
+            "description": "The Steward Program may become desynchronized with the stake pool\u2019s validator list when a validator is marked for deactivation but not immediately removed. This occurs because the validator is marked as delinquent in one epoch but only removed in the next, during which time the Steward's internal state still considers it active while the stake pool has already removed it. The root cause is the asynchronous update between the internal state of the Steward Program and the external stake pool state. An attacker could exploit this by manipulating timing around deactivation and removal to create inconsistencies in validator management. The impact includes incorrect stake distribution decisions based on stale validator data, potentially leading to suboptimal performance or loss of rewards.\n",
+            "severity": "high",
+            "files": [
+                "programs/steward/src/state/steward_state.rs"
+            ],
+            "location": [
+                "deactivate_delinquent",
+                "epoch_maintenance",
+                "auto_remove_validator_from_pool"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Mismatch in Validator Count",
+            "description": "The `num_pool_validators` field is only updated once at the beginning of a compute cycle in `compute_score`, and is not adjusted if a validator is added and then removed within the same cycle. The root cause is that the decrement in `num_pool_validators` happens during `epoch_maintenance` in the next epoch via `remove_validator`, but `compute_score` does not refresh this count until the next cycle. This leads to an off-by-one error where the count remains one less than the actual number of validators. An attacker could exploit this by rapidly adding and removing a validator to skew the rebalancing logic. The impact is that the last validator may be excluded from stake rebalancing in `decrease_stake_calculation`, leading to improper stake distribution.\n",
+            "severity": "low",
+            "files": [
+                "programs/steward/src/state/steward_state.rs",
+                "programs/steward/src/delegation.rs"
+            ],
+            "location": [
+                "steward_state::compute_score#beginning of function",
+                "delegation::decrease_stake_calculation"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "Improper State Transition",
+            "description": "The Steward program allows state transitions (e.g., Rebalance or InstantUnstake) to execute in a new epoch using internal state from the previous epoch, due to improper reset logic. The root cause is that the program does not enforce a mandatory transition to the Idle state at the start of a new epoch, allowing stale state flags like RESET_TO_IDLE to persist. An attacker could exploit this by triggering a state transition early in a new epoch to manipulate stake adjustments based on outdated data. The impact includes incorrect stake reallocations based on stale performance metrics, potentially harming yield optimization and user returns.\n",
+            "severity": "low",
+            "files": [
+                "programs/steward/src/state/steward_state.rs"
+            ],
+            "location": [
+                "steward_state::transition_rebalance"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Index Mismanagement",
+            "description": "After a validator is removed and the remaining validators are shifted left, the `remove_validator` function still attempts to clear the removal flag at the original index, which now refers to a different validator. The root cause is that the index is used after the left shift, making it invalid. This results in clearing the flag for the wrong validator or leaving stale flags set. An attacker could exploit this by orchestrating validator removals to corrupt the state of other validators' removal flags. The impact includes incorrect tracking of which validators are marked for removal, potentially leading to skipped removals or unintended behavior in maintenance operations.\n",
+            "severity": "low",
+            "files": [
+                "programs/steward/src/state/steward_state.rs"
+            ],
+            "location": [
+                "steward_state::remove_validator"
+            ]
+        }
+    ]
+}

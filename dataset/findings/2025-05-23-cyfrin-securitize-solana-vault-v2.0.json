@@ -1,0 +1,199 @@
+{
+    "path": "reports-without-source/2025-05-23-cyfrin-securitize-solana-vault-v2.0.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/securitize-io/bc-solana-vault-sc"
+        ],
+        "commit_id": [
+            "e7244a875189bab156a0a0e0b9dc266e1d269e80"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-05-12",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Precision Manipulation Due to Missing Mint Check",
+            "description": "The vulnerability arises because the deposit_handler function does not enforce a runtime check that ensures liquidation_token_mint and liquidation_token_vault are both present or both absent, despite documentation suggesting they should appear together. This allows a privileged operator to pass a custom mint with zero decimals while omitting the liquidation_token_vault account. As a result, the conversion precision (conv_decimals) is set to zero, causing the denominator in share calculations to become 1 instead of 10^decimals. This inflates the number of shares minted by a factor of 10^D (where D is the asset’s normal decimals), enabling an attacker to deposit minimal assets and receive an arbitrarily large number of shares. The impact is severe: the attacker can redeem these over-minted shares for real underlying assets, effectively draining the vault and diluting honest shareholders, leading to a direct loss of user funds.\n",
+            "severity": "high",
+            "location": [
+                "deposit_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Missing Slippage Check on liquidation_amount in Redemption-Enabled Vaults",
+            "description": "The liquidate_handler function performs a slippage check based on the expected asset amount, but this check is only valid when the vault does not support redemption. In redemption-enabled vaults, the actual amount received by the liquidator is liquidation_amount, which results from calling the redemption program. However, the slippage check is still performed against the asset value before redemption, not against liquidation_amount. This creates a discrepancy where the liquidator specifies a minimum output amount expecting protection, but the actual received amount (liquidation_amount) can be lower than intended. For example, if the liquidator sets min_output_amount to 1000, the asset value might be 1100 (passing the check), but after redemption, liquidation_amount could be only 900. The liquidator receives less than expected, undermining the purpose of slippage protection and potentially leading to financial loss.\n",
+            "severity": "medium",
+            "location": [
+                "liquidate_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-193"
+                ]
+            },
+            "title": "Off-By-One Error in Liquidator and Operator Capacity Check",
+            "description": "When adding new liquidators or operators, the code checks whether the current length of the list is less than or equal to MAX_LENGTH before allowing a push operation. However, this condition is flawed because if the current length is already equal to the maximum allowed (MAX_LIQUIDATORS or MAX_OPERATORS), the check still passes, and the new element is pushed. This results in an array out-of-bounds access, as the list exceeds its intended capacity. The root cause is the use of a greater-than-or-equal (gte) comparison instead of strictly greater-than (gt). The impact includes incorrect program behavior, potential runtime errors, and inconsistent state management, which could disrupt administrative operations and lead to unexpected reverts or undefined behavior during liquidation or operator actions.\n",
+            "severity": "low",
+            "location": [
+                "bc-solana-vault-sc/programs/sc-vault/src/instructions/admin/add_liquidator.rs",
+                "bc-solana-vault-sc/programs/sc-vault/src/instructions/admin/add_operator.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Unsafe Addition in convert_to_shares Causes View Function Inaccuracy",
+            "description": "The convert_to_shares function performs an unchecked addition of total_assets and the provided assets parameter when calculating share conversions. Since this function is used in convert_to_assets_handler—a view function that estimates share amounts—it does not involve actual asset transfers. An attacker can provide a large assets value that, when added to total_assets, exceeds u64::MAX, causing an integer overflow. This results in an incorrect and potentially very low share value being returned, misleading users about the expected output. While this does not directly affect the deposit logic (where actual transfers occur and supply limits prevent overflow), it compromises the reliability of the view function. The impact is limited to inaccurate return values, which could mislead frontends or users relying on these estimates for decision-making.\n",
+            "severity": "low",
+            "location": [
+                "convert_to_shares",
+                "convert_to_assets_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Strict Comparison in Slippage Check Incorrectly Blocks Valid Redemptions",
+            "description": "The slippage check in the liquidate_handler function uses a strict greater-than comparison (>) to validate that the returned assets are above the min_output_amount. However, this logic is incorrect because it reverts the transaction even when the returned amount is exactly equal to the minimum acceptable value. Users expect that setting min_output_amount means they accept any amount greater than or equal to that value. By rejecting equal amounts, the protocol unnecessarily blocks valid liquidation transactions. The root cause is the use of require_gt instead of require_gte in the validation logic. The impact is a denial of service for legitimate liquidations, reducing the efficiency and usability of the system, especially in scenarios where precise slippage tolerance is required.\n",
+            "severity": "low",
+            "location": [
+                "bc-solana-vault-sc/programs/sc-vault/src/instructions/liquidator/liquidate.rs#liquidate_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect Splitting of remaining_accounts Causes Misrouting Between NAV and Redemption Accounts",
+            "description": "In the liquidate_handler function, the splitting of remaining_accounts assumes that the NAV provider will consume up to MAX_NAV_PROVIDER_ACCOUNTS (5) accounts, using .min(5) to determine how many to allocate. However, when redemption is enabled, it requires at least 4 accounts. If the NAV provider only needs 1 account but the liquidator passes 5 remaining accounts (1 for NAV, 4 for redemption), the logic assigns all 5 to the NAV provider because it takes the minimum of available and max (5). This leaves no accounts for the redemption program, causing the transaction to revert when redemption accounts are validated for minimum length. The root cause is the inflexible account splitting logic that does not account for variable requirements between NAV and redemption programs. The impact is transaction failure during liquidation, preventing valid operations and reducing system reliability.\n",
+            "severity": "low",
+            "location": [
+                "bc-solana-vault-sc/programs/sc-vault/src/instructions/liquidator/liquidate.rs#liquidate_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Liquidate Event Emits Shares and Assets in Wrong Order",
+            "description": "The Liquidate event is defined to emit shares as the second parameter and assets as the third, but the actual event construction in the code swaps these positions—assets are emitted second, and shares third. This inconsistency leads to incorrect parsing of event data by off-chain systems that rely on the documented order. Additionally, there is ambiguity about what \"assets\" represents: in non-redemption vaults, it is the amount transferred; in redemption-enabled vaults, the liquidator receives liquidation_amount instead. This further complicates accurate event interpretation. The impact includes incorrect tracking, flawed analytics, and potential misreporting of liquidation events, which can affect monitoring tools, dashboards, and compliance systems that consume these events.\n",
+            "severity": "low",
+            "location": [
+                "bc-solana-vault-sc/programs/sc-vault/src/instructions/liquidator/liquidate.rs#liquidate_handler",
+                "bc-solana-vault-sc/programs/sc-vault/src/events.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Invalid Zero Rate Not Rejected During Deposit",
+            "description": "During deposit operations, the convert_to_shares function does not validate whether the rate value obtained from the NAV provider is greater than zero. While the redeem path includes a check for a positive rate, the deposit path lacks this safeguard. If the rate is zero (e.g., due to an error from the RedStone oracle), the calculation results in zero shares being minted, even though assets were deposited. This means the depositor receives nothing in return, effectively losing their deposit until corrected. The root cause is the absence of input validation for a critical rate parameter. The impact is temporary loss of user funds and a poor user experience, especially in edge cases involving oracle failures or incorrect data feeds.\n",
+            "severity": "informational",
+            "location": [
+                "bc-solana-vault-sc/programs/sc-vault/src/utils/conversions.rs#convert_to_shares"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Redundant vault_authority_signer passed to BurnChecked in redeem and liquidate",
+            "description": "In both redeem_handler and liquidate_handler, the BurnChecked instruction includes vault_authority_signer as a signer, even though the SPL Token program only requires the operator/liquidator (who is already a transaction signer) to authorize the burn. The vault_authority_signer is a PDA that is not needed for this operation. Including it results in an unnecessary PDA signature, which consumes additional compute units without providing any security benefit. This inefficiency increases transaction costs and adds complexity. The root cause is incorrect CPI context construction. The impact is higher gas usage and reduced efficiency, with a minor risk of brittleness if future changes incorrectly assume this signer is required.\n",
+            "severity": "informational",
+            "location": [
+                "redeem_handler",
+                "liquidate_handler"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ]
+            },
+            "title": "Lack of mut on liquidation_token_mint restricts redemption flexibility",
+            "description": "The liquidation_token_mint account in the Liquidate instruction is not marked as mutable (mut), preventing the redemption program from modifying its data when necessary. If the redemption program is the mint authority and needs to mint liquidation_amount tokens during liquidation, it must write to the mint account (e.g., to update supply). Without the mut flag, this operation fails, restricting the types of redemption strategies that can be implemented. The root cause is insufficient account permissions in the instruction definition. The impact is reduced flexibility in integrating with advanced redemption programs that require dynamic minting, limiting the protocol's extensibility and composability with future systems.\n",
+            "severity": "informational",
+            "location": [
+                "bc-solana-vault-sc/programs/sc-vault/src/instructions/liquidator/liquidate.rs#Liquidate"
+            ],
+            "files": []
+        }
+    ]
+}

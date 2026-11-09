@@ -1,0 +1,121 @@
+{
+    "path": "reports/628b07305b8820cc04fba580_624a49f3a51dfbdbbf74ff09_Soteria UXD Audit Report Final.pdf",
+    "project_info": {
+        "url": "https://github.com/UXDProtocol/uxd-program",
+        "commit_id": "958d36a20a77c0ae1945375ebda7a8a660999f46",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-03-30",
+        "project_path": "contracts/628b07305b8820cc04fba580_624a49f3a51dfbdbbf74ff09_Soteria UXD Audit Report Final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "[C-1] manipulate perpetual trade parameters and steal assets",
+            "description": "The vulnerability allows attackers to manipulate perpetual trade parameters by providing valid but inconsistent perp market accounts (e.g., using BTC or SOL perp markets when interacting with the ETH depository). The root cause is insufficient validation of the provided perp market accounts against the actual depository's expected market, despite checking that the account is a valid perp market. This allows an attacker to influence the price and base lot size used in perp order calculations, leading to abnormal minting efficiency. For example, by using the PERP-BTC market with the ETH depository, attackers can mint over 14x more UXD than the value of their collateral. The impact is severe, as it enables repeated exploitation to drain the protocol's assets by minting excessive UXD tokens with minimal collateral.\n",
+            "severity": "critical",
+            "files": [
+                "programs/uxd/src/instructions/mango_dex/mint_with_mango_depository.rs",
+                "programs/uxd/src/instructions/mango_dex/redeem_from_mango_depository.rs",
+                "programs/uxd/src/instructions/mango_dex/rebalance_mango_depository_lite.rs",
+                "programs/uxd/src/mango_utils/perp_info.rs"
+            ],
+            "location": [
+                "mint_with_mango_depository#191",
+                "redeem_from_mango_depository",
+                "rebalance_mango_depository_lite",
+                "perp_info.rs#45-72"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "[I-1] redundant passthrough accounts/transfers",
+            "description": "The contract uses unnecessary passthrough accounts during deposit and withdrawal operations, increasing computation costs without providing security benefits. The cause is a misunderstanding or outdated assumption that MangoAccounts can only transact with token accounts owned by their authority, which is not enforced in the Mango program. This leads to redundant token transfers: first to a passthrough account and then to the final destination. Attackers cannot directly exploit this for theft, but it increases transaction costs and risks hitting Solana's compute limit. The impact is reduced efficiency and higher operational costs. The issue affects both deposit and withdrawal flows, such as deposit_insurance_to_mango_depository and redeem_from_mango_depository.\n",
+            "severity": "informational",
+            "files": [
+                "programs/uxd/src/instructions/mango_dex/deposit_insurance_to_mango_depository.rs",
+                "programs/uxd/src/instructions/mango_dex/redeem_from_mango_depository.rs"
+            ],
+            "location": [
+                "deposit_insurance_to_mango_depository.rs#130-133",
+                "deposit_insurance_to_mango_depository.rs#136-141",
+                "redeem_from_mango_depository.rs#275-289"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-477"
+                ]
+            },
+            "title": "[I-2] deprecated mango account initialization method",
+            "description": "The contract uses the deprecated MangoInstruction::InitMangoAccount to initialize Mango accounts, which prevents them from being closed without an upgrade. The root cause is the use of an outdated initialization method that is no longer recommended by the Mango protocol. While this does not lead to immediate security risks, it creates long-term maintainability issues and may prevent account cleanup. The impact is limited to operational inefficiency and potential future complications if account closure is needed. The issue occurs in the register_mango_depository instruction where initialize_mango_account is called.\n",
+            "severity": "informational",
+            "files": [
+                "programs/uxd/src/instructions/register_mango_depository.rs",
+                "programs/uxd/src/mango_program/init_mango_account.rs"
+            ],
+            "location": [
+                "register_mango_depository.rs#143",
+                "init_mango_account.rs#29-32"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "[I-3] unhandled corner scenario in mint_with_mango_depository",
+            "description": "The mint_with_mango_depository function does not properly handle cases where the collateral amount is less than the perp market's base lot size. The cause is the absence of a pre-check before computing the base lot amount, leading to a division result that floors to zero. This results in a quantity of 0 being passed to mango_program::place_perp_order, which reverts with MangoErrorCode::InvalidParam. The impact is a denial of service for small deposits, preventing users from minting UXD with low collateral. This could affect user experience and onboarding but does not lead to fund loss.\n",
+            "severity": "informational",
+            "files": [
+                "programs/uxd/src/instructions/mango_dex/mint_with_mango_depository.rs"
+            ],
+            "location": [
+                "mint_with_mango_depository.rs#194-197",
+                "mint_with_mango_depository.rs#205-206",
+                "mint_with_mango_depository.rs#246-251"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "[I-4] design choices, clarifications and questions",
+            "description": "This finding highlights several design considerations and open questions. The lack of an owner/admin transfer mechanism poses a risk if credentials are lost. The separation of redeemable supply caps could lead to invariant violations. The unused Total_amount_paid_taker_fee variable suggests potential code bloat or monitoring gaps. Additionally, the use of expensive I80F48 multiplication operations may unnecessarily increase compute costs. These are not direct vulnerabilities but represent areas for improvement in security, maintainability, and efficiency. The impact is primarily on long-term governance, code clarity, and performance.\n",
+            "severity": "informational",
+            "files": [
+                "programs/uxd/src/lib.rs"
+            ],
+            "location": [
+                "Total_amount_paid_taker_fee"
+            ]
+        }
+    ]
+}

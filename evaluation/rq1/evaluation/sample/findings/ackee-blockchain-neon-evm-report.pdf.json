@@ -1,0 +1,171 @@
+{
+    "path": "reports/ackee-blockchain-neon-evm-report.pdf",
+    "project_info": {
+        "url": "https://github.com/neonlabsorg/neon-evm",
+        "commit_id": "eeed4c4fd55e09d30a6a7ae4253a31bdd0bb7a35",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-11-04",
+        "project_path": "contracts/ackee-blockchain-neon-evm-report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Selfdestruct early evaluation",
+            "description": "The selfdestruct(addr) instruction in the EVM implementation is evaluated immediately, causing functions like code, code_size, nonce, storage, code_hash, and valids to return incorrect values within the same transaction. \nThe root cause is that the implementation applies state changes (except Ether transfer) immediately upon encountering selfdestruct, rather than deferring them until transaction finalization as per the Ethereum specification. \nAn attacker could exploit this by calling functions on a contract that has already issued selfdestruct but before the end of the transaction, leading to inconsistent or unexpected behavior. \nThe impact is medium, as it could lead to incorrect application logic in Ethereum-compatible smart contracts running on Neon EVM, potentially affecting contract state integrity.\n",
+            "severity": "medium",
+            "files": [
+                "evm_loader/program/src/executor/state.rs"
+            ],
+            "location": [
+                "state.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-439"
+                ]
+            },
+            "title": "The emulation of the spl_associated_token_program will not work",
+            "description": "The emulation function in spl_associated_token.rs fails because it rejects non-empty instruction data, which is now used in the updated version of the spl_associated_token_account program. \nThe cause is a hardcoded check for empty instruction data, which was valid in older versions but fails with the newer Borsh-serialized instruction data. \nThis can be exploited by any user attempting to use associated token account functionality through the EVM, causing the operation to fail unexpectedly. \nThe impact is medium due to the high likelihood of occurrence, potentially disrupting token operations for users relying on associated token accounts.\n",
+            "severity": "medium",
+            "files": [
+                "evm_loader/program/src/external_programs/spl_associated_token.rs"
+            ],
+            "location": [
+                "spl_associated_token.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-228"
+                ]
+            },
+            "title": "Precompiled ecrecover behaves incorrectly",
+            "description": "The precompiled ecrecover contract does not adhere to the Ethereum specification in three ways: it returns 32 zero bytes instead of an empty vector on failure, and it fails on inputs shorter or longer than 128 bytes instead of padding or truncating them. \nThis deviation is caused by incorrect input validation and output formatting in the ecrecover implementation. \nAn attacker could exploit this by providing malformed input to ecrecover, causing signature recovery to fail in ways that differ from native Ethereum behavior. \nThe impact is low, as it mainly affects compatibility and correctness of signature verification in edge cases.\n",
+            "severity": "low",
+            "files": [
+                "evm_loader/program/src/precompile/ecrecover.rs"
+            ],
+            "location": [
+                "ecrecover.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Differences in the system program emulation",
+            "description": "The SystemInstruction::Transfer emulator does not check whether the source account contains data, leading to different behavior compared to the actual Solana system program. \nThe cause is the omission of a non-emptiness check on the source account in the emulation logic. \nWhile there is no direct exploit path, this discrepancy could lead to inconsistent behavior between emulated and real execution, potentially affecting transaction simulation accuracy. \nThe impact is classified as Warning because the issue cannot be exploited under current configuration but could become a vulnerability if emulation fidelity becomes critical.\n",
+            "severity": "informational",
+            "files": [
+                "evm_loader/program/src/external_programs/system.rs"
+            ],
+            "location": [
+                "system.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant account check",
+            "description": "The code explicitly checks if an account is the Rent sysvar, even though the solana_program::sysvar::rent::Rent::from_account_info function already performs this validation. \nThis redundancy increases compute cost unnecessarily. \nThere is no direct security exploit, but it wastes computational budget. \nThe impact is informational, as it relates to code efficiency rather than security.\n",
+            "severity": "informational",
+            "files": [
+                "evm_loader/program/src/account/sysvar.rs"
+            ],
+            "location": [
+                "sysvar.rs#29"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unnecessary owner check",
+            "description": "The EvmInstruction::CreateAccountV02 instruction includes an explicit owner check for the code account, but this is redundant because the Solana runtime enforces that only the owning program can modify an account's data. \nThe cause is an overabundance of defensive checks that do not add security value. \nThis increases compute usage without benefit. \nThe impact is informational, as it pertains to optimization rather than security.\n",
+            "severity": "informational",
+            "files": [
+                "evm_loader/program/src/instruction/account_create.rs"
+            ],
+            "location": [
+                "account_create.rs#51"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Unnecessary instruction argument",
+            "description": "The CreateAccountV02 instruction includes a bump_seed parameter, but this is unnecessary because the bump can be derived using find_program_address. \nThe cause is an inefficient API design that requires redundant data transmission. \nThis increases transaction size and compute cost. \nThe impact is informational, as it affects efficiency but not security.\n",
+            "severity": "informational",
+            "files": [
+                "evm_loader/program/src/instruction/account_create.rs"
+            ],
+            "location": [
+                "account_create.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Unnecessary holder owner validation",
+            "description": "The TransactionStepFromAccount instruction performs a holder account owner check, but this is duplicated in the State::new function. \nThe cause is redundant validation logic that does not enhance security. \nThis leads to unnecessary compute unit consumption. \nThe impact is informational, as it is a code quality and efficiency issue rather than a security flaw.\n",
+            "severity": "informational",
+            "files": [
+                "evm_loader/program/src/instruction/transaction_step_from_account.rs"
+            ],
+            "location": [
+                "transaction_step_from_account.rs#56"
+            ]
+        }
+    ]
+}

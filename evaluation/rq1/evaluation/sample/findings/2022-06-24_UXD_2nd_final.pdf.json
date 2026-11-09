@@ -1,0 +1,156 @@
+{
+    "path": "reports/2022-06-24_UXD_2nd_final.pdf",
+    "project_info": {
+        "url": "https://github.com/UXDProtocol/uxd-program",
+        "commit_id": "6b11a457b46b7cce81270e19ee50cd07cfe9286d",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-06-24",
+        "project_path": "contracts/2022-06-24_UXD_2nd_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Fee rounding issues",
+            "description": "1. **Description:** The vulnerability involves incorrect fee rounding behavior when dealing with negative quote amounts. The `taker_fee_amount_ceil` function uses `checked_ceil()` on a potentially negative value, which results in rounding toward zero instead of rounding up in absolute terms, contrary to the intended fee collection logic.\n\n2. **Cause:** The root cause is the use of `checked_ceil()` without considering the sign of the input. For negative values, `ceil()` produces a less negative number (i.e., a smaller absolute value), which effectively reduces the fee instead of increasing it as intended.\n\n3. **Exploitation:** An attacker could exploit this by executing trades that result in negative quote deltas (e.g., during redemption), leading to lower fee deductions than expected, thereby gaining an unfair economic advantage.\n\n4. **Impact:** The impact is a loss of fee revenue for the protocol due to inconsistent rounding behavior, especially in redemption scenarios where fees are under-collected.\n",
+            "severity": "medium",
+            "files": [
+                "programs/uxd/src/mango_utils/order_delta.rs",
+                "programs/uxd/src/instructions/mango_dex/redeem_from_mango_depository.rs",
+                "programs/uxd/src/test/mango_utils/test_order_delta.rs"
+            ],
+            "location": [
+                "order_delta.taker_fee_amount_ceil#50-56",
+                "order_delta.derive_order_delta#64-80",
+                "redeem_from_mango_depository#237-241",
+                "test_order_delta.test_taker_fee_amount_ceil#85-97"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "Consider associated token account checks",
+            "description": "1. **Description:** The issue highlights that while the current mint and owner checks on token accounts are safe, the use of associated token account (ATA) checks would provide stricter validation by ensuring only the canonical ATA is accepted.\n\n2. **Cause:** The current logic allows any token account with the correct mint and owner, which could include non-ATA accounts. This is less strict than enforcing the use of the associated token account derived via `get_associated_token_address`.\n\n3. **Exploitation:** While not directly exploitable due to signature requirements, allowing non-ATA accounts could lead to user errors or edge-case behaviors in integrations that assume ATA usage.\n\n4. **Impact:** The impact is low, primarily affecting integration safety and consistency. The team chose not to enforce ATA checks for flexibility, accepting the trade-off.\n",
+            "severity": "informational",
+            "files": [
+                "programs/uxd/src/instructions/mango_dex/mint_with_mango_depository.rs"
+            ],
+            "location": [
+                "mint_with_mango_depository.user_quote"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Design and implementation choices",
+            "description": "1. **Description:** This finding raises questions about specific design decisions: exclusion of `quote_position` in delta calculations, lack of order fulfillment check in redemption, and inconsistent use of `wrapping_add` vs `checked_add` in fee accounting.\n\n2. **Cause:** The inconsistencies stem from implementation choices that deviate from expected patterns, such as using `wrapping_add` for some fee updates while using `checked_add` elsewhere, potentially increasing risk of undetected overflows.\n\n3. **Exploitation:** If `wrapping_add` were used in a context where overflow is possible, it could lead to incorrect state updates. However, the team confirmed that `checked_add` is now used for fee accounting.\n\n4. **Impact:** The impact is informational, as the team clarified that the behaviors are intentional and safe under current assumptions.\n",
+            "severity": "informational",
+            "files": [
+                "programs/uxd/src/instructions/mango_dex/mint_with_mango_depository.rs",
+                "programs/uxd/src/instructions/mango_dex/quote_mint_with_mango_depository.rs"
+            ],
+            "location": [
+                "mango_dex.mint_with_mango_depository.check_perp_order_fully_filled#235",
+                "mango_dex.mint_with_mango_depository.update_onchain_accounting#417-444",
+                "mango_dex.quote_mint_with_mango_depository.update_onchain_accounting#298-327"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Quote mint upper bound in quote_mint and quote_redeem",
+            "description": "1. **Description:** The issue points out confusion in the logic and comments around `quote_mintable` and `quote_redeemable`, particularly the redundant use of `abs()` and unclear rationale for rechecking `net_quote_minted`.\n\n2. **Cause:** The code includes redundant operations (e.g., `checked_abs()` after a positivity check) and misleading comments (e.g., suggesting a u64 can become negative), indicating poor code clarity.\n\n3. **Exploitation:** This is not directly exploitable but could lead to maintenance errors or misinterpretation of logic during future audits or upgrades.\n\n4. **Impact:** The impact is low, limited to code readability and maintainability. The team has since refactored the implementation.\n",
+            "severity": "informational",
+            "files": [
+                "programs/uxd/src/instructions/mango_dex/quote_mint_with_mango_depository.rs",
+                "programs/uxd/src/instructions/mango_dex/quote_redeem_from_mango_depository.rs"
+            ],
+            "location": [
+                "quote_mint_with_mango_depository#185-203",
+                "quote_redeem_from_mango_depository#199-216"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Quote mint checks",
+            "description": "1. **Description:** The instructions `quote_mint_with_mango_depository` and `quote_redeem_from_mango_depository` do not explicitly validate that the provided `quote_mint` matches the Mango market's expected quote currency.\n\n2. **Cause:** Missing explicit validation logic to ensure `mango_group.tokens[QUOTE_INDEX].mint == *quote_mint_key`, relying instead on indirect constraints from token transfers.\n\n3. **Exploitation:** While currently safe due to ATA and transfer checks, omission of explicit validation could allow integration errors or future vulnerabilities if assumptions change.\n\n4. **Impact:** Low impact; the team has since added additional validations to address this.\n",
+            "severity": "informational",
+            "files": [
+                "programs/uxd/src/instructions/mango_dex/quote_mint_with_mango_depository.rs",
+                "programs/uxd/src/instructions/mango_dex/quote_redeem_from_mango_depository.rs"
+            ],
+            "location": [
+                "quote_mint_with_mango_depository",
+                "quote_redeem_from_mango_depository"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Minor: inconsistent or confusing comments",
+            "description": "1. **Description:** Several comments in the code are inaccurate or misleading, such as misstating fee values (0.004 vs 0.0004) and unclear descriptions of soft caps and minting flags.\n\n2. **Cause:** Outdated or imprecise documentation that does not reflect actual usage or values.\n\n3. **Exploitation:** These do not present direct security risks but can mislead developers and auditors, increasing the risk of logic errors during maintenance.\n\n4. **Impact:** Minimal, limited to code clarity and maintainability.\n",
+            "severity": "informational",
+            "files": [
+                "programs/uxd/src/mango_utils/perp_info.rs",
+                "programs/uxd/src/state/controller.rs",
+                "programs/uxd/src/state/mango_depository.rs"
+            ],
+            "location": [
+                "perp_info#20",
+                "controller#31-33",
+                "mango_depository#79-80"
+            ]
+        }
+    ]
+}

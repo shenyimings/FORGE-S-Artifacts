@@ -1,0 +1,179 @@
+{
+    "project": "ellipsis_plasma_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/ellipsis_plasma_audit_final.pdf.json/crates/plasma_state/src/amm.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.14285714285714285,
+        "recall": 1.0,
+        "f1": 0.25
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-1339",
+        "CWE-664",
+        "CWE-190",
+        "CWE-182",
+        "CWE-682",
+        "CWE-691",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Inconsistencies in the AMM Fee Logic",
+            "description": "1. **Description:** The function `amm::get_limit_order_size_in_base_and_quote` incorrectly applies fees to the base asset amount after converting from the quote asset, rather than applying the fee directly to the quote asset before conversion. This leads to an incorrect post-fee calculation and premature termination of limit orders due to fee adjustments.\n\n2. **Cause:** The root cause is the incorrect order of operations in fee application: the system converts the quote amount to base using the exchange rate and then applies the fee on the resulting base amount, instead of applying the fee on the original quote amount prior to conversion.\n\n3. **Exploitation:** An attacker could exploit this by placing limit orders that are prematurely stopped due to miscalculated fees, allowing them to manipulate execution prices or re-enter the market at improved prices after partial execution, potentially gaining unfair trading advantages.\n\n4. **Impact:** The impact includes incorrect execution of limit orders at suboptimal prices, loss of potential price improvements for users, and possible economic inefficiencies in the AMM due to improper fee handling and order termination.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided code, several security issues were identified based on the given CWE list. \n\nFirst, the `mint` function allows an initial deposit into the AMM pool when `total_lp_shares == 0`. However, it only checks that the square of the provided `lp_shares` is approximately equal to the initial `k` (base * quote), but does not enforce any minimum value for `lp_shares`. While there is a check later (`if lp_shares == 0`) that returns an error, this is *after* the reserves have already been updated. This creates a scenario where a malicious user could provide a very small `lp_shares` (e.g., 1) with large reserves, potentially leading to precision loss or manipulation in future calculations. This constitutes improper control over resource initialization and violates the expected economic model.\n\nSecond, in multiple swap functions (`buy_exact_in`, `sell_exact_in`, etc.), the `quote_fee` is calculated as the difference between input and actual swapped amounts. However, this fee is not validated against the expected fee derived from the `fee_in_bps` parameter. An attacker could potentially manipulate input amounts to cause incorrect fee calculations, especially in edge cases involving rounding. The `apply_fees` function assumes the fee is correct without re-verifying it against the expected fee based on volume, which could allow fee theft or underpayment.\n\nThird, the `burn` function calculates withdrawal amounts using floating-point-like arithmetic with `u128` but downcasts to `u64`. If the calculated `base_amount_withdrawn` or `quote_amount_withdrawn` is non-zero in `u128` but becomes zero when downcasted, the function correctly returns an error. However, the comparison `if base_amount_withdrawn == 0` is done in `u128`, and only after passing this check is a downcast attempted. This creates a potential inconsistency: a value like 0.5 in `u128` scaled context might downcast to 0, but the initial check passes because it's non-zero in `u128`. This is an incorrect calculation due to improper handling of integer division and rounding, leading to potential loss of funds.\n\nFourth, the `get_limit_order_size_in_base_and_quote` function performs arithmetic operations on scaled values but does not validate that division operations avoid zero denominators. While `base_snapshot` and `quote_snapshot` are derived from reserves, if either is zero (e.g., during initialization), division by zero could occur. Although the code uses `.saturating_sub()` and similar, the denominator `(2 * quote_snapshot)` in the `Side::Sell` branch could be zero, leading to undefined behavior or panic in debug mode, which is a critical issue.\n\nFifth, the `maybe_update_snapshot` function updates internal state based on slot comparison. However, there is no validation that `new_snapshot_slot` is monotonically increasing or within a reasonable range. A malicious actor could potentially manipulate slot values to force frequent snapshot updates or rollbacks, affecting the limit order logic and enabling front-running or manipulation. This is an improper control flow management issue.\n\nFinally, the `apply_fees` function splits fees between LPs and protocol but does not validate that `total_fees` is consistent with the actual fees collected in the swap. It trusts the `quote_fee` passed from swap functions without recalculating the expected fee based on input volume and `fee_in_bps`. This creates a discrepancy where the fee applied could be different from what should have been collected, violating internal consistency and enabling fee manipulation.\n",
+            "findings": [
+                {
+                    "title": "Improper Validation of LP Shares During Pool Initialization",
+                    "description": "The `mint` function checks `lp_shares == 0` after updating reserves, allowing a malicious user to initialize the pool with an arbitrarily small number of shares, potentially leading to precision loss or economic manipulation.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unverified Fee Calculation in Swap Operations",
+                    "description": "The swap functions calculate `quote_fee` as a residual value without validating it against the expected fee based on `fee_in_bps`. The `apply_fees` function trusts this value without re-verification, enabling potential fee manipulation or theft.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Incorrect Calculation Due to Integer Downcasting in Burn Function",
+                    "description": "The `burn` function checks `base_amount_withdrawn == 0` in `u128` but later downcasts to `u64`. A value that is non-zero in `u128` but becomes zero after downcasting can pass the initial check and cause an error, indicating incorrect handling of integer precision and rounding.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Potential Division by Zero in Limit Order Calculation",
+                    "description": "The `get_limit_order_size_in_base_and_quote` function divides by `(2 * quote_snapshot)` in the `Side::Sell` branch without ensuring `quote_snapshot` is non-zero, risking division by zero if reserves are zero during initialization.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Insufficient Control Flow Management in Snapshot Updates",
+                    "description": "The `maybe_update_snapshot` function updates state based on slot comparison without validating monotonicity or reasonableness of the new slot, potentially allowing manipulation of limit order logic through slot manipulation.",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Trust of Unvalidated Fee Input in apply_fees",
+                    "description": "The `apply_fees` function uses `quote_fee` directly without recalculating the expected fee from swap volume and `fee_in_bps`, creating a trust boundary issue where incorrect fees could be applied due to calculation errors or malicious input.",
+                    "category": "CWE-693",
+                    "severity": "high",
+                    "confidence": 0.95
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided AMM (Automated Market Maker) smart contract code, several security issues were identified. The primary concerns stem from integer arithmetic operations that are susceptible to overflow and underflow, improper handling of fee calculations, and potential invariant violations due to imprecise rounding in fee adjustment logic.\n\nFirst, the use of `saturating_add(1)` and `saturating_sub(1)` in functions like `get_base_out_from_quote_in` and others introduces a risk of incorrect calculation when dealing with edge cases near zero or maximum values. These operations may lead to unexpected behavior in the invariant check (`k_start > k_end`), especially when reserves are low or inputs are large.\n\nSecond, while the code attempts to prevent overflows using `.upcast()` to `u128`, there is no validation that the final results when downcast back to `u64` do not lose precision or cause logical errors. For example, in `mint()` and `burn()`, arithmetic is done in `u128`, but downcasting without proper clamping could result in truncation, although the `.downcast()?` does check against `u64::MAX`. However, this only prevents overflow, not logical errors due to precision loss.\n\nThird, the fee calculation logic in `fee_rounded_up`, `post_fee_adjust_rounded_down`, and `pre_fee_adjust_rounded_up` uses fixed-point approximations with constants like `FEE_ADJUST_MULITPLIER`. This approach risks rounding errors accumulating over time, especially when fees are repeatedly applied. The comment mentions maintaining an invariant `post_fee_adjust(pre_fee_adjust(x)) == x`, but due to integer division truncation and rounding up/down asymmetry, this may not hold in all cases, leading to fee leakage or manipulation.\n\nFourth, in the `sell_exact_in` function, the condition `(base_in + base_reserves).downcast().is_err()` checks for overflow, but this is done after the addition in `u128`, which could already have wrapped around if `base_in + base_reserves > u128::MAX`, though unlikely, it's theoretically possible. More critically, the function uses `quote_swapped_through_bid_including_fee` in `update_pool_reserves_after_sell` but only transfers `quote_swapped_through_bid`, creating a discrepancy in fee accounting.\n\nFinally, the `apply_fees` function assumes that `lp_fees + protocol_fees == total_fees`, but due to integer division truncation in `get_fee_splits`, this may not hold, and the error is caught. However, this indicates a potential inconsistency in fee distribution that could be exploited under specific rounding conditions.\n\nOverall, the most critical issues relate to integer overflow/underflow risks and improper handling of arithmetic invariants, which are common attack vectors in DeFi protocols.\n",
+            "findings": [
+                {
+                    "title": "Potential Integer Overflow in Arithmetic Operations",
+                    "description": "The AMM performs arithmetic operations using u128 upcasting, but several functions like `get_base_out_from_quote_in` use `saturating_add(1)` and `saturating_sub(1)` which can lead to incorrect calculations near boundary values. Additionally, while `.downcast()` checks for u64 overflow, it does not prevent logical errors from precision loss during downcasting after extensive u128 arithmetic.",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Inaccurate Fee Adjustment Due to Rounding Errors",
+                    "description": "The fee adjustment functions `pre_fee_adjust_rounded_up` and `post_fee_adjust_rounded_down` rely on fixed-point approximations using `FEE_ADJUST_MULITPLIER`. Due to asymmetric rounding (up vs down), the invariant `post_fee_adjust(pre_fee_adjust(x)) == x` may not hold in all cases, leading to potential fee leakage or manipulation over repeated operations.",
+                    "category": "CWE-1339",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Mismatch in Fee Accounting During Sell Operations",
+                    "description": "In `sell_exact_in`, the function passes `quote_swapped_through_bid_including_fee` to `update_pool_reserves_after_sell`, but only records `quote_swapped_through_bid` in the swap result. This discrepancy can lead to incorrect reserve updates and fee tracking, potentially allowing manipulation of the pool's state.",
+                    "category": "CWE-182",
+                    "severity": "high",
+                    "confidence": 0.93
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-662",
+            "CWE-193",
+            "CWE-501",
+            "CWE-704",
+            "CWE-834",
+            "CWE-655",
+            "CWE-666",
+            "CWE-669",
+            "CWE-118",
+            "CWE-191",
+            "CWE-182",
+            "CWE-911",
+            "CWE-345",
+            "CWE-841",
+            "CWE-610",
+            "CWE-654",
+            "CWE-778",
+            "CWE-799",
+            "CWE-496",
+            "CWE-807",
+            "CWE-358",
+            "CWE-668",
+            "CWE-372",
+            "CWE-357",
+            "CWE-190",
+            "CWE-1265",
+            "CWE-673",
+            "CWE-362",
+            "CWE-311",
+            "CWE-487",
+            "CWE-135",
+            "CWE-326",
+            "CWE-1229",
+            "CWE-757",
+            "CWE-706",
+            "CWE-705",
+            "CWE-913",
+            "CWE-404",
+            "CWE-369",
+            "CWE-184",
+            "CWE-327",
+            "CWE-424",
+            "CWE-656",
+            "CWE-430",
+            "CWE-221",
+            "CWE-665",
+            "CWE-495",
+            "CWE-128",
+            "CWE-1335",
+            "CWE-1339",
+            "CWE-1329",
+            "CWE-400",
+            "CWE-670",
+            "CWE-410",
+            "CWE-431",
+            "CWE-330",
+            "CWE-768",
+            "CWE-922",
+            "CWE-580"
+        ]
+    ]
+}

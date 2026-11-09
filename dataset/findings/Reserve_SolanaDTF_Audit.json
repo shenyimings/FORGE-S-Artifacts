@@ -1,0 +1,341 @@
+{
+    "path": "reports/frankcastle/Reserve_SolanaDTF_Audit.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/reserve-protocol/reserve-index-dtfs-solana"
+        ],
+        "commit_id": [
+            "5352288a38a28085a63be91ebd23493297ceba4b"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-04-21",
+        "project_path": "contracts/Reserve_SolanaDTF_Audit.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Incorrect token extension check",
+            "description": "The Folio program incorrectly includes TransferFeeConfig in the list of forbidden token extensions, even though it is a mint-only extension according to the SPL Token-2022 specification. This misclassification leads to improper validation, as the program fails to restrict mints that use the TransferFeeConfig extension. The root cause is a logical error in the configuration of forbidden extension types, where TransferFeeConfig is placed in the token extension list instead of the mint extension list. An attacker could exploit this by introducing a token with the TransferFeeConfig extension, which may lead to unexpected behavior during transfers, such as unexpected fee deductions or transaction failures. The impact includes potential loss of funds or disruption of protocol operations due to unhandled token fees.\n",
+            "severity": "high",
+            "location": [
+                "token_util.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/shared/src/utils/token_util.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ],
+                "4": [
+                    "CWE-454"
+                ]
+            },
+            "title": "Multiple simultaneous auctions can be started for the same token pair",
+            "description": "The open_auction function uses init_if_needed to initialize the auction_ends account and blindly overwrites it without checking if an auction for the same token pair is already active. The root cause is the lack of validation in the process_init_if_needed function to prevent re-initialization of ongoing auctions. An attacker or malicious actor could repeatedly trigger the auction start, resetting the end_time and price state, thereby creating multiple overlapping auctions for the same token pair. This could be exploited to delay auction closure, grief bidders, and indefinitely postpone rebalances, which are critical to the protocol's operation. The impact includes denial of service for legitimate bidders and disruption of the rebalancing mechanism.\n",
+            "severity": "high",
+            "location": [
+                "open_auction.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/auction/open_auction.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-909"
+                ]
+            },
+            "title": "Missing basket state update during migration",
+            "description": "During folio migration, the program transfers token balances to a new folio account but fails to update the basket.token_amounts state for the new folio. The root cause is the omission of a call to add_tokens_to_basket on the new folio basket after migration. This leads to incorrect accounting, as the new folio does not recognize the migrated tokens as minted assets. As a result, subsequent mint and burn operations in the new folio will miscalculate values, potentially leading to incorrect token issuance or redemption. The impact is incorrect state representation and potential financial loss due to flawed mint/burn logic in the migrated folio.\n",
+            "severity": "high",
+            "location": [
+                "migrate_folio_tokens.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/owner/migration/migrate_folio_tokens.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "claim_rewards doesn’t claim all rewards",
+            "description": "The claim_rewards function only forwards the first four remaining accounts to the accrue_rewards call, despite the fact that accrue_rewards processes all reward tokens in batches of four accounts. The root cause is a hardcoded index limit (REMAINING_ACCOUNTS_UPPER_INDEX_FOR_ACCRUE_REWARDS = 4) that restricts the number of accounts passed. This results in only the first reward token's rewards being accrued, while others are skipped. Although the function attempts to distribute rewards for all tokens, unaccrued rewards will be zero, leading to users not receiving their full rewards. The impact is financial loss for users holding multiple reward tokens.\n",
+            "severity": "medium",
+            "location": [
+                "claim_rewards.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/rewards/src/instructions/claim_rewards.rs",
+                "reserve-index-dtfs-solana/programs/rewards/src/lib.rs",
+                "reserve-index-dtfs-solana/programs/rewards/src/instructions/accrue_rewards.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-369"
+                ]
+            },
+            "title": "Deferred prices are not handled in permissioned auction opens, leading to DoS",
+            "description": "The open_auction function performs division-by-zero checks for permissionless callers but omits them for permissioned callers when deferred prices are used. The root cause is inconsistent validation logic: while permissionless auctions are blocked when prices are deferred (i.e., zero), permissioned auctions proceed to perform division on these zero values. This leads to a division-by-zero error during price calculation, causing transaction failure. As a result, deferred rebalance configurations become unusable, leading to a denial of service for rebalancing operations. The impact is halted protocol functionality until the rebalance configuration is manually updated.\n",
+            "severity": "medium",
+            "location": [
+                "auction.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/auction/open_auction.rs",
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/auction/open_auction_permissionless.rs",
+                "reserve-index-dtfs-solana/programs/folio/src/utils/accounts/auction.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Possible re-entrancy attack during bids",
+            "description": "The bid function allows a user-specified CPI callback and checks the balance change afterward to ensure funds were received. However, the protection against re-entrancy—blocking CPI calls to the folio program—is insufficient, as an attacker can use a middleman program to call add_to_pending_basket and artificially inflate the balance. The root cause is inadequate validation of callback accounts, allowing indirect access to privileged functions. Although current CPI depth limits prevent exploitation, a future increase in depth could enable this attack. The impact includes unauthorized token deposits and potential theft of auction proceeds.\n",
+            "severity": "medium",
+            "location": [
+                "bid.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/auction/bid.rs",
+                "reserve-index-dtfs-solana/programs/folio/src/utils/external/callback.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Reward tokens once removed cannot be re-added",
+            "description": "When a reward token is removed, its is_disallowed flag is set to true, but there is no mechanism to reset this flag or re-enable the token. The root cause is the absence of functionality in the add_reward_token function to handle previously disallowed tokens. This leads to a permanent exclusion of the token from the reward system, requiring redeployment to re-enable it. The impact is reduced flexibility in reward management and potential loss of functionality if a token needs to be reintroduced.\n",
+            "severity": "low",
+            "location": [
+                "remove_reward_token.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/rewards/src/instructions/add_reward_token.rs",
+                "reserve-index-dtfs-solana/programs/rewards/src/instructions/remove_reward_token.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "The sell_tokens amount should be rounded down",
+            "description": "The calculation for sell_tokens in auction.rs uses ceiling rounding, which can result in a value exceeding the available token supply. The root cause is the use of Rounding::Ceiling in the Decimal conversion, which increases the sell amount unnecessarily. This can cause transactions to revert when the calculated sell amount is greater than the actual balance. The impact is failed auction transactions and potential delays in rebalancing due to repeated reverts.\n",
+            "severity": "low",
+            "location": [
+                "auction.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/folio/src/utils/accounts/auction.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Rebalance nonce doesn’t reflect number of rebalances",
+            "description": "The rebalance nonce is incremented every time start_rebalance is called, regardless of whether the rebalance is finalized. The root cause is the premature increment of the nonce before the rebalance is confirmed via all_rebalance_details_added. This makes the nonce reflect the number of initialization attempts rather than actual finalized rebalances. The impact is inaccurate tracking of rebalance history, which could affect auditing, monitoring, and state-dependent logic.\n",
+            "severity": "low",
+            "location": [
+                "rebalance.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/auction/start_rebalance.rs",
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/auction/add_rebalance_details.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ]
+            },
+            "title": "Unaccrued rewards are lost when reward_token is removed",
+            "description": "When a reward token is removed, future accrue_rewards calls skip calculating rewards for that token due to the is_disallowed check. The root cause is the lack of a final accrual step before disabling the token. Users who did not trigger accrue_rewards before removal lose access to their pending rewards. The impact is permanent loss of user rewards, leading to financial harm and reduced trust in the system.\n",
+            "severity": "low",
+            "location": [
+                "remove_reward_token.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/rewards/src/instructions/remove_reward_token.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "burn_folio_token missing slippage control",
+            "description": "The burn_folio_token function does not accept minimum expected output amounts, leaving users exposed to unfavorable token compositions due to timing changes (e.g., during rebalances). The root cause is the absence of a slippage protection mechanism, unlike the mint function which includes min_raw_shares. An attacker or market movement could manipulate the timing so that users receive fewer or less valuable tokens than expected. The impact is potential financial loss for users during burns.\n",
+            "severity": "low",
+            "location": [
+                "burn_folio_token.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/user/redeem_folio/burn_folio_token.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Incorrect time validation in open_auction",
+            "description": "The open_auction function contains flawed time validation logic that requires the current time to be both before restricted_until and after available_until, which is logically impossible since available_until is always greater than restricted_until. The root cause is a reversal of the intended time window. This leads to auctions never being openable under the specified conditions, resulting in a denial of service for rebalancing. The issue was client-reported and fixed by correcting the comparison logic.\n",
+            "severity": "high",
+            "location": [
+                "auction.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/auction/open_auction.rs",
+                "reserve-index-dtfs-solana/programs/folio/src/utils/accounts/auction.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Improper load_init usage on existing account",
+            "description": "The start_rebalance function incorrectly uses load_init() on an account that may already be initialized via init_if_needed. The root cause is the misuse of load_init(), which fails if the account discriminator is already set. This causes transaction failure when attempting to restart an existing rebalance. The impact is operational disruption and inability to proceed with rebalancing under certain conditions. The issue was fixed by switching to load_mut().\n",
+            "severity": "high",
+            "location": [
+                "start_rebalance.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/auction/start_rebalance.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Incorrect status in fee-distribution",
+            "description": "The start_folio_migration function updates the folio status to Migrating before calling distribute_fees, but distribute_fees only processes fees if the status is Initialized or Killed. The root cause is incorrect ordering of state updates. This causes fee distribution to be skipped during migration. The impact is loss of fee distribution functionality during a critical state transition. The issue was fixed by moving the status update after fee distribution.\n",
+            "severity": "high",
+            "location": [
+                "start_folio_migration.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/owner/migration/start_folio_migration.rs"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Incorrect decimal scaling",
+            "description": "The open_auction function calculates buy_tokens and sell_tokens in 18 decimal scaling, but these values should be in the native decimals of the respective tokens. The root cause is the use of to_scaled without adjusting for token-specific decimals. This leads to incorrect token amounts being used in auctions, potentially causing miscalculations and transaction failures. The impact is incorrect auction mechanics and potential loss of funds. The issue was fixed by using to_token_amount for proper scaling.\n",
+            "severity": "high",
+            "location": [
+                "auction.rs"
+            ],
+            "files": [
+                "reserve-index-dtfs-solana/programs/folio/src/instructions/auction/open_auction.rs"
+            ]
+        }
+    ]
+}

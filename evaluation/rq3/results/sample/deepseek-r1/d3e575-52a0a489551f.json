@@ -1,0 +1,84 @@
+{
+    "project": "04_10_2025_Texture2.0-MR-FV.pdf.json",
+    "files": [
+        "dataset/contracts/04_10_2025_Texture2.0-MR-FV.pdf.json/super-lendy/program/src/processor/reserve.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-697",
+        "CWE-345",
+        "CWE-20",
+        "CWE-1287",
+        "CWE-693"
+    ],
+    "cwe_detected": [
+        "CWE-682",
+        "CWE-435",
+        "CWE-664"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "fees.curator_borrow_fee_rate_bps or fees.curator_performance_fee_rate_bps can't be set to 50% even though the comments say it should be",
+            "description": "1. **Description:** The code uses a strict greater-than check (`> 5000`) instead of greater-than-or-equal, preventing the fee from being set to exactly 50% (5000 basis points), despite comments indicating this should be allowed.\n\n2. **Cause:** A logic inconsistency between the code and its documentation due to the use of `> 5000` instead of `>= 5000`.\n\n3. **Exploitation:** Not exploitable in a malicious sense, but leads to confusion and incorrect configuration expectations.\n\n4. **Impact:** Misalignment between documentation and behavior can lead to incorrect fee settings and user confusion, reducing clarity and maintainability.\n"
+        },
+        {
+            "title": "reserve_mode or flash_loans_enabled can be set to arbitrary value",
+            "description": "1. **Description:** The `alter_reserve` function allows setting `mode` and `flash_loans_enabled` to any `u8` value without validation, even though only specific values (e.g., 0, 1) are meaningful.\n\n2. **Cause:** Lack of input validation on configuration parameters that are treated as enums or booleans in downstream logic.\n\n3. **Exploitation:** Setting invalid values could lead to undefined behavior or misinterpretation of the reserve state.\n\n4. **Impact:** Increases risk of configuration errors and potential logic bugs due to unvalidated inputs.\n"
+        },
+        {
+            "title": "Switchboard confidence interval is not utilized",
+            "description": "1. **Description:** The code checks for price staleness but does not use the confidence interval provided by the Switchboard oracle, which indicates the reliability of the price.\n\n2. **Cause:** Missing integration of the confidence interval in price validation logic.\n\n3. **Exploitation:** An attacker could influence or submit prices with high variance that pass staleness checks but are unreliable.\n\n4. **Impact:** Increases risk of using low-confidence prices in critical operations, potentially leading to incorrect financial decisions.\n"
+        },
+        {
+            "title": "The reward rule can be set to an arbitrary value",
+            "description": "1. **Description:** The `set_reward_rules` function does not validate the `reason` field of reward rules, which should only be 0 (borrowing) or 1 (liquidity).\n\n2. **Cause:** Missing input validation allows arbitrary values to be set for reward rule types.\n\n3. **Exploitation:** Setting invalid rule types could lead to undefined behavior or misattribution of rewards.\n\n4. **Impact:** Could result in incorrect reward distribution logic or future bugs if new code assumes valid values.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The analysis identified two critical security vulnerabilities. First, the `create_reserve` function lacks initialization checks, allowing malicious actors to overwrite existing reserve accounts. Second, the `flash_repay` function fails to account for possible reserve refreshes between flash borrow and repay operations in the same transaction, leading to under-repayment of accrued interest. Additionally, an improper comparison was found in `refresh_reserve` where stale price detection could fail due to incorrect variable casting. These issues stem from improper access control, incorrect lifetime management, and calculation errors respectively.\n",
+            "findings": [
+                {
+                    "title": "Missing Initialization Check in Reserve Creation",
+                    "description": "The `create_reserve` function does not verify if the reserve account is already initialized before writing data. This allows malicious actors to overwrite existing reserve accounts by reusing them, potentially destroying existing state and enabling fund theft.\n",
+                    "category": "CWE-664",
+                    "severity": "critical",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Flash Repay Ignores Interest Accrual During Transaction",
+                    "description": "The `flash_repay` function does not account for possible interest accrual if the reserve is refreshed between flash borrow and repay operations in the same transaction. This results in under-repayment as interest accrued during the flash loan period is not captured, leading to reserve imbalance.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Improper Comparison in Price Staleness Check",
+                    "description": "In `refresh_reserve`, the price staleness threshold comparison casts `price_stale_threshold_sec` (u64) to i64 without validation. This may cause incorrect calculations if threshold values exceed i64::MAX, potentially bypassing stale price detection.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

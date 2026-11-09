@@ -1,0 +1,134 @@
+{
+    "project": "blocksec_ref_token-locker-v2.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_token-locker-v2.0-signed.pdf.json/contracts/contract/src/account.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-664",
+        "CWE-666",
+        "CWE-405",
+        "CWE-400",
+        "CWE-408"
+    ],
+    "cwe_detected": [
+        "CWE-755",
+        "CWE-285",
+        "CWE-435",
+        "CWE-284",
+        "CWE-346",
+        "CWE-703"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Lack of charging NEAR in function withdraw",
+            "description": "The `withdraw()` function initiates token transfers via `transfer_token()`, which requires attaching 1 yocto NEAR. However, the contract—not the user—bears this cost because no NEAR is required from the caller. The `withdraw()` function does not enforce the user to attach a minimal amount of NEAR, leaving the contract to cover transaction fees for token transfers. An attacker could repeatedly call `withdraw()` to drain the contract’s NEAR balance, especially in scenarios with high gas costs or frequent withdrawals. The contract may deplete its NEAR balance, preventing future token transfers and disrupting service for all users.\n"
+        },
+        {
+            "title": "Incorrect update on unlock_time_sec in function after_token_burn()",
+            "description": "In the `after_token_burn()` callback function, when a token transfer fails and the system rolls back the state, the `unlock_time_sec` is incorrectly set to the current timestamp if all tokens were burned. The rollback logic fails to preserve the original `unlock_time_sec` value, instead overwriting it with the current time, which breaks the intended lock-up duration. An attacker could trigger a failed burn transaction (e.g., by making the recipient reject funds), causing the unlock time to reset to the present, thereby bypassing the time lock. Users could prematurely withdraw locked assets by exploiting the incorrect state rollback, undermining the core time-locking functionality of the contract.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract contains several security issues rooted in improper access control, incorrect handling of exceptional conditions, and improper interaction between entities. \n\nFirst, the `withdraw` function allows a user to withdraw tokens that are locked only if the unlock time has passed. However, the function removes the lock entry from the map before checking whether the transfer was successful. The actual transfer is asynchronous, and its outcome is only confirmed in the `after_token_transfer` callback. If the transfer fails (e.g., due to a receiver hook failure), the lock is not restored unless the callback can reconstruct it. While the `after_token_transfer` attempts to restore the balance on failure, it does not reinsert the `unlock_time_sec` if the token wasn't already locked — this could lead to unlocked funds being re-locked with a potentially incorrect (current) timestamp, weakening the lock mechanism.\n\nSecond, the `after_token_transfer` function tries to handle failed transfers by restoring the locked balance. However, if the account was not previously registered (i.e., `internal_get_account` returns `None`), the event is emitted but no state recovery occurs. This results in a loss of funds with no restoration of locks, and the system fails to protect user assets on failure — a failure to properly handle exceptional conditions.\n\nThird, the `withdraw` function does not validate whether the caller owns the lock or if the lock belongs to them — it assumes that because the account is retrieved via `predecessor_account_id`, it is safe. However, the logic for removing and modifying the lock is done before the transfer, and the lock state is not protected during the asynchronous operation. This creates a time-of-check, time-of-use (TOCTOU) vulnerability where the lock is removed before the transfer completes, and in case of failure, the restoration logic may not fully reconstruct the original state.\n\nFinally, the `after_token_transfer` function is marked as `#[private]`, which ensures only the contract itself can call it, protecting against external manipulation. However, there is no validation that the `account_id` passed into `after_token_transfer` matches the original withdrawal request, opening a potential vector for manipulation if the promise chain is spoofed (though NEAR's promise system mitigates this, it's still a critical assumption).\n\nThese issues stem from improper access control (CWE-284) due to insufficient validation of state transitions, improper handling of exceptional conditions (CWE-703) in failure recovery, and improper interaction between components (CWE-435) between `withdraw` and `after_token_transfer`.\n",
+            "findings": [
+                {
+                    "title": "Improper Handling of Failed Withdrawals Can Lead to Inconsistent Lock State",
+                    "description": "In the `withdraw` function, the lock is removed from the account before the transfer is executed. If the transfer fails, the `after_token_transfer` callback attempts to restore the locked balance, but it may not preserve the original `unlock_time_sec` if the token was not already locked. This can result in a weaker lock (with an earlier unlock time) or inconsistent state, violating the intended locking mechanism.",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Funds and Lock State Lost for Unregistered Accounts on Transfer Failure",
+                    "description": "If `after_token_transfer` is called with an `account_id` that is not registered (i.e., `internal_get_account` returns `None`), the failed transfer results in no state restoration. The locked balance is not restored, and the funds are effectively lost with only an event emitted. This represents a failure to handle exceptional conditions properly, risking permanent fund loss.",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "TOCTOU-like Race Condition in Lock Management During Withdrawal",
+                    "description": "The `withdraw` function removes the `LockInfo` from the map before the transfer is confirmed. Since the transfer is asynchronous, there is a window where the lock is gone but the transfer may fail. Although the callback attempts to restore state, the original `unlock_time_sec` might not be preserved, leading to potential early unlocking. This improper sequencing constitutes an improper interaction between components (withdrawal logic and callback handler).",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.93
+                },
+                {
+                    "title": "Lack of Validation in after_token_transfer Enables Potential State Manipulation",
+                    "description": "The `after_token_transfer` function does not validate that the `account_id`, `token_id`, and `amount` match a pending withdrawal. While it is private, a compromised or misrouted promise could trigger it with arbitrary values, potentially restoring locks for non-existent withdrawals. This lack of input validation weakens the protection mechanism.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract contains several security issues related to access control and validation. First, the `withdraw` function allows any user to initiate a withdrawal for their own account, but it does not validate whether the caller is authorized to withdraw from the specific token lock. While it checks if the lock has expired, it assumes that removing and modifying the lock is safe once time-based conditions are met. However, there is no validation that the caller owns the locked tokens beyond being the account owner — which is assumed via `env::predecessor_account_id()`. This could be acceptable in context, but the larger issue lies in the `after_token_transfer` function.\n\nThe `after_token_transfer` function is marked as `#[private]`, meaning it should only be callable by the contract itself after a cross-contract call. However, NEAR's `#[private]` annotation relies on `env::current_account_id()` to validate the caller. If this check is not enforced correctly (e.g., due to misconfiguration or future changes), an external actor might spoof this call, leading to improper restoration of locked balances — a serious vulnerability.\n\nAdditionally, in `withdraw`, after removing the lock, the function proceeds to transfer tokens without confirming the target `token_id` corresponds to a valid and registered token. The `parse_token_id` function is used, but its implementation is not provided, creating a potential for incorrect parsing or unvalidated inputs leading to unintended behavior.\n\nFurthermore, the `transfer_token` function attaches a deposit of 1 yoctoNEAR, which is standard for access key validation, but if the target token contract does not enforce this strictly, the transfer might succeed without proper authorization. There is also no check in `withdraw` that the amount being withdrawn matches actual available balance outside of the lock — the contract assumes the lock is the only source of truth, which may not hold if other balances are managed externally.\n\nThese issues point primarily to improper authorization (CWE-285), origin validation errors (CWE-346), and improper handling of exceptional conditions (CWE-755), especially in post-transfer logic.\n",
+            "findings": [
+                {
+                    "title": "Improper Authorization in withdraw Function",
+                    "description": "The `withdraw` function allows a user to withdraw locked tokens after the unlock time, but it does not verify that the withdrawal amount corresponds to actually available balances or enforce proper authorization beyond time-based unlocking. It assumes the caller is legitimate based on account ID, but does not validate ownership of the locked funds in a broader context, potentially allowing abuse if locks are not correctly maintained.",
+                    "category": "CWE-285",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Origin Validation Error in after_token_transfer",
+                    "description": "The `after_token_transfer` function is marked as `#[private]`, relying on NEAR's runtime to restrict calls to the contract itself. However, this depends on correct enforcement of caller identity via `env::current_account_id()`. If this check fails or is bypassed, an attacker could manually invoke this function to re-inflate locked balances after a failed withdrawal, leading to double-spending or balance manipulation. This constitutes an origin validation error.",
+                    "category": "CWE-346",
+                    "severity": "critical",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Improper Handling of Exceptional Conditions in after_token_transfer",
+                    "description": "In `after_token_transfer`, when a transfer fails, the contract attempts to restore the locked balance. However, if the account no longer exists (i.e., `internal_get_account` returns `None`), the function emits a lost-found event but does not attempt any recovery or logging that would alert administrators. This silent failure to handle a critical error condition could lead to fund loss without detection, indicating improper handling of exceptional conditions.",
+                    "category": "CWE-755",
+                    "severity": "medium",
+                    "confidence": 0.9
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-269",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-393",
+            "CWE-1038",
+            "CWE-188",
+            "CWE-1270",
+            "CWE-436",
+            "CWE-923",
+            "CWE-1267",
+            "CWE-439",
+            "CWE-228",
+            "CWE-397",
+            "CWE-282",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-754",
+            "CWE-755"
+        ]
+    ]
+}

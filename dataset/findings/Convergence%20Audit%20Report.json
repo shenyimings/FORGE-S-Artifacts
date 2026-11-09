@@ -1,0 +1,188 @@
+{
+    "path": "reports/Convergence%20Audit%20Report.pdf",
+    "project_info": {
+        "url": "https://github.com/convergence-rfq/rfq",
+        "commit_id": "9a64a06",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-07-25",
+        "project_path": "contracts/Convergence%20Audit%20Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Cancel Instruction Works on Confirmed RFQ",
+            "description": "This vulnerability allows the taker to cancel an RFQ even after it has been confirmed and settled, which prevents the maker from settling their side of the order. The root cause lies in the access control logic for the `cancel` instruction, which fails to check whether the RFQ has already been confirmed. An attacker (the taker) can exploit this by calling the Confirm, Settle, and then Cancel instructions in sequence, effectively locking the maker's funds in escrow permanently. The impact is a loss of funds for the maker, as they are unable to withdraw or settle due to the cancellation status enforced by the Settle instruction.\n",
+            "severity": "high",
+            "files": [
+                "programs/rfq/src/access_controls.rs"
+            ],
+            "location": [
+                "cancel_access_control#76-90"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Unchecked psy_american_program Address",
+            "description": "The program performs CPI calls to the `psy_american_program` without validating its address, allowing any arbitrary program to be specified. This occurs in both the `InitializeAmericanOptionMarket` and `MintAmericanOption` instructions, where the account is marked with a `/// CHECK: TODO` comment, indicating a missing validation. A malicious user can set the `psy_american_program` to a fake or malicious program that simulates successful execution, tricking the system into marking operations as processed without actual validation. This could lead to unauthorized state changes or bypassing of critical logic, resulting in potential loss of funds or incorrect state transitions.\n",
+            "severity": "low",
+            "files": [
+                "programs/rfq/src/psyoptions/instructions.rs"
+            ],
+            "location": [
+                "InitializeAmericanOptionMarket#14",
+                "MintAmericanOption#70"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Reduced Fee Due To Miscalculation",
+            "description": "The fee calculation in the `Settle` instruction uses an incorrect order of operations\u2014division is performed before multiplication\u2014leading to truncation and significantly reduced fee amounts. For example, with an order amount of 99, a fee numerator of 15, and a denominator of 100, the calculated fee becomes zero instead of the expected 14. This miscalculation benefits users at the expense of the protocol\u2019s revenue. The root cause is the use of `(amount / denominator) * numerator` instead of the more precise `(amount * numerator) / denominator`. While this does not directly lead to loss of funds, it results in a material reduction in protocol fees, especially for smaller order amounts.\n",
+            "severity": "informational",
+            "files": [
+                "programs/rfq/src/instructions.rs"
+            ],
+            "location": [
+                "Settle#337-342"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unnecessary Owner Checks for State Accounts",
+            "description": "The code includes redundant owner checks for Anchor-managed state accounts (e.g., `Account<'info, ProtocolState>`), even though Anchor automatically validates the account owner against the program ID. These checks, such as `constraint = protocol.to_account_info().owner == program_id`, are unnecessary and represent a code antipattern. While they do not introduce direct security risks, they increase code complexity and gas usage unnecessarily. Removing them simplifies the code and aligns with Anchor best practices, reducing the risk of future errors during maintenance.\n",
+            "severity": "informational",
+            "files": [
+                "programs/rfq/src/states.rs"
+            ],
+            "location": [
+                "ProtocolState#39"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unnecessary Treasury Wallet Field in Protocol State",
+            "description": "The `ProtocolState` struct includes a `treasury_wallet` field intended to receive fees, but the actual recipient of fees depends dynamically on the escrow type (asset or quote), making a fixed treasury wallet unusable. This field serves no functional purpose and increases storage costs. The vulnerability stems from a design oversight where the fee destination was assumed to be static. Although this does not lead to immediate security issues, it wastes resources and may mislead developers about the fee flow logic.\n",
+            "severity": "informational",
+            "files": [
+                "programs/rfq/src/states.rs"
+            ],
+            "location": [
+                "ProtocolState#74"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing Check During Fee Initialization",
+            "description": "The program does not validate that `fee_numerator < fee_denominator` during initialization or updates of fee parameters. If `fee_numerator` exceeds `fee_denominator`, the computed fee amount could exceed the order amount, causing arithmetic underflow when subtracting the fee from the order. This would cause the transaction to fail and potentially render the protocol unusable until the fees are corrected. The root cause is the absence of a validation constraint in `initialize_access_control` and `set_fee_access_control`. This could lead to denial of service if invalid fees are set.\n",
+            "severity": "informational",
+            "files": [
+                "programs/rfq/src/access_controls.rs"
+            ],
+            "location": [
+                "initialize_access_control#17",
+                "set_fee_access_control#35"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Taker Can Cancel RFQs With Responses",
+            "description": "The `cancel_access_control` function does not enforce the documented requirement that an RFQ must have no responses before cancellation. Although the docstring states this condition, the code omits a check for `best_bid_amount.is_none()` and `best_ask_amount.is_none()`. This allows a taker to cancel an RFQ after receiving responses, preventing makers from settling and potentially leading to fund lockup. The impact is a partial denial of service for makers and undermines the fairness of the RFQ lifecycle.\n",
+            "severity": "informational",
+            "files": [
+                "programs/rfq/src/access_controls.rs"
+            ],
+            "location": [
+                "cancel_access_control#76-90"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Taker Can Confirm Cancelled RFQs",
+            "description": "The `confirm_access_control` function does not check whether an RFQ has been cancelled before allowing confirmation. As a result, a taker can confirm a previously cancelled RFQ, which leads to a state where neither party can settle because the Settle instruction rejects cancelled RFQs. This results in permanent locking of both taker and maker funds. The root cause is the missing `require!(!rfq.canceled, ...)` check in the confirmation logic, which violates the expected state machine transitions.\n",
+            "severity": "informational",
+            "files": [
+                "programs/rfq/src/access_controls.rs"
+            ],
+            "location": [
+                "confirm_access_control#174-188"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,294 @@
+{
+    "project": "Sponsored CCTP Deposits from Solana Audit.md.json",
+    "files": [
+        "dataset/contracts/Sponsored CCTP Deposits from Solana Audit.md.json/programs/sponsored-cctp-src-periphery/src/instructions/deposit.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2777777777777778,
+        "recall": 0.45454545454545453,
+        "f1": 0.3448275862068966
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-664",
+        "CWE-223",
+        "CWE-691",
+        "CWE-1284",
+        "CWE-666",
+        "CWE-841",
+        "CWE-221",
+        "CWE-405",
+        "CWE-400",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-406",
+        "CWE-664",
+        "CWE-697",
+        "CWE-672",
+        "CWE-404",
+        "CWE-682",
+        "CWE-666",
+        "CWE-284",
+        "CWE-770",
+        "CWE-668",
+        "CWE-703",
+        "CWE-662",
+        "CWE-400",
+        "CWE-405",
+        "CWE-826",
+        "CWE-501"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Program-Sponsored Rents Allow Cheap Griefing That Starves rent_fund and Triggers Repeated Temporary DoS",
+            "description": "This vulnerability arises from the cost asymmetry in the deposit_for_burn function, where the program sponsors rent for both the UsedNonce PDA and the CCTP v2 MessageSent account. The attacker can submit deposits with minimal token amounts while maximizing the hook data size, which increases the rent cost for the MessageSent account. The root cause is the lack of on-chain enforcement of minimum deposit amounts and message size limits, combined with the off-chain quote generator not sufficiently restricting these parameters. An attacker can exploit this by repeatedly submitting such deposits, draining the rent_fund and preventing new sponsored deposits. The impact is a recurring, temporary denial of service (DoS), as the rent_fund must be replenished and the five-day reclaim window delays recovery, allowing the attacker to re-trigger the DoS at low cost.\n"
+        },
+        {
+            "title": "Destination Hook Fails Can Permanently Lock Funds",
+            "description": "The deposit_for_burn function invokes CCTP v2's deposit_for_burn_with_hook, which irreversibly burns tokens on the source chain before confirming successful execution on the destination. If the destination hook fails due to time-sensitive conditions or changing state, the transfer cannot be reversed or rescued under CCTP v2, as it lacks a replacement or unburn mechanism. The root cause is the irreversible nature of the burn operation combined with the dependency on external, potentially failing logic on the destination chain. An attacker or unfortunate user could trigger a burn where the destination conditions are not met, leading to permanent fund lockup. The impact is the permanent loss of user funds when destination-side hooks revert, even if the failure is due to transient or predictable conditions.\n"
+        },
+        {
+            "title": "Missing Rent-Fund Balance Precheck Causes Late Revert and Poor UX in deposit_for_burn",
+            "description": "The deposit_for_burn instruction does not perform an early check on the rent_fund balance before attempting to refund the user for the UsedNonce account creation. The root cause is the absence of a pre-validation step to ensure sufficient lamports are available in the rent_fund. An attacker or regular user could submit transactions when the rent_fund is low, causing the transaction to revert during the refund step after computation has already been consumed. The impact is a poor user experience and wasted transaction fees due to late reverts, as well as inefficient use of compute units, especially under high load or when the fund is near depletion.\n"
+        },
+        {
+            "title": "Repeated PDA Bump Search Wastes Compute Units",
+            "description": "The program derives the rent_fund and state PDAs without storing their bump seeds, forcing Anchor to perform a runtime search for valid bump values on every invocation. The root cause is the omission of persisted bump values in account constraints. This increases compute unit consumption, especially in high-frequency paths like deposit_for_burn. An attacker could exploit this by triggering these paths repeatedly, increasing network load and potentially causing transactions to fail due to compute limits. The impact is inflated and variable compute costs, leading to performance instability and higher transaction failure rates under load.\n"
+        },
+        {
+            "title": "Oversized CCTP Messages Can Permanently Lock Rent in MessageSent Event Accounts",
+            "description": "The deposit_for_burn function allows CCTP messages that are large enough to make the reclaim_event_account transaction exceed Solana's packet size limit due to the inclusion of the attestation with multiple signatures. The root cause is the lack of an upper bound on message size during deposit, which allows creation of MessageSent accounts that cannot be reclaimed. An attacker can exploit this by submitting deposits with messages near the size limit, causing deposit_for_burn to succeed but making reclaim_event_account always fail. The impact is permanent loss of rent funds and a griefing vector that can drain the rent_fund, disrupting service and requiring manual replenishment.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After thorough analysis of the provided Solana smart contract code, I have identified several security issues stemming from the candidate CWE root causes:\n\n1. **CWE-284 (Improper Access Control)**: The `reclaim_used_nonce_account` function lacks access control. Any user can call this function to close a `used_nonce` account after its deadline has passed, causing the rent to be transferred to the `rent_fund` PDA. While this might be intentional for cleanup purposes, there's no restriction on who can trigger this action. This could be exploited by malicious actors to interfere with the protocol's rent management or to front-run legitimate reclaim operations.\n\n2. **CWE-682 (Incorrect Calculation)**: In the `refund_used_nonce_creation` function, the refund calculation uses `anchor_rent.minimum_balance(space)` to determine the lamports to refund. However, the comment acknowledges that \"Actual cost for the user might have been lower if somebody had pre-funded the used_nonce account.\" This means the calculation doesn't account for the actual amount paid by the user, potentially leading to incorrect refunds. If the account was pre-funded, the user receives a refund for rent they didn't pay, which is an economic vulnerability.\n\n3. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: The `reclaim_event_account` function doesn't validate the `message_sent_event_data` account's relationship to the current protocol state. While it relies on CCTP's validation, there's no check to ensure this event account was created by this specific protocol instance. An attacker could potentially pass an event account from a different transaction, causing the rent to be reclaimed to the `rent_fund` when it shouldn't be.\n\n4. **CWE-691 (Insufficient Control Flow Management)**: The `deposit_for_burn` function performs a CPI call to CCTP's `deposit_for_burn_with_hook` without verifying the success of the `refund_used_nonce_creation` operation in a way that would prevent state inconsistency. If the refund fails but the CCTP call succeeds, the user loses their refund but the deposit proceeds. While Anchor's error handling should prevent this, the control flow doesn't explicitly handle partial failure scenarios.\n\n5. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The `used_nonce` account is created in `deposit_for_burn` and can be closed in `reclaim_used_nonce_account`, but there's no mechanism to prevent the account from being closed while a related CCTP message is still in flight or being processed. If the nonce account is closed prematurely (right after the deadline passes but before destination processing completes), it could lead to replay protection issues or state inconsistencies.\n\n6. **CWE-697 (Incorrect Comparison)**: In `reclaim_used_nonce_account`, the comparison `ctx.accounts.used_nonce.quote_deadline >= get_current_time(&ctx.accounts.state)?` uses `>=` which means the account can be closed exactly at the deadline timestamp. However, this might be too early if there's any clock drift or if the quote is still being processed at exactly the deadline time. The comparison should likely be `>` to ensure a safety margin.\n",
+            "findings": [
+                {
+                    "title": "Missing Access Control in reclaim_used_nonce_account Function",
+                    "description": "The reclaim_used_nonce_account function allows any caller to close a used_nonce account after its deadline, transferring rent to the rent_fund PDA. There is no access control mechanism to restrict who can perform this action, potentially allowing malicious actors to interfere with the protocol's rent management or front-run legitimate reclaim operations.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Incorrect Refund Calculation in refund_used_nonce_creation",
+                    "description": "The refund calculation uses anchor_rent.minimum_balance(space) without accounting for the actual amount paid by the user. If the used_nonce account was pre-funded, the user receives a refund for rent they didn't actually pay, leading to incorrect economic outcomes and potential exploitation.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient Validation of message_sent_event_data in reclaim_event_account",
+                    "description": "The reclaim_event_account function doesn't validate that the message_sent_event_data account was created by this specific protocol instance. While it relies on CCTP validation, an attacker could potentially pass an event account from a different transaction, causing rent to be reclaimed inappropriately.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Premature used_nonce Account Closure Risk",
+                    "description": "The used_nonce account can be closed immediately after the quote deadline passes, but there's no mechanism to ensure the related CCTP message has been fully processed on the destination chain. This could lead to replay protection issues or state inconsistencies if the account is closed while the message is still in flight.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Incorrect Deadline Comparison in reclaim_used_nonce_account",
+                    "description": "The comparison 'quote_deadline >= get_current_time()' allows the account to be closed exactly at the deadline timestamp. This might be too early if there's clock drift or if the quote is still being processed at the deadline. The comparison should use '>' to provide a safety margin.",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Missing Access Control in reclaim_event_account Function",
+                    "description": "Similar to reclaim_used_nonce_account, the reclaim_event_account function lacks access control restrictions. Any user can call this function to reclaim event account rent to the rent_fund PDA, potentially interfering with the protocol's intended rent management flow.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "After thoroughly analyzing the provided Solana smart contract code against the specified CWE candidates, I have identified several security issues:\n\n1. **CWE-404: Improper Resource Shutdown or Release** - The `used_nonce` account is created during `deposit_for_burn` but its closure is deferred to a separate function `reclaim_used_nonce_account`. If the quote deadline is never reached or if `reclaim_used_nonce_account` is never called, the account remains open indefinitely, consuming rent and potentially leading to resource exhaustion. The refund mechanism in `refund_used_nonce_creation` attempts to compensate the user, but the account itself is not properly released in all execution paths.\n\n2. **CWE-400: Uncontrolled Resource Consumption** - An attacker can create multiple `used_nonce` accounts by calling `deposit_for_burn` with different nonces. While each individual account requires rent, there's no limit on how many such accounts can be created. This could lead to resource exhaustion of the `rent_fund` account or blockchain storage. The contract doesn't implement any rate limiting or maximum account creation controls.\n\n3. **CWE-665: Improper Initialization** - The `used_nonce` account is initialized with only the `quote_deadline` field set in `deposit_for_burn`. The `UsedNonce` struct's complete initialization state is not visible in this code snippet, but the pattern suggests potential for incomplete initialization if additional fields exist in the struct definition.\n\n4. **CWE-668: Exposure of Resource to Wrong Sphere** - The `message_sent_event_data` account is passed as a `Signer` in `DepositForBurn`, meaning the caller controls this account. This account is then used in CCTP operations and later in `reclaim_event_account`. The contract exposes control of this critical resource to external actors without sufficient validation of its state or ownership, potentially allowing manipulation of event data or rent reclamation.\n\n5. **CWE-501: Trust Boundary Violation** - The contract mixes trusted data (state-controlled parameters) with untrusted user input (quote parameters) without clear separation. The `quote` structure contains both user-controlled data and security-critical parameters like `destination_domain`, `mint_recipient`, and `destination_caller`. While signature validation is performed, the quote data itself crosses trust boundaries and is used directly in CPI calls to CCTP without additional sanitization.\n\n6. **CWE-662: Improper Synchronization** - The `used_nonce` account is created with the `init` constraint to prevent reuse, but there's a race condition window. Between the time the account is created and when the CCTP operation completes, if the transaction fails after account creation but before the CCTP burn, the nonce is consumed but the operation didn't complete. This could lead to denial of service for legitimate users with valid quotes.\n\n7. **CWE-666: Operation on Resource in Wrong Phase of Lifetime** - The `reclaim_event_account` function operates on the `message_sent_event_data` account without verifying its current state or lifecycle phase. It assumes the account is in a reclaimable state but doesn't validate whether the associated CCTP message was actually sent or processed.\n",
+            "findings": [
+                {
+                    "title": "Improper Resource Shutdown - Used Nonce Account Not Guaranteed to Close",
+                    "description": "The `used_nonce` account created in `deposit_for_burn` relies on a separate `reclaim_used_nonce_account` function for closure. If this function is never called (e.g., quote deadline never passes or user doesn't reclaim), the account remains open indefinitely, consuming rent and storage resources. While the user is refunded via `refund_used_nonce_creation`, the account itself is not properly released in all execution paths.",
+                    "category": "CWE-404",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Uncontrolled Resource Consumption via Unlimited Used Nonce Account Creation",
+                    "description": "An attacker can create an unlimited number of `used_nonce` accounts by calling `deposit_for_burn` with different nonces. Each account consumes rent from the `rent_fund` and blockchain storage. There are no rate limits, maximum account caps, or other controls to prevent resource exhaustion attacks. This could drain the `rent_fund` or consume excessive storage.",
+                    "category": "CWE-400",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Exposure of Message Event Data Account to Wrong Sphere",
+                    "description": "The `message_sent_event_data` account is controlled by the caller (passed as `Signer`) and used in critical CCTP operations and later reclamation. The contract exposes control of this resource to external actors without sufficient validation of its state, ownership, or integrity. This could allow manipulation of event data or unauthorized rent reclamation if the account is reused or manipulated between operations.",
+                    "category": "CWE-668",
+                    "severity": "high",
+                    "confidence": 0.82
+                },
+                {
+                    "title": "Trust Boundary Violation in Quote Parameter Handling",
+                    "description": "The contract mixes trusted state data with untrusted user-provided quote parameters without clear separation. The `quote` structure contains security-critical parameters like `destination_domain`, `mint_recipient`, and `destination_caller` that are user-controlled. While signature validation is performed, the quote data crosses trust boundaries and is used directly in CPI calls to CCTP. Additional validation or sanitization of individual quote fields against expected ranges or formats is missing.",
+                    "category": "CWE-501",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Race Condition in Used Nonce Account Creation and CCTP Operation",
+                    "description": "There's a race condition between `used_nonce` account creation and CCTP operation completion. If the transaction fails after the account is created but before the CCTP burn completes, the nonce is consumed but the operation didn't succeed. This creates a denial-of-service vector where legitimate users with valid quotes cannot retry because their nonce is already marked as used.",
+                    "category": "CWE-662",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Operation on Message Event Data in Wrong Lifecycle Phase",
+                    "description": "The `reclaim_event_account` function operates on `message_sent_event_data` without verifying its current state or lifecycle phase. It assumes the account is in a reclaimable state but doesn't validate whether the associated CCTP message was actually sent, processed, or is in the correct state for reclamation. This could lead to premature or invalid reclamation attempts.",
+                    "category": "CWE-666",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Potential Incomplete Initialization of Used Nonce Account",
+                    "description": "The `used_nonce` account is initialized with only the `quote_deadline` field explicitly set in `deposit_for_burn`. Without visibility into the complete `UsedNonce` struct definition, there's a risk that other fields may not be properly initialized, potentially leaving the account in an inconsistent state. The initialization pattern suggests potential for incomplete state setup.",
+                    "category": "CWE-665",
+                    "severity": "low",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "After thoroughly analyzing the provided Solana smart contract code against the specified CWE candidates, I have identified several potential security issues:\n\n1. **CWE-672: Operation on a Resource after Expiration or Release**\n   - In the `deposit_for_burn` function, the `used_nonce` account is initialized and then immediately used. However, there's a potential issue where the `message_sent_event_data` account (a Signer) could be reused or operated on after the transaction completes. More critically, the `reclaim_event_account` function operates on `message_sent_event_data` which may have already been reclaimed or closed by CCTP, leading to operations on expired resources.\n   - The `refund_used_nonce_creation` function transfers lamports from `rent_fund` before the main operation completes. If the subsequent CCTP call fails, the refund has already been processed, potentially leading to inconsistent state.\n\n2. **CWE-770: Allocation of Resources Without Limits or Throttling**\n   - The contract creates a new `used_nonce` account for every deposit without any rate limiting or maximum account creation restrictions. An attacker could spam the network by creating numerous `used_nonce` accounts with different nonces, consuming storage space and potentially exhausting the `rent_fund` balance through repeated refunds.\n   - The `rent_fund` account transfers lamports to users without checking if it has sufficient balance or implementing any throttling mechanism. This could lead to resource exhaustion.\n\n3. **CWE-826: Premature Release of Resource During Expected Lifetime**\n   - The `refund_used_nonce_creation` function prematurely transfers rent back to the user before the CCTP operation completes. If the CCTP `deposit_for_burn_with_hook` call fails after the refund, the user has received funds but the operation didn't complete, creating an inconsistent state.\n   - The `used_nonce` account is marked for closure in `reclaim_used_nonce_account` but the timing check only validates against `quote_deadline`. If the CCTP message hasn't been fully processed on the destination chain, closing this account prematurely could cause issues with replay protection.\n\n4. **CWE-405: Asymmetric Resource Consumption (Amplification)**\n   - An attacker can force the protocol to allocate resources (create `used_nonce` accounts) and consume rent from `rent_fund` by submitting deposits with minimal cost to themselves but maximum cost to the protocol. The refund mechanism means the protocol bears the cost of account creation even if the user's transaction ultimately fails.\n   - The lack of minimum deposit amounts or fees means an attacker could create many small deposits, each consuming protocol resources disproportionate to the value transferred.\n",
+            "findings": [
+                {
+                    "title": "Operation on Potentially Reclaimed Event Account",
+                    "description": "The `reclaim_event_account` function operates on `message_sent_event_data` which may have already been closed or reclaimed by CCTP. There's no validation to ensure the account is still active before attempting to reclaim it, potentially leading to operations on expired resources.",
+                    "category": "CWE-672",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Premature Refund Before Operation Completion",
+                    "description": "The `refund_used_nonce_creation` function transfers lamports from `rent_fund` to the user before the CCTP `deposit_for_burn_with_hook` operation completes. If the CCTP call fails, the user has already received the refund, creating an inconsistent state where resources are released prematurely.",
+                    "category": "CWE-826",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unlimited Used Nonce Account Creation",
+                    "description": "The contract allows unlimited creation of `used_nonce` accounts without rate limiting or maximum account restrictions. An attacker can spam the network by creating numerous accounts with different nonces, consuming storage space and potentially exhausting the `rent_fund` balance through repeated refunds.",
+                    "category": "CWE-770",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Rent Fund Depletion Without Balance Checks",
+                    "description": "The `refund_used_nonce_creation` function transfers lamports from `rent_fund` without verifying sufficient balance. Repeated deposits could drain the `rent_fund` account, causing the protocol to fail when attempting refunds, leading to resource exhaustion.",
+                    "category": "CWE-770",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Asymmetric Resource Consumption via Deposit Spam",
+                    "description": "An attacker can submit numerous small deposits with different nonces, forcing the protocol to allocate `used_nonce` accounts and consume rent from `rent_fund`. The cost to the attacker is minimal (just transaction fees) while the protocol bears disproportionate costs for account creation and rent refunds, enabling resource amplification attacks.",
+                    "category": "CWE-405",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Premature Used Nonce Account Closure",
+                    "description": "The `reclaim_used_nonce_account` function closes the `used_nonce` account based solely on `quote_deadline` without verifying that the CCTP message has been fully processed on the destination chain. Premature closure could compromise replay protection if the message is still in transit or being processed.",
+                    "category": "CWE-826",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "After thoroughly analyzing the provided Solana smart contract code against the specified CWE candidates, I have examined each potential vulnerability category:\n\n1. **CWE-407 (Inefficient Algorithmic Complexity)**: The code uses straightforward operations without nested loops or complex algorithms that could be exploited for DoS attacks.\n\n2. **CWE-408 (Early Amplification)**: The `deposit_for_burn` function does perform a refund operation (`refund_used_nonce_creation`) before the main CCTP bridge operation, but this is not an expensive operation that could be exploited. The actual expensive operation (CCTP bridge) happens after validation.\n\n3. **CWE-409 (Data Amplification)**: No compressed data handling is present in the code.\n\n4. **CWE-1094 (Excessive Index Range Scan)**: No database or large data table scanning operations are present.\n\n5. **CWE-776 (XML Entity Expansion)**: No XML processing is present in the code.\n\n6. **CWE-406 (Network Amplification)**: The code does make CPI calls to external programs (CCTP), but these are necessary for the protocol's functionality and are properly validated. However, there is a potential concern: the `deposit_for_burn` function allows users to trigger multiple expensive CPI calls (to CCTP programs) without significant upfront cost beyond transaction fees. While signature validation is performed, an attacker could potentially generate many valid signatures and flood the system with deposit requests, causing resource amplification through the CCTP bridge operations.\n\n7. **CWE-1084 (Excessive File/Data Access)**: The code accesses multiple accounts but this is necessary for the Solana program model and CCTP integration.\n\n8. **CWE-1176 (Inefficient CPU Computation)**: The signature validation and other operations appear reasonably efficient. No obvious inefficient algorithms detected.\n\n9. **CWE-1072 (No Connection Pooling)**: Not applicable to Solana smart contracts.\n\n10. **CWE-1050 (Resource Consumption in Loop)**: No loops that consume platform resources are present in the code.\n\nUpon careful analysis, I identified one potential issue related to CWE-406 (Network Amplification). The `deposit_for_burn` function allows users to trigger expensive cross-program invocations (CPIs) to CCTP programs. While there is signature validation and nonce checking to prevent replay attacks, the function doesn't implement rate limiting or additional cost barriers beyond standard transaction fees. An attacker with valid signatures could potentially amplify their impact by triggering multiple expensive CCTP operations, though this is somewhat mitigated by the nonce mechanism and transaction costs.\n",
+            "findings": [
+                {
+                    "title": "Potential Network/Resource Amplification via Unrestricted CCTP Bridge Operations",
+                    "description": "The `deposit_for_burn` function allows users to trigger expensive cross-program invocations (CPIs) to CCTP programs (MessageTransmitterV2 and TokenMessengerMinterV2) without significant upfront cost barriers beyond standard Solana transaction fees. While signature validation and nonce checking prevent replay attacks, an attacker could potentially generate multiple valid signatures and submit numerous deposit transactions, causing resource amplification through repeated expensive CCTP bridge operations. Each call triggers multiple account mutations and cross-program invocations that consume network and computational resources. The refund mechanism (`refund_used_nonce_creation`) also means users get reimbursed for some costs, potentially reducing the economic barrier to abuse.",
+                    "category": "CWE-406",
+                    "severity": "low",
+                    "confidence": 0.65
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-410",
+            "CWE-487",
+            "CWE-118",
+            "CWE-501",
+            "CWE-911",
+            "CWE-610",
+            "CWE-704",
+            "CWE-400",
+            "CWE-673",
+            "CWE-668",
+            "CWE-404",
+            "CWE-666",
+            "CWE-913",
+            "CWE-1329",
+            "CWE-580",
+            "CWE-662",
+            "CWE-496",
+            "CWE-669",
+            "CWE-372",
+            "CWE-922",
+            "CWE-1229",
+            "CWE-495",
+            "CWE-706",
+            "CWE-665",
+            "CWE-221"
+        ],
+        [
+            "CWE-1246",
+            "CWE-593",
+            "CWE-771",
+            "CWE-605",
+            "CWE-672",
+            "CWE-405",
+            "CWE-415",
+            "CWE-770",
+            "CWE-1235",
+            "CWE-920",
+            "CWE-779",
+            "CWE-826"
+        ],
+        [
+            "CWE-407",
+            "CWE-408",
+            "CWE-409",
+            "CWE-1094",
+            "CWE-776",
+            "CWE-406",
+            "CWE-1084",
+            "CWE-1176",
+            "CWE-1072",
+            "CWE-1050"
+        ]
+    ]
+}

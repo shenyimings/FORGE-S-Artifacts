@@ -1,0 +1,83 @@
+{
+    "project": "blocksec_burrow_margin_trade_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrow_margin_trade_v1.0-signed.pdf.json/contracts/contract/src/margin_pyth.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-670",
+        "CWE-691"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-682",
+        "CWE-435",
+        "CWE-664"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect enumeration of tokens requiring price feeds",
+            "description": "The function `margin_involved_tokens()` is responsible for identifying which tokens need price feeds for margin operations. It includes `token_c_id` and `token_d_id`, but fails to include `token_p_id` when `token_c_id` equals `token_d_id`. Since `token_p_id` is required for slippage protection calculations, its omission can result in missing price data during critical operations. When the callback `callback_margin_execute_with_pyth()` is invoked, it may fail due to unavailable price feeds for `token_p_id`, causing the entire transaction to revert. This disrupts legitimate margin trading activities and can lead to denial of service for users attempting to open or modify positions.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code uses asynchronous oracle fetching (multiple cross-contract promises) and then executes margin actions in a callback. Several security-relevant weaknesses stem from (1) unsafe assumptions about how many promise results will be available and how they map to the provided flags, (2) lack of a “pending operation / nonce” mechanism to bind a callback to a specific account state across async boundaries, and (3) arithmetic/casting patterns in the Pyth staleness check that can yield incorrect validity decisions. Additionally, multiple `unwrap/expect` sites can cause panics (DoS) when upstream components (oracle responses or flag formatting) behave unexpectedly.\n",
+            "findings": [
+                {
+                    "title": "Async race/TOCTOU: actions executed later without binding to account state (no nonce/pending-op tracking)",
+                    "description": "`margin_execute_with_pyth` schedules oracle promises and passes `account_id`, `actions`, and `default_prices` into `callback_margin_execute_with_pyth`, which later reloads the margin account and executes `internal_margin_execute(...)`.\nThere is no persistent “pending operation id/nonce” recorded in contract state to ensure the callback corresponds to the latest intended operation or a specific account snapshot.\nAs a result, a user can queue multiple `margin_execute_with_pyth` calls before earlier callbacks resolve, and callbacks may execute out-of-order or against an account state that has since changed (by the same user or by other operations affecting positions such as liquidations, depending on broader contract design).\nThis is a classic cross-contract TOCTOU issue that can lead to unintended state transitions (double execution of intended operations, execution with stale assumptions, bypass of expected sequencing).\n",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Incorrect Pyth staleness validation due to truncating cast and unchecked arithmetic",
+                    "description": "In `callback_margin_execute_with_pyth` the staleness check is:\n  `sec_to_nano(pyth_price.publish_time as u32 + config.pyth_price_valid_duration_sec) >= env::block_timestamp()`\nIssues:\n- `publish_time` is cast to `u32`, truncating higher bits if `publish_time` is wider (commonly i64/u64). This can make a very large timestamp appear small, potentially passing/altering the staleness check unexpectedly.\n- `publish_time as u32 + valid_duration_sec` is unchecked addition and can overflow/wrap in release builds (Rust wraps on overflow in optimized builds unless checked), again potentially making stale data appear fresh.\n- `sec_to_nano(...)` likely multiplies by 1e9 and can overflow if not using checked math.\nSince the result gates whether oracle data is accepted for margin actions, incorrect arithmetic here is security-relevant.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Fragile promise result accounting: assumes promise_results_count equals flags length",
+                    "description": "The callback asserts:\n  `env::promise_results_count() == all_promise_flags.len() as u64`\nThis assumes a 1:1 mapping between `all_promise_flags` entries and promise results indices. However, promises are built via repeated `.and(...)` on potentially composite promises returned by `token_involved_promises(...)`, and NEAR's promise composition semantics can be subtle (nested `and`s, multi-promises per token, etc.).\nIf the number/order of promise results differs from `all_promise_flags` (e.g., `token_involved_promises` changes to include multiple receipts per flag, or returns a nested composite), the callback will panic and brick the in-flight operation (DoS of that transaction path).\nThis is an integration/interaction hazard between correctly-behaving components (promise construction and callback decoding) where assumptions about composition/ordering are not enforced robustly.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "DoS via unhandled exceptional conditions (panic on missing/invalid intermediate data)",
+                    "description": "Multiple `unwrap/expect`/panics can be triggered by unexpected upstream inputs, causing denial-of-service for the operation:\n- Partition branch: `all_prices.prices.get_mut(&token_id).unwrap();` will panic if `default_prices` did not include the token expected by the partition flag.\n- `flag.split(FLAG_PARTITION).collect::<Vec<&str>>()[0]` assumes a non-empty split result; malformed flags can lead to panics.\n- `serde_json::from_slice(...).expect(...)` panics on decoding failures (oracle returning unexpected JSON).\n- Any failed promise result triggers `env::panic_str(...)`, aborting the whole callback.\nEven if flags are normally internal, oracle contracts are external components; unexpected failures/format changes can repeatedly break execution.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Potential divide-by-zero / invalid ratio update when applying partitioned price adjustments",
+                    "description": "In the partition flag branch, the code updates:\n  `price.multiplier = u128_ratio(price.multiplier, price_amount, ONE_NEAR);`\nThere is no explicit validation that `price_amount` is non-zero or within expected bounds. If `u128_ratio` performs division by `price_amount` (or otherwise uses it as a denominator), a zero value returned by the oracle (or a malicious/buggy oracle) could cause a panic or an unintended multiplier value.\nBecause the multiplier affects derived prices used for margin actions, incorrect handling can be security-relevant (either DoS or incorrect pricing).\n",
+                    "category": "CWE-703",
+                    "severity": "low",
+                    "confidence": 0.55
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

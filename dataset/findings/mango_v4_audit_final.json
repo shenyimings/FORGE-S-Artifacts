@@ -1,0 +1,59 @@
+{
+    "path": "reports/mango_v4_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/blockworks-foundation/mango-v4",
+        "commit_id": "5c7a2e3",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-03-24",
+        "project_path": "contracts/mango_v4_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Inadequate Access Control Inside HealthRegions",
+            "description": "1. **Description:** The HealthRegion feature allows multiple instructions to be executed without performing health checks, as long as the account ends in a healthy state. However, this introduces a security risk where an attacker can borrow tokens, create bad debt, and immediately liquidate it within the same transaction, effectively stealing funds from the protocol.\n\n2. **Cause:** The root cause is the lack of access control within HealthRegion, which permits operations like withdrawals and liquidations without intermediate health checks. This allows malicious actors to exploit the system by manipulating account states during the transaction.\n\n3. **Exploitation:** An attacker can initiate a HealthRegion, withdraw tokens to create an unhealthy account state, then use the TokenLiqBankruptcy instruction to liquidate the bad debt. Since the liquidation occurs within the same transaction, the protocol covers the loss, enabling the attacker to extract tokens without repayment.\n\n4. **Impact:** A successful exploit leads to unauthorized appropriation of funds from the protocol's banks, resulting in direct financial loss. This undermines the economic integrity of the system and could erode user trust.\n",
+            "severity": "critical",
+            "files": [
+                "programs/mango-v4/src/instructions/health_region.rs"
+            ],
+            "location": [
+                "HealthRegion.TokenWithdraw",
+                "HealthRegion.TokenLiqBankruptcy"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1285"
+                ]
+            },
+            "title": "Inadequate Sanitization Of Token Indexes",
+            "description": "1. **Description:** When registering a new token, the protocol fails to validate that the provided token_index is not set to the reserved value TokenIndex::MAX, which is used internally to represent deactivated token positions.\n\n2. **Cause:** The absence of an explicit check (e.g., require_neq!) against TokenIndex::MAX during token registration allows a malicious or erroneous registration to assign this reserved value, leading to misinterpretation of user token accounts.\n\n3. **Exploitation:** An attacker or admin could register a token with token_index = TokenIndex::MAX. As a result, all user token accounts for that token would be interpreted as deactivated, preventing users from interacting with their funds.\n\n4. **Impact:** This leads to a denial of service for all users holding the affected token, as their accounts become unusable. Additionally, there is inconsistent behavior between is_active_for_token and is_active, which could introduce further logic bugs in permission checks.\n",
+            "severity": "low",
+            "files": [
+                "programs/mango-v4/src/instructions/token_register.rs"
+            ],
+            "location": [
+                "token_register",
+                "token_register_trustless"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,128 @@
+{
+    "path": "reports-without-source/Hylo - OtterSec Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/hylo-so/protocol"
+        ],
+        "commit_id": [
+            "3c91e4a"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-02-10",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Collateral Ratio Manipulation",
+            "description": "The vulnerability arises in the `LstRegistry::load` function, which fails to validate the `remaining_accounts` array properly. Specifically, it does not ensure that the exact expected set of Liquid Staking Token (LST) blocks is provided, allowing an attacker to omit certain `LstRegistryBlock` accounts. This omission reduces the total collateral considered by the system, artificially lowering the collateral ratio and potentially enabling under-collateralized actions or incorrect liquidation thresholds. Additionally, the function does not prevent duplicate `LstRegistryBlock` entries, which would allow an attacker to inflate the collateral ratio by double-counting the same assets, leading to over-leveraging or avoidance of liquidation. The root cause is the lack of strict validation on account inputs and absence of deduplication checks. An attacker could exploit this by crafting a transaction with manipulated or duplicated LST block accounts. The impact includes manipulation of core risk parameters, potential insolvency, and loss of user funds due to incorrect collateral accounting.\n",
+            "severity": "critical",
+            "location": [
+                "hylo-exchange/src/state/lst_registry.rs::LstRegistry::load",
+                "hylo.lst_registry"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Arbitrage Vulnerability Due to Imbalance in EMA Price",
+            "description": "The protocol uses Pyth's exponentially weighted moving average (EMA) price instead of the spot price to value collateral during minting operations. Since EMA prices lag behind real-time market movements, they can remain artificially high during rapid price drops. This delay creates an arbitrage opportunity where an attacker can purchase assets at the lower spot price and then mint synthetic tokens (e.g., hyUSD or xSOL) using the outdated, higher EMA price. The exploitation is feasible when the spread between spot and EMA prices exceeds 1%, which is sufficient to offset transaction fees. The root cause is the reliance on a delayed price feed for critical valuation logic. An attacker could exploit this by monitoring price discrepancies and executing mint transactions during periods of high volatility. The impact includes financial loss to the protocol due to the issuance of overvalued synthetic assets, undermining the system's solvency and economic stability.\n",
+            "severity": "critical",
+            "location": [
+                "ExchangeContext::sol_usd_price",
+                "ExchangeContext::mint_conversion"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Incorrect Fee Application",
+            "description": "The minting fees for `xSOL` and `hyUSD` are determined based on the current `StabilityMode` at the beginning of a transaction. However, if a mint operation triggers a transition to a different stability mode (e.g., from StabilityMode1 to StabilityMode2), the fee is still calculated using the pre-transition mode. This allows an attacker to exploit the timing of mode transitions by first executing a small mint to trigger a mode change and then immediately minting a large amount under the new, more favorable (e.g., zero-fee) mode. The root cause is the incorrect timing of fee calculation, which does not account for state changes within the same transaction. An attacker could exploit this by batching two mint instructions in one transaction to benefit from inconsistent fee application. The impact includes loss of expected fee revenue, manipulation of the protocol's economic model, and potential abuse during periods of volatility.\n",
+            "severity": "medium",
+            "location": [
+                "FeeController::redeem_fee",
+                "StabilityMode"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Inconsistencies in Pyth Oracle Validation Logic",
+            "description": "The protocol's Pyth oracle validation logic contains several weaknesses. First, the `validate_publish_time` function computes the difference between Solana's `clock_time` and Pyth's `publish_time` using a standard subtraction, which can underflow if Solana's clock lags, causing a panic. Second, the protocol does not validate that `price_message.conf` and `ema_conf` are within acceptable bounds, risking the use of highly uncertain price data. Third, it fails to verify the `verification_level` of the Pyth account, missing a security best practice. The root cause is incomplete validation of oracle data integrity and freshness. An attacker could exploit network clock drift or submit high-uncertainty price updates to disrupt protocol operations. The impact includes potential incorrect pricing, operational failures, and increased vulnerability to oracle manipulation, especially under adverse network conditions.\n",
+            "severity": "low",
+            "location": [
+                "hylo-exchange/src/pyth.rs::validate_publish_time",
+                "PriceUpdateV2::price_message.conf",
+                "PriceUpdateV2::price_message.ema_conf",
+                "PriceUpdateV2::verification_level"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Zero Value Operations",
+            "description": "The protocol allows zero-value operations in several functions, including minting, redeeming, swapping, and fee transfers. Functions such as `MintLevercoin`, `RedeemLevercoin`, `RedeemStablecoin`, and swap handlers do not validate that input amounts are greater than zero. Similarly, fee transfers do not check whether `fees_extracted.bits` is non-zero before minting or transferring. The root cause is the absence of input validation for zero amounts. While not directly exploitable for fund theft, an attacker could perform these operations repeatedly to waste computational resources (increasing transaction costs) and pollute event logs with meaningless entries. The impact includes degraded performance, increased on-chain bloat, and potential denial-of-service through resource exhaustion in edge cases.\n",
+            "severity": "low",
+            "location": [
+                "MintLevercoin::deposit_collateral",
+                "RedeemLevercoin::redeem_collateral",
+                "RedeemStablecoin::redeem_collateral",
+                "handle_lever_to_stable",
+                "handle_stable_to_lever",
+                "Swap"
+            ],
+            "files": []
+        }
+    ]
+}

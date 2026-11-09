@@ -1,0 +1,104 @@
+{
+    "project": "REP-Soda-Protocol-2021-10-26.pdf.json",
+    "files": [
+        "dataset/contracts/REP-Soda-Protocol-2021-10-26.pdf.json/program/src/state/user_obligation.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-1041",
+        "CWE-682",
+        "CWE-710",
+        "CWE-1339"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-664",
+        "CWE-691",
+        "CWE-284",
+        "CWE-703"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "USE-01 : Division Before Multiplication",
+            "description": "The code performs division before multiplication in several mathematical calculations, which can lead to loss of precision due to integer truncation. \nThe cause is suboptimal arithmetic ordering in financial calculations. \nWhile not directly exploitable for fund theft, an attacker could leverage the precision loss in edge cases to gain unfair advantages in token distribution or interest calculation. \nThe impact is potential economic imbalance over time, especially in high-volume or high-precision scenarios.\n"
+        },
+        {
+            "title": "USE-02 : Redundant Statement",
+            "description": "The code reconstructs a vector after calling `find_and_remove`, which updates the vector in place, making the reconstruction redundant. \nThe cause is unnecessary code that does not affect functionality but reduces clarity and efficiency. \nThis cannot be exploited by an attacker but reflects poor code hygiene. \nThe impact is purely on code maintainability and performance, with no security implications.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code is generally written in a “state container” style (UserObligation, Collateral, Loan) but it relies heavily on (a) caller-supplied indices and (b) serialized length fields, without validating them before indexing/slicing. In Solana BPF, panics and out-of-bounds slice/index operations abort the program, which is a security-relevant denial-of-service vector (anyone can pass malformed accounts / parameters to force the program to fail). Additionally, deserialization does not enforce invariants (e.g., max number of positions, offset bounds, uniqueness of reserves), so a crafted obligation account can become “poisoned” and brick future instructions. Finally, there is an “unchecked operator” mutation interface that can change risk parameters (LTV/liq ratios, close_ratio) without any access control in this module; if outer instruction routing fails to enforce authorization, this becomes a critical access-control weakness.\n",
+            "findings": [
+                {
+                    "title": "Out-of-bounds slice in UserObligation::unpack_from_slice via unvalidated collaterals_len/loans_len",
+                    "description": "In `UserObligation::unpack_from_slice`, `collaterals_len` and `loans_len` are read from account data and used to compute:\n  - `collaterals_offset = collaterals_len * COLLATERAL_LEN`\n  - `loans_offset = collaterals_offset + loans_len * LOAN_LEN`\nThese offsets are then used for slicing `data_flatten[..collaterals_offset]` and `data_flatten[collaterals_offset..loans_offset]` without checking that:\n  - collaterals_len + loans_len <= MAX_OBLIGATION_RESERVES\n  - collaterals_offset <= data_flatten.len()\n  - loans_offset <= data_flatten.len()\nA maliciously crafted obligation account can set length bytes so the slice ranges exceed `data_flatten` (fixed size `LOAN_LEN * MAX_OBLIGATION_RESERVES`), causing a runtime panic/out-of-bounds and aborting the program. This is a denial-of-service vector on any instruction that attempts to deserialize such an account.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.97
+                },
+                {
+                    "title": "Out-of-bounds write/panic in UserObligation::pack_into_slice if vectors exceed serialized capacity",
+                    "description": "`UserObligation::pack_into_slice` computes `collaterals_offset` and `loans_offset` from the current vector lengths and writes into the fixed `data_flatten` region sized as `LOAN_LEN * MAX_OBLIGATION_RESERVES`.\nIf `self.collaterals.len() + self.loans.len()` exceeds MAX_OBLIGATION_RESERVES (possible if the account was deserialized from malicious data, or if some code path mutates vectors without enforcing the invariant), the calculated offsets can exceed `data_flatten.len()`, and the subsequent slicing/writes will panic.\nThis creates a persistent \"poisoned state\" DoS risk: once such an oversized state exists, subsequent instructions that try to repack it can consistently abort.\n",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.83
+                },
+                {
+                    "title": "Unchecked indexing on user-controlled indices can panic (borrow/repay/pledge/redeem/liquidate)",
+                    "description": "Multiple methods index vectors directly with `self.loans[index]` / `self.collaterals[index]` without bounds checks:\n  - `borrow_in` (self.loans[index])\n  - `repay` (self.loans[index])\n  - `pledge` (self.collaterals[index])\n  - `redeem` (self.collaterals[index])\n  - `redeem_without_loan` (self.collaterals[index])\n  - `replace_collateral` (self.collaterals[out_index])\n  - `liquidate` (self.collaterals[collateral_index], self.loans[loan_index])\nIf an instruction allows a caller to supply these indices (typical for obligation operations), invalid indices will cause an out-of-bounds panic and abort execution.\nThis is an externally triggerable denial-of-service bug unless every caller pre-validates indices before calling these methods.\n",
+                    "category": "CWE-691",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Panic on unexpected param type in operate_unchecked enables DoS if reachable with malformed input",
+                    "description": "`Operator<P> for UserObligation::operate_unchecked` ends with `panic!(\\\"unexpected param type\\\")` if the downcast does not match `IndexedCollateralConfig` or `IndexedLoanConfig`.\nIf this trait method is reachable through any instruction path where `P`/data can be influenced (directly or indirectly) by an attacker, they can trigger a panic-based abort rather than a graceful error return.\nEven if currently only internal code calls it correctly, this is brittle and increases DoS risk during integration/refactors.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "No invariant enforcement against duplicate reserve entries can brick refresh/update flows",
+                    "description": "The state allows pushing new `Collateral`/`Loan` entries without checking that the `reserve` pubkey is unique in the respective vector.\nIn `update_user_obligation`, reserves are looked up with `find_and_remove(&collateral.reserve, ...)` / `find_and_remove(&loan.reserve, ...)`. If the obligation contains duplicate entries referencing the same reserve, the first lookup removes it and the second lookup fails, returning an error.\nThis can create a \"poisoned\" obligation state that cannot be refreshed/updated successfully (persistent DoS on the user position) unless there is an explicit repair path.\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Risk-parameter mutation interface lacks local authorization checks (potential privilege escalation)",
+                    "description": "`operate_unchecked` can modify security-critical parameters stored inside an obligation:\n  - `Collateral.borrow_value_ratio` / `Collateral.liquidation_value_ratio`\n  - `Loan.close_ratio`\nThis module does not enforce that only an authorized entity (e.g., `manager`/admin) can perform these mutations. If any instruction exposes this operator to untrusted callers without a strict signer/authority check, an attacker could raise borrow_value_ratio / lower liquidation constraints, potentially borrowing more than allowed or preventing liquidation.\nNote: this finding depends on how `Operator` is invoked elsewhere; the unsafe surface exists here regardless.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Deserialization does not validate structural constraints (length bounds, max positions), enabling malformed-state attacks",
+                    "description": "Beyond the explicit out-of-bounds risk, `unpack_from_slice` does not validate that:\n  - `collaterals_len` and `loans_len` are each <= MAX_OBLIGATION_RESERVES\n  - `collaterals_len + loans_len` <= MAX_OBLIGATION_RESERVES\n  - offsets align with the fixed flattened area size\nThis is improper neutralization/validation of structured account data and allows attackers to craft account states that violate invariants and trigger downstream failures.\n",
+                    "category": "CWE-707",
+                    "severity": "high",
+                    "confidence": 0.9
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

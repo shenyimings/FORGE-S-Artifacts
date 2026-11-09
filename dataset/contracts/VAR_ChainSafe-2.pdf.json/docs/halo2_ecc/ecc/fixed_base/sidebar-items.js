@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":[["msm_par","Assumptions"],["scalar_multiply","Computes `[scalar] * P` on y^2 = x^3 + b where `P` is fixed (constant)"]]};

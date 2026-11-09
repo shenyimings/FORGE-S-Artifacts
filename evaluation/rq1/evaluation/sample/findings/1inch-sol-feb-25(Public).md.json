@@ -1,0 +1,239 @@
+{
+    "path": "reports/1inch-sol-feb-25(Public).md",
+    "project_info": {
+        "url": "https://github.com/1inch/solana-fusion-protocol",
+        "commit_id": "e797ebc5fc9a9ebb2093386f986fdecd553bfdcd",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-02-25",
+        "project_path": "contracts/1inch-sol-feb-25(Public).md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Order fulfillment can be front-ran to steal from taker using reinitialization",
+            "description": "1. **Description:** The vulnerability allows a malicious maker to steal from a taker by reinitializing an order with the same order ID after canceling the original order. When the taker attempts to fulfill what they believe is the original order, they are instead fulfilling a maliciously modified order.\n2. **Cause:** The order's PDA is derived from a seed, the maker's address, and the order ID. After cancellation, the escrow account is closed, allowing the same order ID to be reused and the PDA to be reinitialized with different parameters.\n3. **Exploitation:** An attacker can create an order, allow a taker to initiate a fill transaction, cancel the order, then immediately create a new order with the same ID but with worse terms (e.g., higher fees, different tokens), causing the taker's transaction to fulfill the malicious order.\n4. **Impact:** The taker can be forced to pay significantly more than expected, including having their SOL balance drained if the destination asset is switched to native SOL. This results in direct financial loss.\n",
+            "severity": "critical",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "fusion-swap.fill#106-258"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Incomplete expiration_time check allows orders to be instantly expired",
+            "description": "1. **Description:** The program checks that the order's expiration_time is not in the past at creation time, but does not enforce a minimum future buffer. This allows makers to set expiration_time equal to the current timestamp, making the order effectively unfillable.\n2. **Cause:** The validation `Clock::get()?.unix_timestamp <= order.expiration_time as i64` passes if the times are equal, but provides no time window for takers to act.\n3. **Exploitation:** A maker can create an order with expiration_time set to the current time, leading takers to waste gas on transactions that will fail with \"OrderExpired\" as soon as they are processed.\n4. **Impact:** Takers incur unnecessary transaction costs, leading to a poor user experience and potential denial of service for legitimate order fills.\n",
+            "severity": "low",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "fusion-swap.create#40-43"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Protocol fee associated token account is not checked against a configured account",
+            "description": "1. **Description:** The protocol fee's destination token account (protocol_dst_ata) is not validated against a known, configured account. This allows the maker to specify any arbitrary account as the recipient of protocol fees.\n2. **Cause:** The program only checks that the mint of protocol_dst_ata matches the destination mint, but does not verify that the account itself is the official protocol fee collection address.\n3. **Exploitation:** A malicious or compromised frontend could direct protocol fees (including surplus fees meant for the DAO) to an attacker-controlled account.\n4. **Impact:** Protocol and DAO funds may be misrouted, leading to financial loss and undermining the intended economic model of the protocol.\n",
+            "severity": "low",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "fusion-swap.fill#337",
+                "fusion-swap.create#163-184"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Maker and taker assets can be identical",
+            "description": "1. **Description:** The program does not prevent orders from being created where the source and destination assets (src_mint and dst_mint) are the same.\n2. **Cause:** No validation is performed during order creation to ensure src_mint != dst_mint.\n3. **Exploitation:** Users can create same-asset trades, which have no economic purpose and can lead to fee farming, artificial volume inflation, and liquidity lock-up in escrow accounts.\n4. **Impact:** This can distort metrics, waste resources, and potentially lead to account derivation conflicts or future security issues due to ambiguous account roles.\n",
+            "severity": "low",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "fusion-swap.create#28-104",
+                "fusion-swap.fill#295-446"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Self-exchange is possible",
+            "description": "1. **Description:** The program allows an account to act as both maker and taker in the same order, enabling self-trading.\n2. **Cause:** No check is performed to ensure that the taker account is different from the maker account during order fulfillment.\n3. **Exploitation:** A user can fulfill their own order, enabling artificial volume generation and potential reward farming without needing multiple accounts or paying additional signing fees.\n4. **Impact:** This undermines the integrity of trading volume metrics and could be exploited in future reward programs. It also increases the risk of insecure PDA derivations if maker and taker are used in seeds.\n",
+            "severity": "low",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "fusion-swap.fill#106-258"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "TODO's in code",
+            "description": "1. **Description:** The codebase contains multiple TODO comments indicating incomplete or potentially risky implementation decisions, particularly around account derivation and initialization.\n2. **Cause:** Developers left unresolved design questions in the code, such as whether to include src_mint in PDA seeds or how to initialize certain accounts.\n3. **Exploitation:** While not directly exploitable now, these TODOs represent technical debt that could lead to future vulnerabilities if not addressed properly.\n4. **Impact:** Increased risk of future security issues due to ambiguous or incomplete account derivation logic, potentially leading to account confusion or privilege escalation.\n",
+            "severity": "informational",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "fusion-swap#374",
+                "fusion-swap#421",
+                "fusion-swap#456"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Single-step ownership transfer to non-Signer may introduce a risk",
+            "description": "1. **Description:** The ownership transfer function accepts a new owner as a Pubkey without requiring them to sign, allowing for accidental transfer to an invalid or unowned address.\n2. **Cause:** The _new_owner parameter is of type Pubkey and not a Signer, so there is no proof of control over the destination address.\n3. **Exploitation:** A typo or error in specifying the new owner could result in permanent loss of contract control.\n4. **Impact:** Risk of accidental ownership loss, leading to irreversible administrative lockout of the contract.\n",
+            "severity": "informational",
+            "files": [
+                "programs/whitelist/src/lib.rs"
+            ],
+            "location": [
+                "whitelist.transfer_ownership#35-40"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Missing events and emits",
+            "description": "1. **Description:** Important state-changing functions such as register, deregister, and transfer_ownership do not emit events.\n2. **Cause:** Event emission is not implemented in the code for these functions.\n3. **Exploitation:** While not directly exploitable, the lack of events makes it harder for off-chain systems to track contract activity reliably.\n4. **Impact:** Reduced transparency and increased difficulty for indexers, monitoring tools, and user interfaces to react to contract changes in real time.\n",
+            "severity": "informational",
+            "files": [
+                "programs/whitelist/src/lib.rs"
+            ],
+            "location": [
+                "whitelist#24-39"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "Inaccurate error on underflow",
+            "description": "1. **Description:** When an underflow occurs during fee amount calculation, the program returns ProgramError::ArithmeticOverflow, which is misleading.\n2. **Cause:** The code uses a generic arithmetic error for both overflow and underflow conditions.\n3. **Exploitation:** This does not enable direct exploitation but complicates debugging and error handling for clients.\n4. **Impact:** Developers and users may misinterpret the cause of transaction failures, leading to longer resolution times and confusion.\n",
+            "severity": "informational",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "fusion-swap.get_fee_amounts#1625"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Incorrect description in Deregister struct",
+            "description": "1. **Description:** The comment in the Deregister struct incorrectly states that it ensures only the owner can register users, when it actually governs deregistration.\n2. **Cause:** A copy-paste or editing error in the code comment.\n3. **Exploitation:** This could mislead developers into thinking the check is for registration, potentially leading to incorrect assumptions about access control.\n4. **Impact:** Confusion during code review or maintenance, increasing the risk of introducing bugs due to misunderstanding the code's intent.\n",
+            "severity": "informational",
+            "files": [
+                "programs/whitelist/src/lib.rs"
+            ],
+            "location": [
+                "whitelist.Deregister#94"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Un-fillable positions may persist due to insufficient fee checks during order creation",
+            "description": "1. **Description:** The program does not validate fee values during order creation, only during fulfillment. This allows creation of orders with fee configurations that will inevitably underflow when filled.\n2. **Cause:** Fee validation logic is only applied in the fill function, not in the create function.\n3. **Exploitation:** A user can create an order with excessive fee percentages that make fulfillment impossible, leaving the order stuck in an unfunded state.\n4. **Impact:** Orders may remain unfilled and tie up resources unnecessarily, degrading user experience and system efficiency.\n",
+            "severity": "informational",
+            "files": [
+                "programs/fusion-swap/src/lib.rs"
+            ],
+            "location": [
+                "fusion-swap.create#28-104",
+                "fusion-swap.get_fee_amounts#608-638"
+            ]
+        }
+    ]
+}

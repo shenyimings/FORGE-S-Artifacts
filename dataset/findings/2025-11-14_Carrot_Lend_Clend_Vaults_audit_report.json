@@ -1,0 +1,209 @@
+{
+    "path": "reports-without-source/2025-11-14_Carrot_Lend_Clend_Vaults_audit_report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/DeFi-Carrot/clend-vaults",
+            "https://github.com/AdevarLabs/clend-vaults"
+        ],
+        "commit_id": [
+            "c836328c28f1579e971e4509d4ec67f8324c5750"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-11-14",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Cross-asset oracle confusion enables share mint mispricing and reserve drain",
+            "description": "The issue arises in the issue and redeem flows where the asset oracle used to value deposits and withdrawals is selected based solely on the user-provided oracle account, without enforcing a binding between the asset_mint and its corresponding oracle. This allows an attacker to supply an oracle for a different asset that has a more favorable price, leading to incorrect valuation of deposits or withdrawals. The root cause is the lack of validation ensuring that the oracle provided matches the asset being deposited or redeemed. An attacker can exploit this by choosing a high-priced oracle when depositing to mint more shares than deserved, or a low-priced oracle when redeeming to withdraw more tokens than entitled. This leads to mispricing of shares and a direct drain of the vault's reserves, potentially resulting in significant financial loss for honest depositors and insolvency of the vault.\n",
+            "severity": "critical",
+            "location": [
+                "https://github.com/AdevarLabs/clend-vaults/blob/main/clend-vaults-main/protocol/programs/clend-vaults/src/instructions/issue.rs#L51-L59",
+                "https://github.com/AdevarLabs/clend-vaults/blob/main/clend-vaults-main/protocol/programs/clend-vaults/src/instructions/redeem.rs#L77-L85"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-191"
+                ]
+            },
+            "title": "Unsigned arithmetic in fold_clend_accounts_equity may underflow when liability value exceeds current sum leading to temporary fund freezing of vault",
+            "description": "The function fold_clend_accounts_equity uses an unsigned 128-bit integer (u128) as an accumulator to compute the net equity of the vault by adding asset values and subtracting liabilities. However, because the accumulator is unsigned, it cannot represent negative values. If a liability value exceeds the current accumulated sum during iteration, the subtraction operation will underflow, causing a panic and aborting the transaction. The root cause is the use of unsigned arithmetic in a context where intermediate negative values are possible due to the order of processing clend accounts. An attacker could exploit this by structuring clend accounts such that a large liability is processed early, before sufficient assets are accumulated, thereby triggering the underflow. This would prevent any operation relying on equity calculation (e.g., issuing or redeeming shares), leading to a temporary freeze of all vault funds until the issue is fixed on-chain.\n",
+            "severity": "high",
+            "location": [
+                "https://github.com/AdevarLabs/clend-vaults/blob/main/clend-vaults-main/protocol/programs/clend-vaults/src/utils/accounts.rs#L110"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "First dust depositor severely limits vault TVL due to fixed 100-share genesis",
+            "description": "Upon vault initialization, the first deposit triggers a special case that mints a fixed 100 shares regardless of the deposit amount. Since there is no minimum deposit requirement, an attacker can deposit a single base unit of a token (e.g., 1 micro-USDC) and receive 100 shares (1e11 base units with 9 decimals). This sets an extremely low share price, causing subsequent deposits to mint an enormous number of shares. Due to the SPL token supply cap (u64::MAX ≈ 1.8e19), this results in a maximum TVL of approximately 184 USDC before the mint operation reverts. The root cause is the fixed initial share mint without proportionality to the deposit value. An attacker can exploit this by making a dust deposit before legitimate users, permanently capping the vault's capacity and rendering it unusable for meaningful deposits. This leads to denial of service for future depositors and effectively bricks the vault.\n",
+            "severity": "high",
+            "location": [
+                "https://github.com/AdevarLabs/clend-vaults/blob/main/clend-vaults-main/protocol/programs/clend-vaults/src/utils/math.rs#L11-L13"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Negative oracle price should abort transaction",
+            "description": "The calc_usd_amount and calc_token_amount functions use the absolute value of the oracle price when performing calculations, instead of reverting on a negative price. A negative oracle price is typically indicative of a malfunctioning or manipulated oracle and should not be accepted. The root cause is the use of price.abs() without prior validation. An attacker could exploit this by feeding a negative price from a compromised oracle, which would be converted to a positive value and used in calculations, potentially distorting the valuation of assets and leading to incorrect share minting or redemption. This could result in accounting corruption, mispricing, and value loss for depositors, undermining the integrity of the vault's net asset value.\n",
+            "severity": "medium",
+            "location": [
+                "https://github.com/AdevarLabs/clend-vaults/blob/main/clend-vaults-main/protocol/programs/clend-vaults/src/utils/math.rs#L57"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack of slippage protection in Issue and Redeem flows enables first-depositor share-price manipulation and value loss",
+            "description": "The issue_handler and redeem_handler functions do not implement slippage protection, meaning users cannot specify a minimum number of shares or tokens they expect to receive. This exposes users to price volatility between transaction construction and execution. The root cause is the absence of min_shares_out or min_token_out parameters. An attacker could exploit this by front-running or back-running transactions when price movements are favorable, leading to unfavorable execution for legitimate users. In particular, without slippage checks, the first depositor could manipulate the initial share price if not properly restricted. This results in value loss for users due to adverse price movements and reduces user confidence in the predictability of deposits and redemptions.\n",
+            "severity": "medium",
+            "location": [
+                "https://github.com/AdevarLabs/clend-vaults/blob/main/clend-vaults-main/protocol/programs/clend-vaults/src/instructions/redeem.rs#L14"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "Mismatch in balance classification logic (is_liab) allows liabilities to be treated as assets leading to overstated equity calculation",
+            "description": "The vault incorrectly determines whether a balance is an asset or liability by checking if asset_shares is zero (bal.asset_shares.is_zero()), whereas the Clend protocol uses a threshold-based check (>= 1 token) via fixed-point arithmetic. This discrepancy means that small dust balances (e.g., 0.5 tokens) are classified as assets by the vault, even when Clend treats them as liabilities. The root cause is the oversimplified balance classification logic. An attacker or even normal operations (e.g., borrowing) could leave dust asset shares while incurring large liabilities, causing the vault to misclassify the entire balance as an asset. This leads to liabilities being omitted from equity calculations, resulting in overstated vault equity and share price. Subsequent withdrawals would then drain more funds than available, leading to insolvency.\n",
+            "severity": "medium",
+            "location": [
+                "https://github.com/AdevarLabs/clend-vaults/blob/main/clend-vaults-main/protocol/programs/clend-vaults/src/utils/accounts.rs#L119-L120"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Management fee timestamp updated even when computed fee rounds to zero",
+            "description": "The management fee accrual function updates the management_fee_last_update timestamp before checking whether the computed fee amount (fee_usd_cents) is zero. If the fee rounds down to zero, the timestamp is still updated, effectively discarding the accrued time window instead of carrying it forward. The root cause is the incorrect ordering of operations. While this issue is largely theoretical under current parameters (due to 60-second accrual intervals and typical fee rates), it could become exploitable if fee rates are lowered or vault equity becomes very small. The impact is a gradual loss of potential fee revenue due to reset accrual periods, leading to economic inefficiency and reduced income for the protocol.\n",
+            "severity": "low",
+            "location": [
+                "https://github.com/AdevarLabs/clend-vaults/blob/main/clend-vaults-main/protocol/programs/clend-vaults/src/state/clend_vaults.rs#L654-L659"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Two-step rounding-up in Issue fee conversion results in gradual value leak from shareholders",
+            "description": "The issue fee conversion process in the vault applies two consecutive rounding-up operations when converting the fee from asset units to USD and then to vault shares. This double rounding-up causes the protocol to mint more shares for the fee than the actual value deposited, meaning the fee shares represent slightly more value than the fee collected from the depositor.\n\nThe root cause is the use of rounding-up arithmetic in two sequential conversion steps without compensating for the accumulated rounding bias. This design flaw introduces a systematic overstatement of the fee value in terms of shares.\n\nAn attacker cannot directly exploit this for immediate gain, but repeated deposits with small amounts could slightly amplify the effect. More importantly, the surplus share minting implicitly draws value from the existing vault equity because the total equity increases only by the actual deposit amount, while the fee shares correspond to a higher value.\n\nThe impact is a gradual dilution of existing shareholders' equity, as the excess shares minted for fees are backed by value not fully contributed by the depositor. This constitutes a value leak from current shareholders to the protocol or fee recipient.\n",
+            "severity": "low",
+            "location": [
+                "clend-vaults/src/state/clend_vaults.rs#693-709"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-351"
+                ]
+            },
+            "title": "Missing Verification-level check accepts partially verified Pyth oracle data",
+            "description": "The PythOracle::get_price() function does not validate the verification_level field of the PriceUpdateV2 structure, allowing the use of partially verified oracle data. While the function checks the confidence interval, it fails to enforce that the price update must be fully verified by the Pyth network.\n\nThe cause is the omission of a match or if-check on the verification_level enum, which can be either Partial (with a number of signatures) or Full. Without this check, the protocol may accept price updates that have not met the full guardian quorum, relying instead on weaker off-chain rules.\n\nAn attacker could potentially influence price feeds if they compromise a minority of Pyth signers and issue a partially verified update. Although current Pyth deployments require at least 5 signatures even for partial updates, this does not provide the same security guarantee as full verification (e.g., 13 of 19 Wormhole guardians).\n\nThe impact is that the vault may mint or redeem shares based on inaccurate or potentially manipulated valuations, leading to economic loss for users. Given that vaults prioritize correctness over speed, accepting unverified data increases risk unnecessarily.\n",
+            "severity": "low",
+            "location": [
+                "clend-vaults/src/utils/price.rs#104-125"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing verification for Token 2022 Extensions",
+            "description": "The issue handler does not account for SPL Token 2022 extensions such as TransferFee and TransferHook. When a user deposits a token with the TransferFee extension, the actual amount received by the vault is less than the amount specified in the transaction due to the fee being deducted during transfer. However, the protocol calculates shares based on the pre-fee amount, leading to over-minting.\n\nThe root cause is the reliance on the input amount rather than the actual received balance when calculating share issuance and fees. Additionally, the protocol does not restrict mints with problematic extensions during asset registration.\n\nAn attacker could exploit this by depositing a token with a TransferFee extension, causing the protocol to mint more shares than deserved. Similarly, a TransferHook could alter the transfer behavior in unexpected ways, potentially disrupting accounting.\n\nThe impact includes incorrect share minting, inaccurate fee calculations, and potential economic loss for existing shareholders. This undermines the fairness and correctness of the vault's accounting system.\n",
+            "severity": "low",
+            "location": [
+                "clend-vaults/src/instructions/issue.rs#102-108"
+            ],
+            "files": []
+        }
+    ]
+}

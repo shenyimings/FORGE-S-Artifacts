@@ -1,0 +1,640 @@
+{
+    "path": "reports/zenith/GMX Solana - Zenith Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/gmsol-labs/gmx-solana"
+        ],
+        "commit_id": [
+            "ee31f0921d0f645de811b0fc93679fd2d7ba140a"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-05-27",
+        "project_path": "contracts/GMX Solana - Zenith Audit Report.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Callback failures can be used to enable risk-free trades",
+            "description": "The vulnerability allows a malicious user to perform risk-free trades by specifying a callback program that fails during execution until the market price moves favorably. The root cause is the override of Anchor's default behavior, which allows any arbitrary program to be used as a callback without validation. This lack of restriction means a user can deploy a callback that conditionally fails the `on_executed` instruction based on a user-controlled flag. An attacker can exploit this by submitting market orders with a failing callback, preventing execution until the price shifts in their favor, then allowing execution to proceed at the favorable price. The impact includes unfair profit extraction at the expense of the protocol and other users, as well as potential denial of service by spamming close orders with broken callbacks, disrupting keeper operations.\n",
+            "severity": "critical",
+            "location": [
+                "programs/callback/src/interface.rs#14-16",
+                "programs/store/src/states/common/action.rs#172-202"
+            ],
+            "files": [
+                "gmx-solana/programs/callback/src/interface.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-610"
+                ],
+                "3": [
+                    "CWE-15"
+                ]
+            },
+            "title": "Changes to claimable_time_window can lead to collisions of claimable accounts",
+            "description": "The claimable_time_window parameter can be modified by a config keeper, which affects the PDA derivation of claimable accounts via the `claimable_time_key` function. The root cause is the indirect use of this mutable parameter in PDA seeds, which breaks deterministic account derivation. If the window size changes, existing claimable accounts become inaccessible or collide with new ones due to altered seeds. An attacker or misconfigured update could exploit this by changing the window size, leading to denial of service for legitimate claims or potential account collisions. The impact includes loss of access to funds, disruption of protocol operations, and potential rent theft or account squatting if new accounts are created at previously used PDAs.\n",
+            "severity": "high",
+            "location": [
+                "programs/store/src/lib.rs#591-594",
+                "programs/store/src/instructions/config.rs#27-35",
+                "programs/store/src/states/store.rs#234-240",
+                "programs/store/src/states/store.rs#581",
+                "programs/store/src/states/store.rs#293-313",
+                "crates/programs/src/utils/store.rs#50-71",
+                "crates/gmsol/src/exchange/order.rs#675",
+                "crates/gmsol/src/exchange/order.rs#690",
+                "crates/gmsol/src/exchange/order.rs#705",
+                "crates/gmsol/src/exchange/position_cut.rs#237",
+                "crates/sdk/src/client/ops/exchange/order.rs#749",
+                "crates/sdk/src/client/ops/exchange/order.rs#764",
+                "crates/sdk/src/client/ops/exchange/order.rs#779",
+                "crates/sdk/src/client/ops/exchange/order.rs#1784",
+                "programs/store/src/instructions/token.rs#95",
+                "programs/store/src/instructions/token.rs#163",
+                "programs/store/src/instructions/exchange/execute_order.rs#713",
+                "programs/store/src/instructions/exchange/execute_order.rs#728",
+                "programs/store/src/instructions/exchange/execute_order.rs#743",
+                "programs/store/src/instructions/exchange/execute_order.rs#1511",
+                "programs/store/src/instructions/exchange/execute_order.rs#1526",
+                "programs/store/src/instructions/exchange/execute_order.rs#1541",
+                "programs/store/src/instructions/exchange/position_cut.rs#179",
+                "programs/store/src/instructions/exchange/position_cut.rs#194",
+                "programs/store/src/instructions/exchange/position_cut.rs#209"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/lib.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-115"
+                ]
+            },
+            "title": "Price adjustments/validation use better-than-market prices for some oracles",
+            "description": "The vulnerability arises because the price adjustment and validation logic assumes the mid-price is the fair market price, which is incorrect for oracles like Switchboard that return a median price. The root cause is the failure to distinguish between symmetric confidence bounds (e.g., Pyth) and asymmetric min/max values with a median (e.g., Switchboard). This leads to incorrect price capping, where the adjusted price may be above or below the actual market price. An attacker could exploit this by submitting trades at these unfair prices, gaining an arbitrage advantage not available on other venues. If price adjustments are disabled, valid orders may be rejected during normal market fluctuations, reducing liquidity. The impact includes unfair trading advantages, loss of protocol revenue, and reduced market efficiency.\n",
+            "severity": "high",
+            "location": [
+                "programs/store/src/states/oracle/mod.rs#391-403",
+                "programs/store/src/states/oracle/validator.rs#83-92"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/states/oracle/mod.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Competitions can be manipulated through many small-volume trades",
+            "description": "The competition mechanism can be gamed by executing multiple small trades below the volume threshold in the final block, allowing a malicious user to accumulate winning volume without triggering competition extension. The root cause is the per-trade volume check instead of cumulative block-level volume tracking. An attacker can exploit this by splitting large trades into many sub-threshold trades in the last block, instantly winning the competition. This undermines the fairness of the competition and allows MEV extraction at the expense of regular users. The impact includes unfair distribution of rewards and erosion of user trust in the competition system.\n",
+            "severity": "medium",
+            "location": [
+                "programs/competition/src/instructions/trade_callback.rs#204"
+            ],
+            "files": [
+                "gmx-solana/programs/competition/src/instructions/trade_callback.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "update_order() never checks for v2 callbacks",
+            "description": "The update_order() function fails to enforce the callback execution invariant that is properly implemented in update_order_v2(). The root cause is the omission of a callback check in the legacy update_order path, creating an inconsistency in security guarantees. An attacker could exploit this by configuring a callback and using the legacy update path to bypass callback execution, potentially disrupting dependent logic or avoiding side effects like fee accrual or state updates. The impact includes inconsistent behavior between function variants and potential bypass of critical business logic, undermining the reliability of callback-based extensions.\n",
+            "severity": "medium",
+            "location": [
+                "programs/store/src/instructions/exchange/order.rs#1880-1887"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/instructions/exchange/order.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-267"
+                ]
+            },
+            "title": "Order keepers can extract value through transaction ordering",
+            "description": "Malicious order keepers can reorder transactions within the same validity window to maximize their own profits, such as triggering kink points in fee models, manipulating funding rate skews, or amplifying price impact. The root cause is the lack of enforced ordering by submission time, combined with the economic incentives embedded in the fee and pricing models. An attacker with keeper privileges can exploit this by selectively ordering transactions to benefit their positions. The impact includes unfair profit extraction, distortion of market mechanics, and potential losses for other users, especially during keeper outages when competition is reduced.\n",
+            "severity": "medium",
+            "location": [
+                "crates/model/src/params/fee.rs#250",
+                "crates/model/src/params/fee.rs#375-379",
+                "crates/model/src/action/swap.rs#113"
+            ],
+            "files": [
+                "gmx-solana/crates/model/src/params/fee.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "close_empty_claimable_account can be abused for DoS and rent theft by malicious order keepers",
+            "description": "The close_empty_claimable_account instruction can be exploited by malicious keepers to close claimable accounts immediately after they are created by legitimate keepers. The root cause is the lack of access control on account closure, allowing any keeper to close empty accounts and claim the rent. This enables two attacks: denial of service by preemptively closing accounts needed for order execution, and rent theft by stealing the lamports from accounts created by others. The impact includes disruption of protocol operations, financial loss for honest keepers, and increased operational costs due to the need for defensive transaction bundling.\n",
+            "severity": "medium",
+            "location": [
+                "programs/store/src/lib.rs#1746-1752",
+                "programs/store/src/instructions/token.rs#142-197"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/lib.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Competition participants can game volume metric",
+            "description": "The competition leaderboard calculates volume as the absolute difference in position size, which rewards users twice when they open and close a position. The root cause is the lack of distinction between new volume and position closure. A malicious user can exploit this by rapidly opening and closing large positions to inflate their volume without holding exposure, or use multiple accounts to dominate the leaderboard. This undermines the competition's goal of incentivizing genuine trading activity. The impact includes unfair reward distribution, manipulation of the leaderboard, and reduced effectiveness of the incentive mechanism.\n",
+            "severity": "low",
+            "location": [
+                "programs/competition/src/instructions/trade_callback.rs#165-180"
+            ],
+            "files": [
+                "gmx-solana/programs/competition/src/instructions/trade_callback.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-662"
+                ],
+                "3": [
+                    "CWE-820"
+                ],
+                "4": [
+                    "CWE-567"
+                ]
+            },
+            "title": "Mutable Config/Competition accounts in all order instructions will lead to contention",
+            "description": "The protocol requires the same mutable Config or Competition account in every order instruction, creating a shared write bottleneck. The root cause is the architectural decision to use a single PDA for global state, which is not optimized for high-concurrency environments. This leads to high transaction contention, especially during market volatility, resulting in increased failure rates and priority fee competition. The impact includes degraded user experience, higher transaction costs, and reduced throughput during peak activity, which is particularly problematic for a DEX with bursty traffic patterns.\n",
+            "severity": "low",
+            "location": [
+                "programs/callback/src/instructions/action_callback.rs#20-21",
+                "programs/competition/src/instructions/trade_callback.rs#91-93"
+            ],
+            "files": [
+                "gmx-solana/programs/callback/src/instructions/action_callback.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Calls to initialize_config() can be front-run",
+            "description": "The callback program's Config PDA uses hard-coded seeds for derivation, meaning only one such PDA can exist per program. The initialize_config() instruction lacks authorization checks, allowing any user to invoke it upon deployment. This enables a malicious actor to front-run the legitimate deployer and initialize the configuration with potentially inappropriate or offensive data (e.g., vulgar prefix). The root cause is the absence of access control on a critical initialization function. An attacker could exploit this by monitoring the network for the program deployment and being the first to call initialize_config(). The impact includes loss of control over the configuration state and potential reputational damage due to misuse of the on-chain data.\n",
+            "severity": "low",
+            "location": [
+                "programs/callback/src/instructions/config.rs#L5-L31"
+            ],
+            "files": [
+                "gmx-solana/programs/callback/src/instructions/config.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Lack of uniqueness validation of trade_event in OnExecuted callback",
+            "description": "The OnExecuted callback in the competition program does not verify whether a trade_event has been processed before. This allows the same trade_event to be reused multiple times, which could artificially inflate a participant's trading volume or leaderboard ranking. The cause is the absence of a mechanism to track previously used trade_event IDs. A malicious or compromised callback authority could exploit this by replaying valid trade events. Although the signer is restricted to the callback authority, the competition program itself remains vulnerable to internal data integrity issues. The impact is a compromise of the competition's fairness and integrity, potentially leading to incorrect reward distribution.\n",
+            "severity": "low",
+            "location": [
+                "programs/competition/src/instructions/trade_callback.rs#L115-L116"
+            ],
+            "files": [
+                "gmx-solana/programs/competition/src/instructions/trade_callback.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Missing validation of association between trade_event and trader/participant in OnExecuted callback",
+            "description": "The OnExecuted callback fails to validate that the provided trade_event is linked to the trader or participant being updated. This allows any trade_event to be used for any participant, potentially leading to incorrect volume tracking and leaderboard manipulation. The root cause is the lack of explicit checks to ensure the trade_event corresponds to the correct user. An attacker with access to the callback authority could exploit this by submitting mismatched trade_event and participant pairs. While mitigated by the requirement of a trusted signer, the competition program logic itself is flawed. The impact is a risk of data corruption and unfair advantages in the competition.\n",
+            "severity": "low",
+            "location": [
+                "programs/competition/src/instructions/trade_callback.rs#L115-L116"
+            ],
+            "files": [
+                "gmx-solana/programs/competition/src/instructions/trade_callback.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Improper use of require_neq macro for Pubkey comparison",
+            "description": "The code uses the general-purpose require_neq! macro to compare two Pubkey values in the participant initialization instruction. However, this macro does not properly handle the semantic comparison of Solana public keys. The correct approach is to use Anchor's require_keys_neq! macro, which is specifically designed for Pubkey comparisons and ensures byte-level equality checks. The cause is a misuse of macros due to oversight or lack of familiarity with Anchor's best practices. This could lead to logical errors in authorization if two different Pubkeys are incorrectly considered equal due to macro behavior. The impact is a potential security bypass, although the actual risk may be low given the nature of the comparison.\n",
+            "severity": "low",
+            "location": [
+                "programs/competition/src/instructions/participant_init.rs#L47"
+            ],
+            "files": [
+                "gmx-solana/programs/competition/src/instructions/participant_init.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Competitions can expire instantly",
+            "description": "The competition initialization instruction allows the start_time to be set in the past, which, combined with a valid end_time in the future, results in a competition that is already expired upon creation. The cause is the lack of a validation check ensuring that the start_time is greater than or equal to the current blockchain timestamp. An attacker or negligent user could exploit this by creating a competition with a past start_time, rendering it immediately inactive. The impact is a denial of service for legitimate participants and confusion in the user experience, undermining the intended functionality of time-bound competitions.\n",
+            "severity": "low",
+            "location": [
+                "programs/competition/src/instructions/competition_init.rs#L41"
+            ],
+            "files": [
+                "gmx-solana/programs/competition/src/instructions/competition_init.rs"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Zero max_deviation in case of low-decimal mid_price can cause unexpected price validation failures",
+            "description": "In the price validator, the max_deviation value is calculated using integer division, which truncates fractional parts. If the mid_price has a low decimal multiplier and the max_deviation_factor is small, this calculation can result in a max_deviation of zero. When max_deviation is zero, only exact price matches are accepted, causing legitimate prices to fail validation. The root cause is integer division truncation in the apply_factor function without a minimum threshold. An attacker could exploit market conditions to trigger this edge case, leading to rejected valid transactions. The impact is reduced system reliability and potential disruption of price-sensitive operations.\n",
+            "severity": "low",
+            "location": [
+                "programs/store/src/states/oracle/validator.rs#L71-L92"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/states/oracle/validator.rs"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ]
+            },
+            "title": "Malicious keepers can deliberately cancel protocol operations by abusing the throw_on_execution_error flag",
+            "description": "The throw_on_execution_error flag, when set to false, causes the protocol to cancel user operations (e.g., deposits, withdrawals) upon any error, rather than allowing retries. A malicious keeper can exploit this by setting the flag to false during periods of market volatility to deliberately cancel user actions. The cause is the lack of restrictions on who can set this flag and the protocol's strategy of treating many errors as non-temporary. Although the protocol intends this behavior, it creates a minor denial-of-service vector. The impact is a degraded user experience, forcing users to resubmit operations and potentially missing execution windows.\n",
+            "severity": "low",
+            "location": [
+                "programs/store/src/lib.rs#L1836-L1874",
+                "programs/store/src/lib.rs#L1940-L1978",
+                "programs/store/src/lib.rs#L2268-L2336",
+                "programs/store/src/lib.rs#L2338-L2402",
+                "programs/store/src/lib.rs#L2404-L2460",
+                "programs/store/src/lib.rs#L2462-L2517",
+                "programs/store/src/lib.rs#L2727-L2772",
+                "programs/store/src/lib.rs#L3425-L3489",
+                "programs/store/src/lib.rs#L3580-L3640",
+                "programs/store/src/lib.rs#L3729-L3791"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/instructions/exchange/execute_shift.rs"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Precision loss in with_max_deviation_factor function due to division by RATIO_MULTIPLIER",
+            "description": "The with_max_deviation_factor function divides a u128 max_deviation_factor by RATIO_MULTIPLIER (10^12) to store it as a u32, which can result in truncation of significant digits if the input is not an exact multiple. This leads to a loss of precision, and when the value is later reconstructed, it may not match the original, allowing lower-than-intended deviations. The cause is silent truncation during type conversion without validation. An attacker could exploit this by setting a max_deviation_factor that truncates to zero or a very small value, weakening price validation. The impact is reduced accuracy in deviation checks and potential security implications in edge cases.\n",
+            "severity": "low",
+            "location": [
+                "crates/utils/src/token_config.rs#L319-L332"
+            ],
+            "files": [
+                "gmx-solana/crates/utils/src/token_config.rs"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "try_adjust_price() may return an incorrect result",
+            "description": "The try_adjust_price() function is intended to indicate whether a price adjustment occurred, but it can return false even when the price.max field was successfully updated. This happens because internal function calls may error, causing the outer function to return false despite partial success. The root cause is non-atomic updates and improper error propagation. An attacker could exploit this by triggering error conditions that do not affect the price update but cause the function to report failure. The impact is incorrect state reporting and potential logic errors in calling functions that rely on the return value for decision-making.\n",
+            "severity": "low",
+            "location": [
+                "programs/store/src/states/oracle/mod.rs#L396-L401"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/states/oracle/mod.rs"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "No way to close and reclaim rent for ActionStats and Participant accounts",
+            "description": "Traders must create ActionStats and Participant accounts, which incur rent costs, but there is no instruction to close these accounts and reclaim the rent once they are no longer needed. The cause is the absence of a cleanup mechanism. Users are forced to leave funds locked in rent-exempt accounts indefinitely. While not a direct security vulnerability, this represents a resource inefficiency and poor user experience. The impact is economic loss for users due to unrecoverable rent payments and unnecessary bloat in the on-chain state.\n",
+            "severity": "informational",
+            "location": [
+                "programs/competition/src/instructions/participant_init.rs#L9-L13"
+            ],
+            "files": [
+                "gmx-solana/programs/competition/src/instructions/participant_init.rs"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "InvalidTradeEvent is never used",
+            "description": "The InvalidTradeEvent error is defined in the error enum but is never actually used in the codebase. The cause is dead code, likely from a previous implementation that was modified without removing the error variant. This does not pose a security risk but reduces code clarity and maintainability. The impact is minimal, limited to code quality and potential confusion for developers reading the code.\n",
+            "severity": "informational",
+            "location": [
+                "programs/competition/src/error.rs#L9-L10",
+                "programs/competition/src/instructions/trade_callback.rs"
+            ],
+            "files": [
+                "gmx-solana/programs/competition/src/error.rs"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-571"
+                ]
+            },
+            "title": "No way to deactivate a Competition",
+            "description": "The Competition account has an is_active field that is set to true during initialization but cannot be changed afterward. The field is checked in various instructions, consuming compute units, but serves no functional purpose since it cannot be deactivated. The cause is a redundant state field without corresponding logic to modify it. This leads to unnecessary resource consumption and code complexity. The impact is inefficient use of compute units and potential confusion about the intended lifecycle of a competition.\n",
+            "severity": "informational",
+            "location": [
+                "programs/competition/src/instructions/competition_init.rs#L58-L59",
+                "programs/competition/src/instructions/trade_callback.rs#L68-L71",
+                "programs/competition/src/instructions/trade_callback.rs#L149-L152"
+            ],
+            "files": [
+                "gmx-solana/programs/competition/src/instructions/competition_init.rs"
+            ]
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ]
+            },
+            "title": "Typos",
+            "description": "The codebase contains numerous typographical errors in comments and constant names, such as \"collatearl\" instead of \"collateral\", \"prcie\" instead of \"price\", and \"receving\" instead of \"receiving\". The cause is human error during development. While these do not affect runtime behavior, they reduce code readability, professionalism, and maintainability. The impact is primarily on developer experience and code quality, potentially leading to confusion during audits or maintenance.\n",
+            "severity": "informational",
+            "location": [
+                "programs/callback/**/*.rs",
+                "programs/store/**/*.rs"
+            ],
+            "files": [
+                "gmx-solana/programs/callback/src/instructions",
+                "gmx-solana/programs/callback/src/types.rs",
+                "gmx-solana/programs/callback/src/interface.rs",
+                "gmx-solana/programs/callback/src/lib.rs",
+                "gmx-solana/programs/callback/src/states.rs"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "create_order()/update_order() do not emit event like the v2 versions do",
+            "description": "The create_order() and update_order() instructions do not emit events upon state changes, unlike their v2 counterparts which do. This creates an undocumented inconsistency. The cause is a discrepancy in event emission logic between instruction versions. The impact is reduced observability for off-chain systems relying on events, potentially leading to missed updates or incorrect state tracking in external applications.\n",
+            "severity": "informational",
+            "location": [
+                "programs/store/src/instructions/exchange/order.rs#L1880-L1886",
+                "programs/store/src/instructions/exchange/order.rs#L1020-L1028",
+                "programs/store/src/instructions/exchange/order.rs#L1306"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/instructions/exchange/order.rs"
+            ]
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-431"
+                ]
+            },
+            "title": "Chainlink oracle logic is unimplemented",
+            "description": "The Chainlink oracle logic in the store program is entirely commented out. If a token is configured to use Chainlink as its oracle, the program will revert unexpectedly when attempting to fetch prices. The cause is incomplete or abandoned implementation. The impact is a critical failure in price feeds for any token relying on Chainlink, leading to denial of service for trading or other price-dependent operations.\n",
+            "severity": "informational",
+            "location": [
+                "programs/store/src/states/oracle/chainlink.rs#L32"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/states/oracle/chainlink.rs"
+            ]
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "The GtBank struct has changed without version-based handling",
+            "description": "The GtBank struct has been modified (e.g., reduced reserved field size, added receiver_vault_out) without using the version field to manage backward compatibility. The version field exists but is not checked or enforced in the code. While the changes appear non-breaking due to zero-initialized defaults, future changes could lead to silent data corruption. The impact is a risk of undefined behavior or state deserialization errors if the struct evolves further without proper version checks.\n",
+            "severity": "informational",
+            "location": [
+                "programs/treasury/src/states/gt_bank.rs#L15-L28 (new)",
+                "programs/gmsol-treasury/src/states/gt_bank.rs#L14-L26 (old)"
+            ],
+            "files": [
+                "gmx-solana/programs/treasury/src/states/gt_bank.rs"
+            ]
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-439"
+                ]
+            },
+            "title": "The ActionHeader struct has changed without version-based handling",
+            "description": "The ActionHeader struct has undergone changes since the last audit, including reductions in padding_0 and reserved field sizes, and the addition of new fields such as callback_kind, callback_version, callback_program_id, callback_config, and callback_action_stats.\nThe root cause of the issue is the presence of an unused version field within the struct, which is not leveraged anywhere in the codebase to differentiate between different versions of the struct.\nWhile the current changes do not break functionality due to safe default values (zeros), future changes could lead to parsing errors or undefined behavior if version-specific handling is not implemented.\nThe impact is currently low, as no immediate exploitability exists, but it may lead to compatibility issues or misinterpretation of data in future upgrades if versioning is not enforced.\n",
+            "severity": "informational",
+            "location": [
+                "programs/store/src/states/common/action.rs#L21-L61",
+                "programs/gmsol-store/src/states/common/action.rs#L17-L49"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/states/common/action.rs"
+            ]
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Unresolved TODO and FIXME comments",
+            "description": "Multiple instances of TODO and FIXME comments were found in the codebase, indicating incomplete or potentially problematic code sections that require attention.\nThe cause is the presence of unaddressed developer notes, such as implementing functionality, reading program IDs from markets, or reducing function arguments, which may indicate technical debt or incomplete logic.\nThese comments could lead to incorrect assumptions during maintenance or integration, especially if they point to missing validation or configuration logic.\nThe impact is informational, as there is no direct security exploit, but unresolved comments may lead to bugs or inconsistencies in future development or audits.\n",
+            "severity": "informational",
+            "location": [
+                "crates/gmsol/src/exchange/treasury.rs#L11",
+                "crates/gmsol/src/exchange/treasury.rs#L59",
+                "crates/gmsol/src/store/token_config.rs#L75",
+                "crates/sdk/src/client/ops/market.rs#L537",
+                "crates/sdk/src/client/ops/token_config.rs#L31"
+            ],
+            "files": [
+                "gmx-solana/crates/gmsol/src/exchange/treasury.rs"
+            ]
+        }
+    ]
+}

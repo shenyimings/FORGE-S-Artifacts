@@ -1,0 +1,649 @@
+{
+    "path": "reports-without-source/2025-11-07_GLAM_audit_report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/glamsystems/glam"
+        ],
+        "commit_id": [
+            "bafcfeab704126408fdd14c156a26901bdfb9dcb",
+            "ca92a55e00494ce7d3c2e9a0fbb3739c63d77ac6"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-11-07",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Stale AUM after operations enables share dilution attacks",
+            "description": "The protocol caches Assets Under Management (AUM) in the `priced_protocols` vector, which is used by functions like `subscribe`, `fulfill`, and `claim_fees` to calculate share ratios. However, after state-changing operations such as burning or minting shares, the cached AUM is not invalidated or refreshed. This allows stale pricing data to persist across transactions within the same slot.\n\nThe root cause is the failure to reset the `priced_protocols` state after operations that alter the underlying asset balances. As a result, subsequent operations use outdated AUM values to compute share issuance, leading to incorrect share distribution.\n\nAn attacker can exploit this by triggering a large redemption just before a new subscription, causing the new depositor to receive fewer shares than they should. For example, after 800 shares are redeemed from a 1000-share pool, the AUM remains at 1000 USD. A new deposit of 100 USD would then be credited with only 25 shares instead of 100 due to the incorrect 4:1 ratio.\n\nThe impact is a dilution of shares for honest participants, enriching early redeemers at the expense of later depositors. This undermines the fairness and economic integrity of the vault.\n",
+            "severity": "high",
+            "location": [
+                "https://github.com/glamsystems/glam/blob/bafcfeab704126408fdd14c156a26901bdfb9dcb/anchor/programs/glam_mint/src/state/aum.rs#L16-L20"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Overpricing of external positions",
+            "description": "The protocol checks whether all external positions have been priced by comparing a HashSet of `priced_positions` against `external_positions`. However, because HashSet removes duplicates, an attacker can submit the same position multiple times, making the length check pass even if only one unique position is priced.\n\nThe root cause is the use of a HashSet for comparison, which ignores duplicate entries, combined with the lack of duplicate prevention in certain pricing endpoints like `price_kamino_vault_shares`. This allows an attacker to inflate the perceived AUM by repeatedly pricing the same asset.\n\nAn attacker can exploit this by calling a pricing instruction multiple times for the same position, thereby inflating the total AUM without corresponding real assets. This false AUM can then be used to mint more shares than justified, leading to value dilution.\n\nThe impact is an overvaluation of the vault’s assets, enabling unfair share minting and potential loss of value for existing holders. This compromises the accuracy and trustworthiness of the protocol's valuation mechanism.\n",
+            "severity": "high",
+            "location": [
+                "https://github.com/glamsystems/glam/blob/bafcfeab704126408fdd14c156a26901bdfb9dcb/anchor/programs/glam_mint/src/state/aum.rs#L31-L44"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Admin cannot burn or force-transfer tokens from non-ATA accounts, allowing users to evade controls",
+            "description": "The `burn_tokens` and `force_transfer_tokens` instructions restrict the source token account to only associated token accounts (ATAs). This prevents administrators from acting on tokens held in non-ATA SPL token accounts, which users can create freely.\n\nThe root cause is the use of ATA-specific constraints in the account validation, rather than general SPL token account checks. This design oversight allows malicious users to move their tokens to non-ATA accounts to evade administrative controls such as forced transfers or burns.\n\nAn attacker can exploit this by transferring their tokens to a non-ATA account before an enforcement action, rendering admin controls ineffective. This allows them to retain tokens that should have been burned or transferred as part of a protocol action.\n\nThe impact is a weakening of administrative authority, reducing the protocol's ability to enforce policies or respond to malicious behavior. This could lead to governance circumvention or unfair advantages for bad actors.\n",
+            "severity": "medium",
+            "location": [
+                "https://github.com/glamsystems/glam/blob/ca92a55e00494ce7d3c2e9a0fbb3739c63d77ac6/anchor/programs/glam_mint/src/instructions/burn_tokens.rs#L55-L61"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ]
+            },
+            "title": "Compute units exhaustion in queue instructions",
+            "description": "The `fulfill` instruction processes all eligible requests in the `RequestQueue` in a single iteration, which can grow up to ~145,000 entries due to Solana account size limits. This leads to unbounded compute unit consumption, potentially exceeding the 1.4 million CU per transaction limit.\n\nThe root cause is the use of a vector-based queue with O(n) iteration, where each request processing consumes significant compute. As the queue grows, the loop in `fulfill` becomes infeasible to complete, causing transaction failures and stalling the entire queue system.\n\nAn attacker can exploit this by submitting a large number of requests, forcing the `fulfill` transaction to fail due to compute exhaustion. This denies service to legitimate users and prevents the processing of any requests, including subscriptions and redemptions.\n\nThe impact is a denial of service that can completely halt protocol operations, especially under high load. This undermines the reliability and availability of the system, particularly as user adoption grows.\n",
+            "severity": "medium",
+            "location": [
+                "https://github.com/glamsystems/glam/blob/bafcfeab704126408fdd14c156a26901bdfb9dcb/anchor/programs/glam_mint/src/state/request_queue.rs#L134-L137"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Fee structure changes can be applied to pending requests when timelock is disabled",
+            "description": "The protocol is designed to prevent fee structure changes from being retroactively applied to pending subscription and redemption requests by validating that no pending fulfillments exist before applying updates in the update_mint_apply_timelock() function. This validation uses a require! macro to ensure the request queue does not contain any pending fulfillments. However, when timelock_duration is set to 0, the update_mint() function applies changes immediately via materialize_mint_updates() without performing this same validation. The root cause is a missing validation check in the immediate update path, creating an inconsistent security state between timelocked and instant updates. An admin could exploit this by modifying the fee structure with timelock_duration == 0, causing the new fees to be applied to all pending requests. This would result in users being charged fees different from those in effect when they submitted their requests, violating user expectations and potentially leading to financial loss or loss of trust in the protocol's predictability.\n",
+            "severity": "medium",
+            "location": [
+                "anchor/programs/glam_mint/src/instructions/update_mint_apply_timelock.rs#34-L40",
+                "update_mint() when timelock_duration == 0"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-182"
+                ]
+            },
+            "title": "Timelock can be bypassed allowing immediate state changes",
+            "description": "The `is_timelock_expired()` function returns true when `timelock_expires_at` is 0, which allows callers to bypass the intended timelock delay. The root cause is that after `update_state_apply_timelock()` resets `timelock_expires_at` to 0, subsequent staging of updates (e.g., via `enable_disable_protocols_handler`) does not extend the timelock, leaving it at 0. An attacker can exploit this by first triggering a state update to reset the timelock, then staging new changes, and immediately applying them via another call to `update_state_apply_timelock()`, since the condition `timelock_expires_at <= now()` is instantly satisfied. This allows immediate activation of staged changes without waiting for the required timelock period, undermining the security mechanism designed to prevent rushed or malicious state modifications.\n",
+            "severity": "low",
+            "location": [
+                "accounts.rs::is_timelock_expired#405-407"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Rounding against the protocol in fulfill_subscription",
+            "description": "The `total_fee_shares` is calculated using floor division, which rounds down the fees. Since the user receives `shares_after_fees = shares_before_fees - total_fee_shares`, rounding down the fees effectively rounds up the user's shares. The root cause is the use of `.safe_div()` without adding an offset for ceiling division. An attacker can exploit this by making deposits with specific amounts (e.g., 1,000,001 instead of 1,000,000) where the fractional fee remainder is discarded, resulting in the user receiving one extra share due to the rounding error. Over many transactions, this leads to a gradual loss of value from the protocol, breaking economic invariants and potentially affecting solvency.\n",
+            "severity": "low",
+            "location": [
+                "request_queue.rs::fulfill_subscription#54-57"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "When setting new fees, they are applied retroactively",
+            "description": "The `set_protocol_fees` instruction updates the fee structure without first crystallizing outstanding fees. The root cause is the lack of a pre-update check or fee crystallization step, which allows new fee rates to be applied to accrued but unclaimed fees from previous periods. An attacker (or privileged actor) could change the fee structure after fees have accumulated but before they are minted, thereby retroactively applying higher or lower fees to past activity. This undermines the predictability and fairness of the fee system, potentially leading to disputes or unexpected dilution/benefits for users depending on the direction of the fee change.\n",
+            "severity": "low",
+            "location": [
+                "set_protocol_fees.rs#33-40"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Early exit in crystallize_fees_and_calc_new_shares means timestamps are not updated",
+            "description": "The `crystallize_fees_and_calc_new_shares` function returns early when `aum <= 0`, which skips the update of fee structure timestamps and `last_aum`. The root cause is an optimization that avoids computation when AUM is zero, but it fails to maintain critical state consistency. An attacker could manipulate the timing of fee crystallization around periods of zero AUM to prevent timestamp updates, which breaks performance-fee calculations that depend on `last_performance_fee_crystallized`. This could delay or prevent accurate fee accrual, leading to incorrect fee distributions and potential loss of revenue for fee recipients.\n",
+            "severity": "low",
+            "location": [
+                "flow.rs::crystallize_fees_and_calc_new_shares#380-382"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "AUM calculation can be manipulated",
+            "description": "The AUM calculation verifies that all `external_positions` are priced by checking their pubkeys exist in `priced_positions`, but it does not validate that the underlying position data has not changed. The root cause is the reuse of pubkeys for different positions without invalidating stale pricing data. An attacker can delete a high-value position and recreate a low-value one at the same pubkey within the same slot. Since the pubkey is still present in `priced_positions`, the outdated high-value pricing is reused, inflating the AUM. This allows the attacker to mint more shares than justified by the actual asset value, leading to dilution of existing holders and potential insolvency.\n",
+            "severity": "low",
+            "location": [
+                "aum.rs#45-50"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Usd-only oracle check blocks LSTs as base assets",
+            "description": "The `PricedAssetInfo::base_asset_amount` function enforces that the base asset oracle must be USD-denominated via `require_eq!(base_asset_usd_price.denom, PriceDenom::USD)`. The root cause is a rigid oracle validation that does not support alternative pricing paths. This prevents liquid staking tokens (LSTs), which are typically priced in SOL, from being used as base assets. An attacker is not the primary concern here, but legitimate users are harmed as they cannot configure vaults with LSTs despite intended support. The impact is reduced functionality and loss of product flexibility, limiting the protocol's utility and adoption.\n",
+            "severity": "low",
+            "location": [
+                "assets.rs#31-35"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Fee crystallization before subscription allows users to receive more shares for the same deposit",
+            "description": "The `subscribe()` function calculates Net Asset Value (NAV) at the beginning using the current `shares_supply`, but a permissionless `crystallize_fees()` call can increase `shares_supply` just before subscription. The root cause is the incorrect ordering of operations: NAV is computed before internal fee crystallization. An attacker can front-run a subscription by calling `crystallize_fees()`, which mints fee shares and increases total supply, thereby lowering NAV. The lower NAV results in the subscriber receiving more shares for the same deposit amount. Although the gain per transaction is small, it creates an unfair advantage for proactive users and introduces inconsistency in share pricing, undermining economic fairness.\n",
+            "severity": "low",
+            "location": [
+                "subscribe.rs#192-201"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Strengthen Drift borrow guard",
+            "description": "The withdraw instruction in the Drift integration trusts accounts provided in ctx.remaining_accounts without verifying that they are owned by the Drift program (drift::id()). Although Drift may eventually reject invalid accounts, the instruction should fail early to prevent unnecessary computation.\n\nThe root cause is the lack of ownership and discriminator validation on accounts in ctx.remaining_accounts. The code assumes the downstream program will enforce correctness, but this leads to delayed error handling.\n\nAn attacker could potentially pass invalid or maliciously crafted accounts to waste compute units or cause unexpected behavior before rejection at the target program level.\n\nThe impact includes inefficient use of resources (wasted compute units) and delayed error reporting, which could hinder debugging and increase transaction costs.\n",
+            "severity": "n/a",
+            "location": [
+                "ext_drift/src/instructions/withdraw.rs#64-77"
+            ],
+            "files": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Incorrect validation of stake pool account",
+            "description": "The validation logic for the stake pool account only checks that the account owner matches one of the three official stake-pool program IDs. However, other account types (e.g., ValidatorList) under the same program share the owner, so this check can incorrectly accept an invalid account type.\n\nThe root cause is the absence of a check for the concrete account type or data layout. The code only inspects a fixed offset for the mint without confirming the account's actual structure.\n\nAn attacker or misconfigured call could pass a different account type (like ValidatorList) that shares the owner but has a different data layout, leading to incorrect interpretation of data.\n\nThe impact includes potential mispricing, incorrect state assumptions, and possible fund mismanagement due to processing on invalid account types.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_protocol/src/instructions/jupiter_swap.rs#124-131"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-570"
+                ]
+            },
+            "title": "Eliminate dead code around underflow check",
+            "description": "The code contains a conditional check `if vault_aum < 0` after subtracting management and performance fees from `vault_aum`. However, since `vault_aum` is an unsigned integer, the subtraction itself will panic on underflow, making the if guard redundant.\n\nThe root cause is a misunderstanding of unsigned integer arithmetic in Rust, where underflow causes a panic by default in debug mode (and potentially in production depending on configuration), rendering the explicit check useless.\n\nAn attacker cannot directly exploit this, but the presence of dead code may mislead developers into thinking underflow is being handled gracefully.\n\nThe impact is reduced code clarity and maintainability, with no direct security risk, but it obscures the actual failure mode and introduces unnecessary logic.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_protocol/src/state/price/kamino.rs#331-333"
+            ],
+            "files": []
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-369"
+                ]
+            },
+            "title": "Fail gracefully when trying to divide by zero by mistake",
+            "description": "The code performs a division using `.safe_div()` on `vault_state_summary.shares_issued`, but if this value is zero, the operation will still fail without a clear context. Although `.safe_div()` may return a Result, the error message lacks specificity.\n\nThe root cause is the absence of a pre-check ensuring that `shares_issued > 0` before division, which is a necessary condition for meaningful pricing.\n\nIf a zero value is passed due to initialization error or state corruption, the division will fail with a generic panic or error, making debugging difficult.\n\nThe impact is a potential denial of service for pricing operations and unclear error traces, hindering operational recovery and monitoring.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_protocol/src/state/price/kamino.rs#342"
+            ],
+            "files": []
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "Underwater position stalls pricing and AUM calculation due to problematic cast",
+            "description": "The function attempts to cast the result of `total_spot_value.safe_add(total_unrealized_pnl)?` to `u128`, but if the position is underwater (i.e., unrealized losses exceed collateral), this value becomes negative, and the cast to an unsigned type fails.\n\nThe root cause is the premature casting of a signed value (which can be negative) into an unsigned integer, which fails when the position has negative net value.\n\nGiven Drift's high leverage, underwater positions can occur frequently, and this failure blocks pricing and AUM updates for the entire vault.\n\nThe impact is a denial of service for vault pricing and AUM calculation during market downturns, potentially freezing vault operations and preventing accurate valuation.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_mint/src/instructions/price_drift_vault_depositors.rs#171"
+            ],
+            "files": []
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Vault fees documentation concern around burning",
+            "description": "The code optimizes fee burning by skipping the actual mint-and-burn cycle for `pa_shares_vault_fee`, instead adjusting balances directly. While functionally correct, this creates a discrepancy between documentation/user expectations and on-chain behavior.\n\nThe root cause is a performance optimization that removes a visible burn event from the blockchain trace.\n\nAlthough not exploitable, this can mislead users and auditors who expect to see explicit burn transactions for transparency.\n\nThe impact is reduced auditability and transparency, potentially eroding trust if users believe fees are not being burned as promised.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_mint/src/state/request_queue.rs#60-64"
+            ],
+            "files": []
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Move crystallize_fees_and_calc_new_shares before fulfilling orders",
+            "description": "The `crystallize_fees_and_calc_new_shares` function is called after fulfilling liquidity requests in instructions like `subscribe`, meaning it uses post-action state (e.g., updated AUM and shares) instead of the intended pre-action snapshot.\n\nThe root cause is incorrect sequencing of state mutation and fee crystallization, which obscures the intended business logic and increases the risk of future regressions.\n\nA developer might assume fees are calculated on pre-action data, but they are actually based on updated values, potentially leading to incorrect fee accrual.\n\nThe impact is incorrect fee calculations and increased risk of logic errors in future modifications due to unclear intent.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_mint/src/instructions/subscribe.rs#191-201"
+            ],
+            "files": []
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Ensure shares_decimals >= base_asset_decimals",
+            "description": "The code assumes that `shares_decimals >= base_asset_decimals` when scaling AUM for NAV calculation, but this assumption is not enforced with a runtime check.\n\nThe root cause is the lack of input validation on configuration parameters, relying solely on correct setup.\n\nA misconfiguration where `shares_decimals < base_asset_decimals` would cause incorrect scaling and potentially overflow or underflow during arithmetic.\n\nThe impact is incorrect net asset value (NAV) calculations, leading to mispriced shares and potential financial loss.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_protocol/src/state/flow.rs#194"
+            ],
+            "files": []
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Add extra requirements before closing the GlamProtocol",
+            "description": "The `close_state_handler` allows immediate closure of non-tokenized vaults (where mint is Pubkey::default()) with only a minimal check. It does not verify that the vault is empty or disabled.\n\nThe root cause is insufficient validation before allowing state destruction, increasing the risk of accidental or malicious closure.\n\nAn attacker with access to the signer could close a vault prematurely, leading to loss of state and potential fund immobilization.\n\nThe impact includes irreversible data loss and potential disruption of vault operations if closed while active or holding assets.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_protocol/src/instructions/state.rs#142-146"
+            ],
+            "files": []
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "cpi_proxy could validate cpi_program the same way integration programs do",
+            "description": "The `cpi_proxy` instruction includes a `cpi_program` account marked with `/// CHECK:`, trusting integration programs to pass the correct program ID. However, `cpi_proxy` itself does not validate the program ID, even though it is known.\n\nThe root cause is a lack of defense-in-depth; while upstream checks exist, the proxy should independently verify the target program.\n\nA misrouted CPI call due to a bug or exploit in an integration could lead to unintended program interactions.\n\nThe impact is increased risk of incorrect CPI routing, potentially leading to unexpected behavior or security incidents if the wrong program is invoked.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_protocol/src/instructions/cpi_proxy.rs#143-144"
+            ],
+            "files": []
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-267"
+                ]
+            },
+            "title": "Add threshold support against full amount delegate access",
+            "description": "Delegates with permissions like `FarmsPermissions::Stake` can move 100% of vault funds in a single action, with no rate limits or thresholds.\n\nThe root cause is an all-or-nothing permission model that grants full capital access upon delegation.\n\nA compromised delegate key or malicious delegate could drain or misallocate all funds in a single transaction.\n\nThe impact is high blast radius from delegate misuse, increasing systemic risk to vault assets.\n",
+            "severity": "n/a",
+            "location": [
+                "ext_kamino/src/instructions/farms_stake.rs#14-26"
+            ],
+            "files": []
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Enforce Checks on extra_params for Each Action",
+            "description": "The `cpi_proxy_handler` processes `extra_params` without validating that each `action_type` is permitted under the delegate's granted permissions. A delegate with only `HarvestReward` permission could submit actions to add or remove external accounts.\n\nThe root cause is missing permission enforcement within the proxy handler, relying on external validation that may not be sufficient.\n\nThis allows privilege escalation where low-privilege delegates can perform high-risk actions.\n\nThe impact is a critical access control bypass, enabling unauthorized state modifications and potential fund diversion.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_protocol/src/instructions/cpi_proxy.rs#70-72"
+            ],
+            "files": []
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Lack of validation on destination accounts allows fund diversion by delegator",
+            "description": "The `withdraw.rs` instruction uses `UncheckedAccount` for `user_token_account` and assumes Drift will validate it. However, Drift's withdraw instruction does not validate the destination account, unlike its deposit instruction.\n\nThe root cause is misplaced trust in the target program's validation, combined with incomplete validation in the calling instruction.\n\nA malicious or compromised delegator could redirect withdrawn funds to an arbitrary account.\n\nThe impact is unauthorized fund diversion, leading to direct financial loss.\n",
+            "severity": "n/a",
+            "location": [
+                "ext_drift/src/instructions/withdraw.rs#176-178"
+            ],
+            "files": []
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Unsynced WSOL ATAs mispriced in validate_and_price_token_account",
+            "description": "The `validate_and_price_token_account` function checks `ata.amount == 0` before checking for wSOL. For unsynced wSOL accounts, `amount` is zero but the account holds lamports, causing the function to return zero value.\n\nThe root cause is incorrect ordering of early-return conditions, failing to handle native SOL balance before SPL token logic.\n\nThis leads to underpricing of wSOL holdings when accounts are not synced, affecting AUM and share pricing.\n\nThe impact is inaccurate valuation of vault assets, potentially leading to incorrect redemption prices or collateral assessments.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_protocol/src/state/price/vault.rs#105-125"
+            ],
+            "files": []
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-390"
+                ]
+            },
+            "title": "Missing error handling for optional position valuation returns",
+            "description": "The `drift_user_spot_and_perp_values` function uses `if let Some(...)` to handle return values from `get_balance_value_and_token_amount` and `get_unrealized_pnl`. If these return `None` due to arithmetic errors (overflow, underflow), the position is silently skipped.\n\nThe root cause is silent failure on arithmetic errors instead of propagating them as errors.\n\nThis results in incomplete or incorrect total value calculations, as affected positions are excluded from AUM and PnL.\n\nThe impact is materially incorrect financial reporting, leading to mispriced shares and flawed risk assessments.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_protocol/src/state/price/drift.rs#191-202"
+            ],
+            "files": []
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Inconsistent max age seconds configuration for aggregator oracles",
+            "description": "The `validate_oracle` function applies local `max_age_seconds` configuration for direct oracles but ignores it for aggregator oracles (via Scope), using only the global configuration.\n\nThe root cause is divergent logic paths for different oracle types, with aggregator oracles bypassing local overrides.\n\nVault owners cannot customize freshness requirements for aggregated feeds, forcing uniform staleness tolerance across all vaults.\n\nThe impact is reduced risk management flexibility, potentially exposing vaults to stale prices even when stricter local policies are desired.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_protocol/src/state/price/oracle.rs#595-599"
+            ],
+            "files": []
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ]
+            },
+            "title": "Output token account must be pre-created for Jupiter swaps",
+            "description": "The `jupiter_swap` instruction requires the `output_vault_ata` to already exist. If the vault is swapping into a new token for the first time, the transaction will fail unless the ATA is pre-created.\n\nThe root cause is the absence of `init_if_needed` in the account constraint, requiring manual setup.\n\nThis creates operational friction for vault managers who must issue separate transactions to initialize ATAs.\n\nThe impact is degraded user experience and increased transaction costs due to mandatory pre-initialization.\n",
+            "severity": "n/a",
+            "location": [
+                "glam_protocol/src/instructions/jupiter_swap.rs#264-270"
+            ],
+            "files": []
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Max-staleness oracle aggregation",
+            "description": "The current oracle aggregation logic in oracle.rs filters price submissions strictly by the maximum landed_at timestamp, meaning only the most recent submissions with the latest timestamp contribute to the final averaged price. While this approach is acceptable because the result is still checked against a confidence interval, it unnecessarily discards other recent and valid submissions that fall just behind the latest timestamp. The root cause is the lack of a configurable staleness window, which limits the depth of the price feed. This design reduces the resilience and stability of the price oracle, as it becomes more sensitive to minor timing differences between oracles. An attacker or network delay could exploit this by slightly delaying a submission to exclude otherwise valid data, increasing price variance and reducing the robustness of the aggregation. The impact is a less stable and potentially more manipulatable price feed, which could affect downstream financial operations such as valuation, liquidations, or minting decisions. Introducing a max_staleness parameter would allow the inclusion of all submissions within a recent time window, improving data depth and price stability.\n",
+            "severity": "low",
+            "location": [
+                "anchor/programs/glam_protocol/src/state/price/oracle.rs#349-L354"
+            ],
+            "files": []
+        },
+        {
+            "id": 30,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Unstaked funds cannot be withdrawn from Kamino Farms",
+            "description": "The `farms_unstake` instruction performs a CPI to Kamino Farms' `unstake` function, which only marks the position as unstaked but does not withdraw the funds. The protocol fails to follow up with a call to `withdraw_unstaked_deposits`, leaving the tokens stranded in Kamino.\n\nThe root cause is the incomplete implementation of the unstaking flow, where the second step of fund retrieval is omitted. This results in funds being locked in the external protocol even after the unstake operation is completed.\n\nWhile not directly exploitable by an attacker, this issue affects all users attempting to unstake from Kamino Farms. Their funds remain inaccessible without manual intervention or external tools.\n\nThe impact is a loss of fund accessibility for users, reducing capital efficiency and user trust. It also increases operational friction and support burden for the protocol team.\n",
+            "severity": "low",
+            "location": [
+                "https://github.com/glamsystems/glam/blob/bafcfeab704126408fdd14c156a26901bdfb9dcb/anchor/programs/ext_kamino/src/instructions/farms_unstake.rs#L29-L31"
+            ],
+            "files": []
+        },
+        {
+            "id": 31,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Expired delegates can bypass authorization checks",
+            "description": "The `check_owner_or_delegate` function verifies if a signer is a delegate by checking their public key against the `delegate_acls` list but does not validate the `expires_at` timestamp. This allows expired delegates to retain access indefinitely.\n\nThe root cause is the omission of timestamp validation in the authorization logic, despite the field being present and used elsewhere (e.g., in `check_access_any`). This inconsistency creates a privilege escalation vector.\n\nAn attacker who was previously granted delegate status can continue to perform privileged operations after their access has expired. This could include modifying vault settings or triggering sensitive actions.\n\nThe impact is unauthorized access to administrative functions, potentially leading to fund mismanagement or configuration changes. While the risk is mitigated by the need for prior delegation, it still represents a failure in access control enforcement.\n",
+            "severity": "low",
+            "location": [
+                "https://github.com/glamsystems/glam/blob/bafcfeab704126408fdd14c156a26901bdfb9dcb/anchor/programs/glam_protocol/src/state/auth.rs#L153-L154"
+            ],
+            "files": []
+        },
+        {
+            "id": 32,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Admin can steal funds by maliciously configuring claimable fees",
+            "description": "When `timelock_duration` is set to zero, the `update_mint_params` function allows immediate parameter updates without restricting which fields can be modified. This enables the admin to directly alter `ClaimableFees` and redirect fees to their own account.\n\nThe root cause is the lack of parameter validation in the zero-timelock code path. While timed updates restrict changes to `NotifyAndSettle` and `FeeStructure`, the immediate update path allows any parameter to be changed, including sensitive internal states.\n\nA malicious or compromised admin can exploit this to update the `ClaimableFees` field and route most or all protocol fees to themselves, effectively stealing from the system.\n\nThe impact is a direct loss of revenue for the protocol and its users, undermining trust in the admin's role. This represents a critical centralization risk where a single actor can extract value without oversight.\n",
+            "severity": "low",
+            "location": [
+                "https://github.com/glamsystems/glam/blob/bafcfeab704126408fdd14c156a26901bdfb9dcb/anchor/programs/glam_protocol/src/state/accounts.rs#L393-L395"
+            ],
+            "files": []
+        }
+    ]
+}

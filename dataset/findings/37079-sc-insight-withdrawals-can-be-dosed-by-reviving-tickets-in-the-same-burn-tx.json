@@ -1,0 +1,42 @@
+{
+    "path": "reports/immunefi/37079-sc-insight-withdrawals-can-be-dosed-by-reviving-tickets-in-the-same-burn-tx.md",
+    "project_info": {
+        "url": [
+            "https://github.com/jito-foundation/restaking/tree/master/vault_program"
+        ],
+        "commit_id": [
+            "9bdcb8e665d2011fb72d82cd8ff225d2c3817d9f"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-11-24",
+        "project_path": "contracts/37079-sc-insight-withdrawals-can-be-dosed-by-reviving-tickets-in-the-same-burn-tx.md-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Withdrawals can be DOSed by reviving tickets in the same burn tx",
+            "description": "1. **Description:** The vulnerability allows an attacker to prevent future withdrawals for a specific withdrawal ticket base by reviving the ticket account in the same transaction that burns it. Although the account data is zeroed out during closure, it is not resized to zero. If lamports are refunded to the account within the same transaction, the account is not garbage collected and retains its (zero-filled) data.\n\n2. **Cause:** The root cause lies in the use of `close_program_account`, which zeroes out account data but does not resize it to zero. When a subsequent instruction in the same transaction refunds lamports, the account survives with zero-filled data. Later attempts to create a new withdrawal ticket with the same base (e.g., a PDA) fail because the `load_system_account` function checks for empty data and rejects accounts that are not fully uninitialized.\n\n3. **Exploitation:** An attacker (or a third-party program) can intentionally refund lamports to a withdrawal ticket account in the same transaction as its burn. This revives the account with zeroed data. Any future attempt to enqueue a withdrawal using the same base will fail with `AccountAlreadyInitialized`, blocking the withdrawal.\n\n4. **Impact:** The primary impact is that withdrawals for the affected base are permanently blocked, leading to frozen funds for third-party programs that rely on deterministic PDAs for withdrawal tickets. While individual users can switch to a new base keypair, programs using fixed PDAs cannot easily recover, resulting in a denial-of-service and potential permanent fund lockup.\n",
+            "severity": "informational",
+            "location": [
+                "vault_program::process_burn_withdrawal_ticket",
+                "vault_program::process_enqueue_withdrawal",
+                "vault_program::load_system_account"
+            ],
+            "files": [
+                "restaking/vault_program/src/burn_withdrawal_ticket.rs"
+            ]
+        }
+    ]
+}

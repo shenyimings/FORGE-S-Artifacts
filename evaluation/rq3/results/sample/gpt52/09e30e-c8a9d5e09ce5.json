@@ -1,0 +1,160 @@
+{
+    "project": "Squads%20Audit.pdf.json",
+    "files": [
+        "dataset/contracts/Squads%20Audit.pdf.json/programs/squads-mpl/src/lib.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2222222222222222,
+        "recall": 1.0,
+        "f1": 0.3636363636363636
+    },
+    "cwe_ground_truth": [
+        "CWE-670",
+        "CWE-691"
+    ],
+    "cwe_detected": [
+        "CWE-1265",
+        "CWE-664",
+        "CWE-617",
+        "CWE-691",
+        "CWE-435",
+        "CWE-670",
+        "CWE-284",
+        "CWE-703",
+        "CWE-834"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect Threshold Checks",
+            "description": "The vulnerability arises in the multisig creation logic where the threshold for approval is validated before duplicate members are removed from the members list. The check ensures the threshold is within the valid range of 1 to the total number of members, but this validation occurs prior to deduplication of the members vector. As a result, if an attacker provides a list of duplicate public keys, the actual number of unique members after deduplication will be smaller than the original count used in the threshold validation. This allows the creation of a multisig instance where the threshold exceeds the actual number of members, making it impossible to reach consensus and effectively freezing the multisig. The root cause is the incorrect order of operations: deduplication should occur before threshold validation. An attacker could exploit this by crafting a create instruction with many duplicate members and a high threshold, leading to a denial of service by rendering the multisig inoperable. The impact is a loss of functionality and potential lock-up of funds or governance capability, though not direct fund loss.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code implements a multisig that creates transactions (draft→active→executeReady) and later executes saved instructions via PDA signing. The security model relies on “ms_change_index” to deprecate transactions whenever membership/threshold changes, and on careful handling of untrusted inputs during execution (notably `account_list` and instruction indices).\nSeveral issues arise from the listed CWE root causes:\n1) `execute_transaction` / `execute_instruction` omit the deprecation check (`transaction.transaction_index > multisig.ms_change_index`) that is enforced elsewhere (activate/approve/reject/cancel). This allows execution of stale transactions approved under an old member set/threshold, which is an access-control failure against a critical governance resource.\n2) `execute_transaction` trusts `account_list` indices without bounds checking; invalid indices can panic/abort the program (DoS). Multiple `.unwrap()` uses on checked arithmetic can also panic on rare boundary conditions (index overflow), likewise causing DoS.\n3) `execute_instruction` appears inconsistent with the authority model used in `execute_transaction` (no special-case for `authority_index == 0`), which can make otherwise-valid transactions impossible to execute sequentially. This is an integration/interaction bug that manifests when multiple correctly-behaving components (transaction creation vs. sequential execution) are used together.\n4) `add_member` uses `realloc(..., false)` (no zero-initialization), which is a resource-lifetime/control smell: newly-added bytes may contain stale data, increasing the chance of state confusion or unintended data disclosure through account reads (depending on how the account is later interpreted/serialized).\n",
+            "findings": [
+                {
+                    "title": "Deprecated transactions can still be executed (missing ms_change_index check)",
+                    "description": "The code comments state execution should be prevented if a transaction is deprecated by `ms_change_index`, and this constraint is enforced in `activate_transaction`, `approve_transaction`, `reject_transaction`, and `cancel_transaction`.\nHowever, both execution entrypoints omit this protection:\n- `ExecuteTransaction` account constraints do NOT include `constraint = transaction.transaction_index > multisig.ms_change_index`.\n- `ExecuteInstruction` account constraints do NOT include the same deprecation check.\nAs a result, a transaction that became `ExecuteReady` under an old member set/threshold can still be executed after the multisig membership/threshold changes (i.e., after `set_change_index` is advanced via add/remove member or threshold changes). This violates the intended governance control and can enable actions that the current multisig configuration would no longer authorize.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Out-of-bounds indexing in execute_transaction via untrusted account_list (panic/DoS)",
+                    "description": "`execute_transaction` accepts `account_list: Vec<u8>` and maps each element to an index into `ctx.remaining_accounts`:\n`let acc = &ctx.remaining_accounts[index].clone();`\nThere is no check that `index < ctx.remaining_accounts.len()`. A malicious caller can supply an index that is out of range, triggering a runtime panic (abort) and causing the instruction to fail.\nWhile Solana transaction failure is not a fund-theft primitive, it is a denial-of-service vector against transaction execution (especially relevant when `allow_external_execute` is enabled and executors are untrusted).\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unchecked unwraps on checked arithmetic can panic on boundary conditions (DoS)",
+                    "description": "Multiple sites use `checked_add(...).unwrap()` / `try_into().unwrap()` in instruction handlers and account seeds, for example:\n- `ms.transaction_index = ms.transaction_index.checked_add(1).unwrap();`\n- `tx.instruction_index = tx.instruction_index.checked_add(1).unwrap();`\n- PDA seed derivations using `...checked_add(1).unwrap().to_le_bytes()`\n- `let new_threshold: u16 = ...try_into().unwrap();`\nIf indices ever reach their maximum representable value (or if state becomes inconsistent/corrupted), these will panic and abort execution rather than returning a controlled error. This enables denial-of-service in rare but security-relevant edge cases (e.g., long-lived multisigs, or state corruption scenarios).\n",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Sequential execution authority derivation inconsistent with batch execution (authority_index == 0 DoS)",
+                    "description": "`execute_transaction` supports two signing modes:\n- `authority_index == 0`: uses the multisig PDA seeds `[b\"squad\", multisig.create_key, b\"multisig\", bump]`\n- `authority_index >= 1`: uses authority PDA seeds `[b\"squad\", ms_key, authority_index, b\"authority\", bump]`\nIn contrast, `execute_instruction` always derives seeds using the `authority` PDA form:\n`[b\"squad\", ms_key, tx.authority_index, b\"authority\", tx.authority_bump]`\nand does not special-case `authority_index == 0`. Transactions created with `authority_index == 0` (which appear explicitly supported in `create_transaction`) may therefore be impossible to execute via the sequential path, causing partial-execution/continuation failures and a persistent DoS for that transaction execution mode.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Realloc extends multisig account without zero-initializing new bytes",
+                    "description": "In `add_member`, the multisig account is reallocated with:\n`AccountInfo::realloc(&multisig_account_info, needed_len, false)?;`\nPassing `false` means the newly allocated bytes are not zero-initialized. This is an improper resource-lifetime/control practice: extended regions may contain stale data, which can lead to state confusion if later code (or future upgrades) accidentally interprets/serializes those bytes, and can also expose unintended historical data when accounts are read off-chain.\nAlthough the current logic likely relies on explicit vector lengths (mitigating immediate exploitation), this is still a risky pattern for long-lived governance state.\n",
+                    "category": "CWE-664",
+                    "severity": "low",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The program is a multisig executor that performs CPI (`invoke_signed`) into arbitrary programs using a PDA authority. This design is inherently sensitive to nested invocation (reentrancy) and to compute/iteration blowups because it must iterate over user-provided instruction/account lists. In the provided code, several protections are missing or inconsistent:\n- `execute_transaction` and `execute_instruction` perform CPIs before updating any “in-progress/executing” state, enabling a CPI callee to call back into this program and re-run execution paths while the transaction/instruction is still marked executable.\n- `execute_instruction` does not handle `authority_index == 0` (multisig PDA authority) the same way `execute_transaction` does, leading to an always-failing control-flow path for sequential execution of authority-0 transactions.\n- `execute_transaction` trusts `account_list: Vec<u8>` as indices into `remaining_accounts` without bounds checks, which can trigger runtime panics (transaction abort / DoS).\n- Iteration over instructions and their account metas is not sufficiently bounded at runtime, allowing excessive compute consumption for large transactions.\n",
+            "findings": [
+                {
+                    "title": "Reentrancy via CPI allows nested execution of ExecuteReady transactions/instructions",
+                    "description": "Both `execute_transaction` and `execute_instruction` perform CPI (`invoke_signed`) into an arbitrary, user-specified program (`ms_ix.program_id`) before committing any state that would prevent re-entry (e.g., marking the transaction as executing/executed, or marking the instruction as executed).\n\nA malicious callee program can CPI back into this program (nested invocation) and call `execute_transaction` again on the same `transaction` while the outer call is still in progress. Because the transaction status is only set to executed *after* the loop, the inner call can pass `transaction.status == ExecuteReady` and re-run the same instructions, potentially causing double-execution (e.g., duplicate transfers, repeated authority actions) within one outer invocation.\n\nSimilarly, `execute_instruction` sets `instruction.executed = true` only after the CPI; a reentrant call can execute the same “next instruction” again before it is marked executed.\n\nAffected code:\n- `execute_transaction`: CPI inside the instruction loop, `transaction.set_executed()` only after loop.\n- `execute_instruction`: CPI occurs before `ms_ix.set_executed()`.\n",
+                    "category": "CWE-1265",
+                    "severity": "critical",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Sequential execution path is always incorrect for authority_index == 0",
+                    "description": "`create_transaction` supports `authority_index == 0` as a special case that uses the multisig PDA seeds (`[b\\\"squad\\\", create_key, b\\\"multisig\\\"]`) during full execution (`execute_transaction` handles this with a match on `authority_index`).\n\nHowever, `execute_instruction` (sequential execution) always derives signer seeds as:\n`[b\\\"squad\\\", ms_key, authority_index, b\\\"authority\\\", bump]`\nand does not special-case `authority_index == 0`. For authority-0 transactions, this seed set will not match the intended multisig PDA authority, so `invoke_signed` will fail whenever sequential execution is attempted on such a transaction.\n\nThis is an always-incorrect control-flow path: authority-0 transactions are supported by one execution handler (`execute_transaction`) but effectively unsupported/broken by the sequential handler (`execute_instruction`).\n\nAffected code:\n- `execute_instruction`: always uses `authority_seeds` and never uses the multisig PDA seeds for index 0.\n",
+                    "category": "CWE-670",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Out-of-bounds indexing of remaining_accounts via account_list can panic (DoS)",
+                    "description": "`execute_transaction` builds `mapped_remaining_accounts` by interpreting each byte in `account_list` as an index into `ctx.remaining_accounts`:\n\n`let acc = &ctx.remaining_accounts[index].clone();`\n\nThere is no bounds check that `index < ctx.remaining_accounts.len()`. If `account_list` contains an invalid index, the program will panic due to Rust slice bounds checking, aborting execution. This creates a denial-of-service vector against execution attempts (wasting compute/fees and preventing successful execution until a correct call is made).\n\nWhile Solana transaction failure is not state-corrupting, panics are still security-relevant because they can be induced by untrusted input and reliably force failure.\n\nAffected code:\n- `execute_transaction`: mapping `account_list` into `remaining_accounts` without validation.\n",
+                    "category": "CWE-670",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unbounded/insufficiently bounded iteration over instructions and account metas may exhaust compute",
+                    "description": "The executor loops over:\n- All instructions from `1..(transaction.instruction_index + 1)` in `execute_transaction`, and\n- All account metas in each instruction (`for account_index in 0..ms_ix.keys.len()`), and\n- Similarly iterates `0..ms_ix.keys.len()` in `execute_instruction`.\n\nAlthough there are implicit practical limits (transaction size, account limits, rent costs), the on-chain logic itself does not enforce a strict upper bound on:\n- number of instructions per transaction (besides whatever `MsTransaction` allows), nor\n- number of keys per instruction (besides `MsInstruction::MAXIMUM_SIZE`, not shown here).\n\nAttackers/members can craft large transactions that are expensive to execute and likely to exceed compute limits, resulting in repeated failures/DoS of execution workflows.\n\nAffected code:\n- `execute_transaction`: `(1..max_ix_index).try_for_each(...)` and inner `for account_index in 0..ms_ix.keys.len()`.\n- `execute_instruction`: `for account_index in 0..ms_ix.keys.len()`.\n",
+                    "category": "CWE-834",
+                    "severity": "medium",
+                    "confidence": 0.75
+                }
+            ]
+        },
+        {
+            "reasoning": "Review focused only on the provided CWE candidates. No web redirect logic exists (CWE-698 not applicable). Rust’s required braces largely prevent incorrect block delimitation (CWE-483), and no clear security-relevant operator/precedence mistakes were identified (CWE-480/CWE-783) in the shown logic/constraints.\n\nThe primary security-relevant root cause present is CWE-617 (reachable assertion/panic equivalents). The program contains multiple attacker-reachable panic paths via:\n(1) out-of-bounds slice indexing when mapping `account_list` indices into `ctx.remaining_accounts`, and\n(2) pervasive use of `.unwrap()` on `checked_add()` / conversions / bump lookups, which can panic if counters overflow or if unexpected state is encountered. These panics abort the instruction, creating denial-of-service conditions and, in some edge cases (counter saturation), may permanently prevent certain actions.\n",
+            "findings": [
+                {
+                    "title": "Out-of-bounds indexing panic in execute_transaction via attacker-controlled account_list",
+                    "description": "In `execute_transaction`, the program builds `mapped_remaining_accounts` by interpreting each byte in `account_list` as an index into `ctx.remaining_accounts`:\n\n- `let acc = &ctx.remaining_accounts[index].clone();`\n\nBecause `account_list` is user-controlled and there is no bounds check that `index < ctx.remaining_accounts.len()`, an attacker can pass an index that is out of range, triggering a Rust panic due to out-of-bounds slice indexing.\n\nOn Solana, this causes the instruction to abort (transaction failure). While it doesn't directly steal funds, it is an attacker-reachable abort that can be used to grief/DoS execution attempts (e.g., repeatedly submitting failing execute calls).\n",
+                    "category": "CWE-617",
+                    "severity": "medium",
+                    "confidence": 0.93
+                },
+                {
+                    "title": "Multiple unwrap()-triggered panics (checked_add / bumps) can abort instructions and potentially lock functionality on extreme counter values",
+                    "description": "The program uses `.unwrap()` in several places where failure results in a panic (instruction abort) rather than a controlled error. Notable instances include:\n\n- Counter increments:\n  - `ms.transaction_index = ms.transaction_index.checked_add(1).unwrap();` (create_transaction)\n  - `tx.instruction_index = tx.instruction_index.checked_add(1).unwrap();` (add_instruction)\n  - Account seed derivations also use `checked_add(1).unwrap()` in account attributes (e.g., CreateTransaction PDA seed, AddInstruction PDA seed, ExecuteInstruction PDA seed and constraints).\n- Conversions:\n  - `ctx.accounts.multisig.keys.len().try_into().unwrap()` (remove_member / threshold adjustments)\n- Bump extraction:\n  - `*ctx.bumps.get(\"multisig\").unwrap()`, `*ctx.bumps.get(\"transaction\").unwrap()`, `*ctx.bumps.get(\"instruction\").unwrap()`\n\nIf any of these unwrap’d values become `None` (e.g., counter reaches its max and `checked_add` fails, or state is otherwise inconsistent), the program will panic and abort. While some overflows are practically unlikely, counters are on-chain state and monotonically increase; at saturation, this can become a permanent DoS for creating new transactions/instructions (functionality lock).\n\nThese should be converted to explicit error returns (e.g., `ok_or`/`require!`) to avoid panic-based aborts.\n",
+                    "category": "CWE-617",
+                    "severity": "medium",
+                    "confidence": 0.88
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-1265",
+            "CWE-834",
+            "CWE-662",
+            "CWE-430",
+            "CWE-431",
+            "CWE-362",
+            "CWE-670",
+            "CWE-841",
+            "CWE-768",
+            "CWE-705",
+            "CWE-799"
+        ],
+        [
+            "CWE-783",
+            "CWE-480",
+            "CWE-483",
+            "CWE-698",
+            "CWE-617"
+        ]
+    ]
+}

@@ -1,0 +1,369 @@
+{
+    "path": "reports-without-source/StixSwapSolana-security-review_2025-01-07.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/STIX-Co/stix-swap-solana-contracts"
+        ],
+        "commit_id": [
+            "d7bae15f6208b02da6029dfda2994d7b859b486e"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-01-07",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "Premature closure of offer and whitelist accounts",
+            "description": "The take_offer function prematurely closes the offer and whitelist PDA accounts even during partial fulfillment of an offer. This occurs because the `close = maker` constraint is applied directly in the account validation, causing both accounts to be closed regardless of whether the full offer amount is taken. The root cause is the incorrect placement of the close constraint without checking if the offer has been fully fulfilled. An attacker or regular user taking a partial offer would trigger closure, leaving the remaining tokens locked in the vault. This leads to a critical impact: permanent loss of user funds and loss of offer/whitelist state data.\n",
+            "severity": "critical",
+            "location": [
+                "take_offer#offer",
+                "take_offer#whitelist"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ]
+            },
+            "title": "ATA initialization causes permanent DoS",
+            "description": "The create_offer function uses the `init` constraint to create an associated token account (ATA) for the offer vault. However, since any external user can pre-initialize this ATA off-chain, the instruction will fail whenever it tries to reinitialize an already-existing account. This creates a permanent denial-of-service (DoS) condition where legitimate makers cannot create offers. The root cause is the use of `init` instead of `init_if_needed`, which does not handle pre-existing accounts gracefully. An attacker can exploit this by preemptively creating the ATA for any offer, blocking its creation. The impact includes complete disruption of offer functionality and potential loss of protocol fees.\n",
+            "severity": "critical",
+            "location": [
+                "create_offer#vault_token_account"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "TokenAccounts#fee_wallet lacks constraints",
+            "description": "In the take_offer function, the fee_wallet account is not properly constrained, allowing the taker to pay protocol fees to any arbitrary account. Although the associated token accounts are tied to fee_wallet via `associated_token::authority`, the fee_wallet itself is only marked as a generic AccountInfo without address validation. This means the program does not verify that fee_wallet matches the configured fee address in fee_config. The root cause is the missing `address = fee_config.fee_address` constraint. An attacker could redirect fees to a non-treasury address by manipulating the fee_wallet input. This leads to loss of protocol revenue and misdirection of funds.\n",
+            "severity": "critical",
+            "location": [
+                "take_offer#TokenAccounts#fee_wallet"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-684"
+                ],
+                "3": [
+                    "CWE-440"
+                ]
+            },
+            "title": "Missing fee calculation on input token in take_offer",
+            "description": "The protocol documentation specifies a 1% fee on both input and output tokens, but the implementation only charges the fee on the output token. In the take_offer function, the input token amount is transferred in full from the vault to the taker without deducting a fee. The root cause is the absence of fee calculation and transfer logic for the input token. An attacker (or any taker) can repeatedly take offers to avoid paying input-side fees, effectively receiving a discounted trade. This results in significant financial loss for the protocol, as it misses out on half of the expected fee revenue.\n",
+            "severity": "high",
+            "location": [
+                "take_offer#input_token_transfer"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Lack of mint validation in create_offer allows arbitrary tokens",
+            "description": "The create_offer function accepts any input and output token mints without validating them against the admin-defined mint_whitelist. While the whitelist is initialized in a separate admin function, the create_offer instruction does not enforce membership checks. This allows users to create offers with arbitrary tokens, including those with transfer fees (e.g., Token-2022 with fee extensions), which can result in received amounts being less than expected. The root cause is the missing validation logic against the mint_whitelist account. This can lead to inconsistent state, incorrect balance calculations, and potential loss of funds when fee-on-transfer tokens are used.\n",
+            "severity": "high",
+            "location": [
+                "create_offer#input_token_mint",
+                "create_offer#output_token_mint"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "The creator of the offer can attack the taker by front-running",
+            "description": "The offer PDA is derived solely from the maker's address, meaning the same PDA is reused if the offer is canceled and recreated. Since the offer data is mutable via recreation, the maker can change the price (expected_amount/token_amount ratio) and front-run a taker who is about to accept the original offer. The root cause is the lack of a unique or sequential identifier (like an index) in the PDA seed, allowing offer state to be overwritten. The attacker monitors the mempool and re-submits the offer with a worse price just before the taker’s transaction confirms. This leads to the taker executing a trade at a significantly worse rate than expected, resulting in financial loss.\n",
+            "severity": "high",
+            "location": [
+                "create_offer#seeds"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ]
+            },
+            "title": "Permanent DOS and loss of funds due to unhandled token dust",
+            "description": "The cancel_offer and take_offer functions attempt to close the vault token account, but they do not first ensure that the account balance is zero. If an attacker sends a small amount of arbitrary tokens to the vault, the close_account instruction will fail due to the non-native token balance check in the SPL Token program. This results in a permanent denial-of-service, as neither cancellation nor taking the offer can proceed. The root cause is the lack of a pre-close balance sweep. The impact is severe: user funds become permanently locked in the vault, and the offer cannot be resolved. The attack cost is minimal, involving only a small token transfer.\n",
+            "severity": "high",
+            "location": [
+                "cancel_offer#vault_token_account",
+                "take_offer#vault_token_account"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ]
+            },
+            "title": "Whitelisted taker can DoS attack other whitelisted takers",
+            "description": "The take_offer function closes the entire whitelist account after a taker interacts with an offer. Since the whitelist is shared among multiple takers, closing it prevents other whitelisted takers from participating in the same offer, even if only a partial fill occurs. The root cause is the use of `close = maker` on the whitelist account without considering multi-taker scenarios. A malicious taker can take a small portion of the offer and close the whitelist, blocking others. This allows a low-cost denial-of-service attack against competing takers, undermining the fairness and availability of whitelisted offers.\n",
+            "severity": "medium",
+            "location": [
+                "take_offer#whitelist"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Same token swap protection missing",
+            "description": "The create_offer function does not prevent users from creating offers where the input and output tokens are identical. This enables wash trading, where a user swaps a token with themselves, artificially inflating trading volume. The root cause is the absence of a validation check comparing input_token_mint and output_token_mint. This can be exploited to manipulate on-chain metrics, deceive users, and potentially interfere with price oracles that rely on trade data. While no direct fund loss occurs, it damages protocol integrity and trust.\n",
+            "severity": "medium",
+            "location": [
+                "create_offer"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Frontrunning the initialization of admin_config",
+            "description": "The initialize function sets critical admin configuration, including the admin address, but does not guard against race conditions. If the admin fails to call initialize promptly after deployment, an attacker can front-run the transaction and set themselves as the admin. The root cause is the lack of access control or timelock mechanism on the initialize function. Once set, the admin cannot be changed without proper governance, giving the attacker permanent control. This leads to full protocol compromise, including fee redirection and configuration changes.\n",
+            "severity": "low",
+            "location": [
+                "initialize#admin_config"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing fee address validation in update function",
+            "description": "The fee_address_update function allows setting a new fee address without validating that it is a valid, usable token account. It accepts any Pubkey, including system program addresses, PDAs, or non-writable accounts. The root cause is the absence of input validation checks. An attacker (or mistaken admin) could set an invalid address, causing future fee transfers to fail and resulting in permanent loss of collected fees. This reduces protocol reliability and fund recoverability.\n",
+            "severity": "low",
+            "location": [
+                "fee_address_update#new_address"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing minimum trade size protection",
+            "description": "The protocol does not enforce a minimum trade size in the create_offer function, allowing users to create offers with extremely small amounts (dust trades). The root cause is the lack of a validation rule based on token decimals or a fixed threshold. Attackers can exploit this to spam the system with negligible trades, increasing computational load, bloating storage, and potentially manipulating trading statistics. While the direct impact is low, it degrades system performance and user experience over time.\n",
+            "severity": "low",
+            "location": [
+                "create_offer#token_amount",
+                "create_offer#expected_amount"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "State inconsistency due to Solana rollback",
+            "description": "Solana rollbacks can cause state inconsistencies, particularly in global configuration like admin_config. If a rollback occurs, the protocol may continue operating with outdated settings that were previously updated. The root cause is the lack of a mechanism to detect chain reorganizations or validate configuration freshness. This could lead to incorrect behavior, such as using deprecated fee rates or whitelist rules. The impact is low but non-zero, as it may result in temporary operational errors or security gaps until manual admin intervention.\n",
+            "severity": "low",
+            "location": [
+                "admin_config"
+            ],
+            "files": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-909"
+                ]
+            },
+            "title": "offer_id is not utilized in create_offer",
+            "description": "The Offer struct defines an offer_id field intended to uniquely identify offers, but this field is never assigned in the create_offer function. The root cause is the omission of ID generation logic during offer creation. As a result, the offer_id remains uninitialized or zero, making it impossible to reference offers reliably off-chain or in external systems. This reduces the utility of the offer tracking system and complicates integration with frontends or analytics tools.\n",
+            "severity": "low",
+            "location": [
+                "create_offer#offer_id"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing validation for an expected amount greater than zero",
+            "description": "The create_offer function does not validate that expected_amount is greater than zero, allowing the creation of offers with zero expected output. The root cause is the missing require! check for expected_amount > 0. This leads to nonsensical offers where takers receive nothing in return for their input, potentially used for spam or manipulation. While not directly harmful, it degrades user experience and protocol credibility.\n",
+            "severity": "low",
+            "location": [
+                "create_offer#expected_amount"
+            ],
+            "files": []
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Expiring offers without closing the offer PDA causes DoS",
+            "description": "1. **Description:** The `update_offer_status` function allows an admin to mark an offer as Expired without closing the associated offer PDA (Program-Derived Address). This leaves the PDA account still open on-chain.\n2. **Cause:** The root cause is the lack of a mechanism to close the PDA after updating the offer status to Expired. The account remains open with funds locked, and the `close = maker` directive is not triggered because the account is not properly closed during status update.\n3. **Exploitation:** An admin could mark an offer as Expired without closing it, which would prevent any further interaction via `take_offer` or similar functions that require the status to be Ongoing. Since the PDA is not closed, the maker cannot reclaim rent-exempt SOL or reinitialize a new offer using the same account.\n4. **Impact:** This results in a Denial-of-Service condition where the maker’s funds remain locked indefinitely in the unclosed PDA, the maker cannot create new offers using the same account, and takers are unable to interact with the offer, reducing system usability and fund efficiency.\n",
+            "severity": "low",
+            "location": [
+                "update_offer_status",
+                "take_offer"
+            ],
+            "files": []
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-222"
+                ]
+            },
+            "title": "Unreliable event logging due to Solana log truncation",
+            "description": "1. **Description:** The current implementation uses the `emit!` macro to emit events, which can lead to unreliable logging on Solana because nodes truncate logs exceeding 10 KB in size.\n2. **Cause:** Solana's default log truncation policy discards data beyond the 10 KB limit, and the use of `emit!` does not account for this limitation, potentially omitting critical event data from the transaction logs.\n3. **Exploitation:** While not directly exploitable by an attacker, this issue can be leveraged in scenarios where large event payloads are expected, causing off-chain services (e.g., indexers, monitoring tools) to miss or misinterpret transaction outcomes due to incomplete logs.\n4. **Impact:** Critical event data may be lost, leading to inconsistent off-chain data processing, reduced transparency, and impaired auditability of on-chain actions, which undermines trust and operational reliability for integrators and users.\n",
+            "severity": "low",
+            "location": [
+                "emit!",
+                "emit_cpi!"
+            ],
+            "files": []
+        }
+    ]
+}

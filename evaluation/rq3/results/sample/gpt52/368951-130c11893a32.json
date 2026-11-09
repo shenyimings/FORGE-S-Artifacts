@@ -1,0 +1,196 @@
+{
+    "project": "blocksec_ref_lp_as_collateral_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_lp_as_collateral_v1.0-signed.pdf.json/burrowland/contracts/contract/src/position.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2,
+        "recall": 1.0,
+        "f1": 0.33333333333333337
+    },
+    "cwe_ground_truth": [
+        "CWE-345",
+        "CWE-693"
+    ],
+    "cwe_detected": [
+        "CWE-807",
+        "CWE-697",
+        "CWE-682",
+        "CWE-345",
+        "CWE-351",
+        "CWE-1293",
+        "CWE-346",
+        "CWE-703",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Improper LP Token Collateral Price Calculation",
+            "description": "1. **Description:** The `get_collateral_sum_with_volatility_ratio()` function calculates LP token collateral value based on the underlying token prices, but does not validate or secure the redemption amount of those tokens.\n2. **Cause:** The quantity of underlying tokens that an LP token can redeem is manipulatable, making the derived price unreliable.\n3. **Exploitation:** An attacker can manipulate the LP token's underlying reserves to artificially inflate or deflate its perceived value, affecting collateral and borrowing power.\n4. **Impact:** This allows attackers to borrow excessive funds or trigger unjustified liquidations, undermining the financial integrity of the protocol.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code contains multiple security-relevant logic and arithmetic patterns that can lead to exploitable failures. In several places it uses unchecked `u128` arithmetic (`+`, `-`, `*`, `pow`) on user-influenced quantities (shares, decimals, amounts), which in optimized builds may wrap on overflow/underflow, producing incorrect collateral/borrow accounting. The code also relies on `unwrap()/expect()` for map lookups and LP token info retrieval, enabling transaction-triggered panics (DoS) if invariants are not met. Additionally, LP-token position handling ignores the `token_id` argument in collateral-related methods and uses string-prefix classification plus `AccountId::new_unchecked`, which can misclassify positions or accept malformed IDs, leading to incorrect asset attribution and bypasses in upstream checks.\n",
+            "findings": [
+                {
+                    "title": "Unchecked arithmetic on collateral/borrowed shares can overflow/underflow",
+                    "description": "Multiple functions mutate share balances using unchecked arithmetic on `u128`:\n- `increase_collateral`: `... .0 += shares.0`\n- `increase_borrowed`: `... .0 += shares.0`\n- `LPTokenPosition` branch of `decrease_collateral`: `lp_token_position.collateral.0 - shares.0` (no `checked_sub`)\nIn optimized builds, `u128` overflow/underflow may wrap (or otherwise behave unexpectedly depending on compilation flags), corrupting accounting. An attacker who can trigger large share deltas or under-subtractions can cause balances to wrap to a very large value (or near-zero), potentially enabling wrongful withdrawals/borrows or bypassing risk checks in other parts of the protocol.\n",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Potential overflow in LP collateral valuation (pow/multiply chains)",
+                    "description": "In `get_collateral_sum_with_volatility_ratio` (LP branch), several computations can overflow `u128`:\n- `let unit_share = 10u128.pow(unit_share_tokens.decimals as u32);`\n- `unit_share_token_value.amount.0 * 10u128.pow(token_asset.config.extra_decimals as u32);`\n- `10u128.pow(collateral_asset.config.extra_decimals as u32) * unit_share`\nLarge/invalid `decimals` or `extra_decimals` values (from config or stored LP info) can make `10^decimals` exceed `u128`, and subsequent multiplications can overflow. This can silently wrap and produce drastically wrong collateral valuation, impacting solvency/risk decisions.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "DoS via unwrap/expect on missing assets or LP token info",
+                    "description": "The code uses `unwrap()`/`expect()` on lookups that can fail and panic the transaction:\n- `decrease_collateral` / `decrease_borrowed`: `.get(token_id).unwrap()` panics if the token key is absent.\n- `internal_unwrap_collateral` / `internal_unwrap_borrowed`: `.expect(\"... not found\")`\n- LP valuation: `self.last_lp_token_infos.get(&lp_token_position.lpt_id).expect(\"lp_token_infos not found\")`\nIf callers can reach these paths with a missing key (e.g., by manipulating position contents, using unexpected token IDs, or racing state changes), they can force panics and cause denial-of-service for affected operations.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "LP position collateral methods ignore token_id, enabling asset-attribution confusion",
+                    "description": "For `Position::LPTokenPosition`, collateral-related APIs ignore the `token_id` parameter:\n- `decrease_collateral(&mut self, token_id, shares)` subtracts from LP collateral regardless of `token_id`.\n- `internal_unwrap_collateral(&self, token_id)` returns LP collateral regardless of `token_id`.\nIf upstream logic assumes `token_id` is enforced (e.g., checks/limits per collateral asset), a caller may pass an arbitrary `token_id` and still affect/read LP collateral, potentially bypassing token-specific validations or mispricing/incorrectly accounting collateral under the wrong asset identifier.\n",
+                    "category": "CWE-697",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Position type decided by string prefix; may misclassify attacker-chosen identifiers",
+                    "description": "`Position::new(position: &String)` selects LP-vs-regular by `position.starts_with(SHADOW_V1_TOKEN_PREFIX)`. If external inputs influence `position`, an attacker can craft identifiers that match the prefix to force LP position logic (or avoid it by not matching), leading to inconsistent accounting paths and validation assumptions. This is a security-relevant comparison because it drives which accounting and valuation logic runs.\n",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Use of AccountId::new_unchecked on stored lpt_id bypasses validation",
+                    "description": "In LP valuation, the code constructs an account id via:\n`AccountId::new_unchecked(lp_token_position.lpt_id.clone())`.\nThis bypasses syntactic validation of the account ID format. If an invalid/malicious string reaches `lpt_id` (e.g., via position initialization or state corruption), downstream asset lookup and logic may behave unexpectedly or panic, and it weakens a protection mechanism (account id validation) that would normally prevent malformed identifiers from entering security-sensitive paths.\n",
+                    "category": "CWE-693",
+                    "severity": "medium",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Division-by-zero risk if volatility_ratio is zero",
+                    "description": "`get_borrowed_sum_with_volatility_ratio` divides by `asset.config.volatility_ratio` via `.div_ratio(asset.config.volatility_ratio)`. If `volatility_ratio` can ever be zero due to misconfiguration or unexpected state, this can trigger division-by-zero behavior (panic or invalid value), halting execution and potentially enabling DoS or incorrect risk evaluation.\n",
+                    "category": "CWE-703",
+                    "severity": "low",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The code has multiple instances where security-relevant behavior depends on untrusted, unchecked, or unauthenticated data. Most notably:\n(1) share accounting uses unchecked arithmetic on `u128` in several places, which can overflow/underflow and corrupt collateral/borrow balances;\n(2) the LP-vs-regular position type is selected purely by a string prefix, and LP token IDs are converted into `AccountId` via `new_unchecked`, meaning the contract does not sufficiently verify the authenticity/validity of identifiers before using them in sensitive pricing/collateral logic;\n(3) several `unwrap()`/`expect()` paths depend on attacker-controlled `token_id` presence in maps and can cause panics (DoS) if these methods are reachable with arbitrary inputs.\n",
+            "findings": [
+                {
+                    "title": "Unchecked u128 arithmetic can overflow/underflow share accounting",
+                    "description": "The contract updates share balances using raw `+`/`-` on `u128` without `checked_*` or `saturating_*` operations in multiple places:\n- `increase_collateral` (RegularPosition): `... .0 += shares.0;`\n- `increase_borrowed` (both position types): `... .0 += shares.0;`\n- `increase_collateral` (LPTokenPosition): `lp_token_position.collateral.0 + shares.0`\n- `decrease_collateral` (LPTokenPosition): `lp_token_position.collateral.0 - shares.0` (no underflow check)\n\nIf an attacker can cause these functions to be called with large values (or with `shares` greater than the stored balance in the LP path), the arithmetic may overflow/underflow. In Rust/Wasm, this can lead to panics (DoS) or wrapping behavior depending on build settings; wrapping is especially dangerous because it can turn a small balance into an extremely large one, breaking collateral/borrow limits and enabling incorrect withdrawals/liquidation avoidance.\n",
+                    "category": "CWE-807",
+                    "severity": "critical",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "LP position classification relies on untrusted string prefix (spoofable asset type)",
+                    "description": "`Position::new(position: &String)` decides whether a position is an `LPTokenPosition` solely by checking `position.starts_with(SHADOW_V1_TOKEN_PREFIX)`.\n\nThis is a security decision (which pricing path is used, which collateral model applies) based on an untrusted, user-controlled string. An attacker can craft an identifier with the expected prefix to force the contract down the LP-token valuation path. That path then uses `last_lp_token_infos.get(&lp_token_position.lpt_id)` and per-token composition to compute collateral value, which may differ materially from regular assets and may allow bypassing intended constraints if other parts of the system assume only genuine LP token IDs reach this branch.\n\nBecause there is no explicit verification that `lpt_id` is a legitimate LP token contract / registered asset, authenticity of the identifier is not sufficiently validated before using it in sensitive valuation logic.\n",
+                    "category": "CWE-345",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Use of AccountId::new_unchecked allows invalid/unauthenticated identifiers in sensitive lookups",
+                    "description": "In `get_collateral_sum_with_volatility_ratio` (LPTokenPosition branch), the code constructs an `AccountId` from `lpt_id` using:\n`AccountId::new_unchecked(lp_token_position.lpt_id.clone())`.\n\n`new_unchecked` bypasses `AccountId` format validation and may accept malformed strings. This weakens origin/identifier authenticity checks and can lead to inconsistent asset lookups (`internal_unwrap_asset`), unexpected panics, or unintended interactions if other parts of the contract treat `AccountId` validity as an invariant.\n\nIn combination with the prefix-based classification, this expands the attack surface for feeding crafted identifiers into pricing/collateral logic without strong validation.\n",
+                    "category": "CWE-345",
+                    "severity": "medium",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Panic-based control flow on missing map entries enables denial of service via malformed inputs",
+                    "description": "Multiple functions assume the existence of entries and call `unwrap()`/`expect()`:\n- `decrease_collateral` (RegularPosition): `regular_position.collateral.get(token_id).unwrap()`\n- `decrease_borrowed` (both position types): `.get(token_id).unwrap()`\n- `internal_unwrap_collateral` / `internal_unwrap_borrowed`: `.expect(\"... not found\")`\n- LP valuation: `last_lp_token_infos.get(...).expect(\"lp_token_infos not found\")`\n\nIf any of these methods are reachable with attacker-influenced `token_id`/`lpt_id` (directly or indirectly), an attacker can trigger panics by referencing non-existent keys, causing transaction failure and potentially creating griefing/DoS conditions for users or for batched operations.\n",
+                    "category": "CWE-807",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains multiple trust and type-classification decisions that depend on externally-controlled strings and externally-supplied data structures without strong validation. In particular:\n- `Position::new()` classifies a position as an LP-token position purely by checking a string prefix, which is a weak type distinction and can be spoofed by an attacker-controlled token identifier. This can route execution into LP-specific valuation logic and state layout assumptions.\n- The LP-token valuation path uses `AccountId::new_unchecked(lp_token_position.lpt_id.clone())`, bypassing AccountId format validation and relying on an unvalidated identifier as the “origin” of the asset lookup.\n- Both collateral/borrow valuation routines take `prices: &Prices` as an input and do not verify that the prices originate from a trusted source or correlate them with an independent source. If these functions are used (directly or indirectly) in state-changing checks (LTV/health/liquidation), then attacker-controlled prices could subvert those checks.\n",
+            "findings": [
+                {
+                    "title": "Spoofable position type via token-id prefix check (LP vs Regular)",
+                    "description": "`Position::new(position: &String)` decides whether to create an `LPTokenPosition` by checking `position.starts_with(SHADOW_V1_TOKEN_PREFIX)`. If `position` is derived from user-controlled input (e.g., a token id / position key), an attacker can craft identifiers that match the prefix to force the contract to treat a position as an LP-token position.\n\nThis is a weak type distinction that can cause the contract to apply the wrong accounting/valuation semantics (LP-token collateral is a single `collateral` field, while regular collateral is a per-token map; LP path also requires `last_lp_token_infos` and uses `lpt_id`-based asset resolution). This can lead to incorrect risk calculations or denial-of-service via panics if expected LP metadata is missing.\n",
+                    "category": "CWE-351",
+                    "severity": "high",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Unchecked AccountId construction for LP token id allows unvalidated origin/identifier usage",
+                    "description": "In `get_collateral_sum_with_volatility_ratio()` for `LPTokenPosition`, the contract converts `lp_token_position.lpt_id` into an AccountId using `AccountId::new_unchecked(...)` and then uses it to resolve an asset via `internal_unwrap_asset(...)`.\n\nBecause `new_unchecked` skips AccountId validation, a malformed or attacker-chosen `lpt_id` can:\n- break invariants expected by asset lookups (panic/DoS),\n- cause unexpected identifier interpretation compared to validated/canonical ids,\n- weaken origin validation of what contract/account is being treated as the LP token.\n\nEven if the string is generally expected to be a valid account id, the unchecked conversion removes a defense-in-depth validation boundary.\n",
+                    "category": "CWE-346",
+                    "severity": "medium",
+                    "confidence": 0.81
+                },
+                {
+                    "title": "Valuation depends on externally-supplied Prices without origin/integrity correlation",
+                    "description": "`get_collateral_sum_with_volatility_ratio(&self, position_info: &Position, prices: &Prices)` and\n`get_borrowed_sum_with_volatility_ratio(&self, position_info: &Position, prices: &Prices)`\nfully trust `prices.get_unwrap(token_id)` for valuation, but this code does not verify:\n- that `Prices` originated from a trusted oracle,\n- that the price data is fresh/expected (beyond LP-token-info timestamp checks, which do not cover prices),\n- or that prices correlate with an independent source.\n\nIf `Prices` can be influenced by an attacker (e.g., passed from an external call path into internal risk checks), then collateral and borrowed sums can be manipulated to bypass collateralization constraints or liquidations.\n\nEven if `Prices` is intended to be contract-sourced, this interface design creates a sharp edge: the integrity and origin of `prices` must be enforced at every call site.\n",
+                    "category": "CWE-1293",
+                    "severity": "high",
+                    "confidence": 0.56
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-655",
+            "CWE-345",
+            "CWE-656",
+            "CWE-182",
+            "CWE-330",
+            "CWE-327",
+            "CWE-757",
+            "CWE-358",
+            "CWE-184",
+            "CWE-311",
+            "CWE-326",
+            "CWE-357",
+            "CWE-424",
+            "CWE-778",
+            "CWE-807",
+            "CWE-654"
+        ],
+        [
+            "CWE-1293",
+            "CWE-646",
+            "CWE-924",
+            "CWE-349",
+            "CWE-649",
+            "CWE-360",
+            "CWE-494",
+            "CWE-352",
+            "CWE-353",
+            "CWE-347",
+            "CWE-354",
+            "CWE-346",
+            "CWE-351",
+            "CWE-348",
+            "CWE-616"
+        ]
+    ]
+}

@@ -1,0 +1,129 @@
+{
+    "path": "reports/zenith/GMX Solana Decentralized Perpetuals Exchange - Zenith Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/gmsol-labs/gmx-solana/pull/304",
+            "https://github.com/gmsol-labs/gmx-solana/pull/305",
+            "https://github.com/gmsol-labs/gmx-solana/pull/306",
+            "https://github.com/gmsol-labs/gmx-solana"
+        ],
+        "commit_id": [
+            "595a070d5fff2a00e33dcf46efa2223bc60df221",
+            "20acb01b1cca547d0a19c56a03a076767f419167",
+            "939c1ab4d548586df3886f3dc5d90fdbc3d9037e",
+            "6a5e6b24d72fcd216f8314db4ef651c575e7fa72"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-01-15",
+        "project_path": "contracts/GMX Solana Decentralized Perpetuals Exchange - Zenith Audit Report.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Insufficient precision may be used if the price suddenly drops",
+            "description": "1. **Description:** The precision used when consuming oracle prices is determined solely by keeper-configured token settings, which may not adapt quickly enough to sudden price drops, leading to loss of precision.\n2. **Cause:** The system lacks a mechanism to dynamically adjust precision based on current price levels, relying instead on manually updated configurations that may lag behind market changes.\n3. **Exploitation:** An attacker could exploit periods of high volatility, especially sharp price drops, where outdated precision settings result in inaccurate price representations.\n4. **Impact:** This can lead to incorrect trade executions, liquidations, or pricing discrepancies, potentially affecting user positions and system fairness.\n",
+            "severity": "low",
+            "location": [
+                "crates/utils/src/oracle.rs#67-76",
+                "crates/utils/src/price/decimal.rs#83"
+            ],
+            "files": [
+                "20acb01b1cca547d0a19c56a03a076767f419167/gmx-solana/crates/utils/src/oracle.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-636"
+                ]
+            },
+            "title": "Malicious keeper can cancel valid Increase orders to earn fees",
+            "description": "1. **Description:** The `execute_increase_or_swap_order_v2` instruction does not enforce the provision of an event account for Increase orders, allowing malicious keepers to submit transactions without it.\n2. **Cause:** The function fails to validate that the `event` account is provided when processing Increase orders, and with `throw_on_execution_error = false`, the order is marked as cancelled instead of reverting.\n3. **Exploitation:** A malicious keeper can omit the event account, causing a valid order to be cancelled while still collecting the execution fee due to error suppression.\n4. **Impact:** This allows keepers to earn fees without executing legitimate orders, leading to financial gain at the expense of users and undermining the integrity of the order execution system.\n",
+            "severity": "low",
+            "location": [
+                "/programs/store/src/instructions/exchange/execute_order.rs#200",
+                "order.rs#1048-1051"
+            ],
+            "files": [
+                "20acb01b1cca547d0a19c56a03a076767f419167/gmx-solana/programs/store/src/instructions/exchange/execute_order.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Inconsistent doc and implementation for update_price_feed_with_chainlink_idempotent()",
+            "description": "1. **Description:** The documentation for `update_price_feed_with_chainlink_idempotent()` states that it returns `Ok(false)` if the price report is valid but not newer than the last update, implying a check for `price_ts <= last_price_ts`.\n2. **Cause:** The actual implementation only checks `price_ts < last_price_ts`, which excludes the equal case, creating a discrepancy between documented and actual behavior.\n3. **Exploitation:** Developers relying on the documented behavior might incorrectly assume that identical timestamps are handled as non-updates, potentially leading to logic errors in dependent systems.\n4. **Impact:** Misunderstanding the function's behavior could result in incorrect assumptions about price feed freshness, affecting downstream logic such as oracle updates or market state transitions.\n",
+            "severity": "low",
+            "location": [
+                "programs/store/src/lib.rs#1265",
+                "programs/store/src/states/oracle/feed.rs#94-96"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Misleading comments",
+            "description": "1. **Description:** Certain code comments and documentation are misleading, particularly around the `update_price_feed_with_chainlink_idempotent()` function and `validated_meta_with_options()`, which state conditions that do not fully reflect runtime behavior.\n2. **Cause:** The comments were not updated after code changes, leading to discrepancies between documentation and actual logic flow, such as skipping validation checks when a price is stale.\n3. **Exploitation:** Developers or auditors relying on comments may make incorrect assumptions about safety guarantees, potentially introducing bugs when extending or integrating with the code.\n4. **Impact:** Increased cognitive load and risk of developer error due to misleading documentation, which could lead to security vulnerabilities in future code changes.\n",
+            "severity": "informational",
+            "location": [
+                "programs/store/src/lib.rs#1265",
+                "programs/store/src/states/position.rs#124"
+            ],
+            "files": [
+                "20acb01b1cca547d0a19c56a03a076767f419167/gmx-solana/programs/store/src/states/market/mod.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Missing error message",
+            "description": "1. **Description:** The `FailedToCalculateMarketTokenAmountToBurn` error in `CoreError` lacks the `#[msg()]` attribute, making it the only error without a human-readable message.\n2. **Cause:** The error was added or modified without including the standard message annotation used for client-side error handling and debugging.\n3. **Exploitation:** Client applications expecting consistent error messages may fail to handle or log this specific error properly, leading to confusion during debugging or monitoring.\n4. **Impact:** Reduced observability and potential misdiagnosis of failures in client integrations, affecting user experience and supportability.\n",
+            "severity": "informational",
+            "location": [
+                "programs/store/src/lib.rs#4260-4261"
+            ],
+            "files": [
+                "20acb01b1cca547d0a19c56a03a076767f419167/gmx-solana/programs/store/src/lib.rs"
+            ]
+        }
+    ]
+}

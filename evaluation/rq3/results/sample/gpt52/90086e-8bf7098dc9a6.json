@@ -1,0 +1,207 @@
+{
+    "project": "sec3_helium_program_library_report.pdf.json",
+    "files": [
+        "dataset/contracts/sec3_helium_program_library_report.pdf.json/programs/voter-stake-registry/src/instructions/cast_vote_v0.rs",
+        "dataset/contracts/sec3_helium_program_library_report.pdf.json/programs/voter-stake-registry/src/instructions/update_voter_weight_record_v0.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.13636363636363635,
+        "recall": 0.5,
+        "f1": 0.21428571428571427
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-1288",
+        "CWE-862",
+        "CWE-285",
+        "CWE-284",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-1280",
+        "CWE-664",
+        "CWE-682",
+        "CWE-862",
+        "CWE-691",
+        "CWE-435",
+        "CWE-285",
+        "CWE-638",
+        "CWE-284",
+        "CWE-425",
+        "CWE-346",
+        "CWE-703",
+        "CWE-1314",
+        "CWE-749"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Permissionless update_voter_weight_record_v0",
+            "description": "The `update_voter_weight_record_v0` instruction allows any payer to update a voter weight record for any owner, without requiring authorization from the owner. The root cause is the absence of a signature or authority check on `args.owner`. An attacker can exploit this to manipulate voting weights, clear targets, or alter voting actions on behalf of other users. The impact includes vote manipulation, undermining the integrity of the governance system.\n"
+        },
+        {
+            "title": "Manipulate num_active_votes in position",
+            "description": "The instruction `update_voter_weight_record_v0` and `cast_vote_v0` do not validate that the position account corresponds to the provided token account's mint. This allows an attacker to pass unrelated position accounts, manipulating the `voter_weight` calculation or incrementing `num_active_votes` on arbitrary positions. The root cause is missing mint consistency checks. Exploitation involves passing mismatched accounts to inflate voting power or lock positions incorrectly. The impact is vote manipulation and potential denial of service for legitimate voters.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code contains several patterns that can lead to security-relevant failures under the provided CWE root causes. Most notably, `cast_vote_v0` is designed to be “cumulative across transactions” by persisting partial voting power inside `VoterWeightRecord` and by creating `NftVoteRecord`s, but it does not re-validate that previously-counted NFTs/positions are still controlled by the same owner at the time of the final bundled `spl-gov::CastVote`. If the voting NFTs/positions are transferable (or can be temporarily held/flash-borrowed), this breaks lifetime/control assumptions and can enable voting with assets no longer owned. Additionally, `NftVoteRecord` PDAs are derived from (proposal, nft_mint) without the owner, which can enable “burning” an NFT’s voting ability for a proposal via temporary ownership, affecting subsequent owners (a cross-entity integration risk).\nThe code also uses unsafe arithmetic and `unwrap()` on `checked_add`, which can panic/abort the instruction on overflow (DoS vector), and increments `num_active_votes` with `+= 1` without overflow checks (possible wraparound). Finally, `itertools::tuples()` silently drops remainder accounts, which is a control-flow footgun that can lead to unintended partial processing without explicit failure, and `update_voter_weight_record_v0` allows updating/initializing a voter weight record for an arbitrary `owner` without any signature/authority check in this instruction (relying entirely on downstream governance constraints and/or `resolve_vote_weight` correctness).\n",
+            "findings": [
+                {
+                    "title": "Cumulative CastVote persists weight across transactions without re-validating continued ownership",
+                    "description": "`cast_vote_v0::handler` accumulates vote weight across multiple invocations by adding into `voter_weight_record.voter_weight` when `weight_action_target`/`weight_action` match, but it does not re-check that NFTs/positions previously counted are still controlled by `args.owner` at the moment the final `spl-gov::CastVote` is executed.\n\nIf the NFTs/positions used for voting are transferable (or can be temporarily acquired), an attacker can:\n1) call `CastVoteV0` with NFTs they temporarily control, creating `NftVoteRecord`s and increasing the persisted voter weight;\n2) transfer/sell/return those NFTs;\n3) later call `CastVoteV0` again (with any remaining NFTs) and bundle the final call with `spl-gov::CastVote`, causing the final `VoterWeightRecord` to include weight from NFTs no longer owned.\n\nThis is a lifetime/control failure because the program treats “used once in the past” as equivalent to “owned now for this vote”.\n",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "NFT vote record keyed only by (proposal, nft_mint) can grief future owners (proposal-level vote burn)",
+                    "description": "`CastVoteV0` creates `NftVoteRecord` PDAs using seeds implied to be `('nft-vote-record', proposal, nft_mint)` and explicitly notes the PDA validation is based on those seeds. Because the owner is not part of the PDA derivation, any party who temporarily controls an NFT can create the record and permanently mark that NFT as “already voted” for that proposal (`VsrError::NftAlreadyVoted` on subsequent attempts), even if the NFT is later transferred to a new owner.\n\nThis is an interaction issue between transferability of NFTs and the plugin’s “one vote per mint per proposal” accounting, potentially allowing vote-power denial for subsequent legitimate owners.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Unchecked increment of num_active_votes can overflow and wrap",
+                    "description": "In `cast_vote_v0::handler`, `position_acc.num_active_votes += 1;` is performed without `checked_add`. In Solana BPF release builds, integer overflow can wrap, potentially resetting `num_active_votes` to 0 after enough increments.\n\nIf `num_active_votes` gates withdrawals/exits elsewhere (common pattern), wraparound can incorrectly re-enable actions or break accounting invariants.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.83
+                },
+                {
+                    "title": "Use of unwrap() on checked_add can abort execution (overflow-triggered DoS)",
+                    "description": "Both handlers do `voter_weight = voter_weight.checked_add(nft_vote_weight).unwrap();` and `voter_weight_record.voter_weight.checked_add(voter_weight).unwrap();`.\nIf an attacker can provide enough accounts/weights (or if `resolve_vote_weight` can return large values), overflow will cause `unwrap()` to panic, aborting the program. This is improper exceptional-condition handling and can be used to force transaction failure (DoS) for callers attempting to cast/prepare votes with large weights.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Silent dropping of remaining accounts due to itertools::tuples() can cause unintended partial processing",
+                    "description": "`cast_vote_v0` uses `ctx.remaining_accounts.iter().tuples()` expecting groups of 3 accounts, and `update_voter_weight_record_v0` expects groups of 2. `itertools::tuples()` will silently ignore remainder accounts if the length is not an exact multiple of the tuple size.\n\nThis control-flow behavior can lead to under-counted weight or missing record creations without an explicit error, which can be security-relevant if callers or integrators assume “all provided accounts were processed” and base subsequent logic on that assumption.\n",
+                    "category": "CWE-691",
+                    "severity": "low",
+                    "confidence": 0.86
+                },
+                {
+                    "title": "UpdateVoterWeightRecord allows initializing/updating a voter_weight_record for arbitrary owner without any authority check",
+                    "description": "`update_voter_weight_record_v0::handler` accepts `args.owner` and will `init_if_needed` and overwrite the corresponding `voter_weight_record` PDA without requiring any signer/authority related to `args.owner` in this instruction.\n\nWhile downstream SPL-Governance actions typically require the governing token owner or delegate to sign, this instruction itself does not enforce that constraint, and therefore relies on external protection mechanisms and on `resolve_vote_weight` fully binding provided token/position accounts to `args.owner`. If those external assumptions are violated or an integration uses the record in other contexts, unauthorized parties could manipulate the record contents (e.g., setting weight to 0 by providing no remaining accounts).\n",
+                    "category": "CWE-284",
+                    "severity": "low",
+                    "confidence": 0.62
+                }
+            ]
+        },
+        {
+            "reasoning": "The code primarily relies on helper functions (`resolve_governing_token_owner`, `resolve_vote_weight`) and downstream SPL-Governance checks for identity/realm/proposal validation. In the provided handlers themselves, there are several access-control gaps and ordering issues.\n\nIn `update_voter_weight_record_v0::handler`, the program accepts an arbitrary `args.owner` and (re)initializes and overwrites the PDA voter-weight record for that owner without requiring any signature/authorization from the owner (or a verified delegate). Even if SPL-Governance later requires proper authority to actually perform governance actions, this still allows unauthorized mutation/creation of the owner-scoped record and can be used for griefing/confusion and as a latent risk if any integrator assumes the record is owner-authoritative.\n\nIn `cast_vote_v0::handler`, the code mutates `PositionV0` (increments `num_active_votes` and serializes via `exit`) before checking `position.is_writable`. This is an access-control check performed after the asset has already been accessed/modified (even though Solana will roll back on error, it is still a bad pattern and can manifest as runtime failures rather than clean precondition checks).\n\nAdditionally, `cast_vote_v0` manually creates accounts using a remaining-account (`nft_vote_record_info`) supplied by the caller. The code comments claim `create_and_serialize_account_signed` validates the PDA, but if that assumption is wrong or changes, this becomes a dangerous “create arbitrary program-owned account” primitive exposed to external actors.\n\nFinally, `args.proposal` is not validated to be a legitimate governance Proposal for the registrar’s realm/governance program within this instruction. The comments state SPL-Governance will check in its `CastVote`, but this instruction can be invoked standalone to create NftVoteRecord PDAs for arbitrary proposal keys (and to mutate related state), which is an origin/endpoint validation gap for this instruction’s own state transitions.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized creation/mutation of VoterWeightRecord for arbitrary owner",
+                    "description": "`update_voter_weight_record_v0::handler` takes `args.owner` and writes to the PDA\n`seeds = [registrar, \"voter-weight-record\", args.owner]` using `init_if_needed`, but it does not require:\n- `args.owner` to be a signer, nor\n- any verified delegate/authority account proving the caller is allowed to act for `args.owner`.\n\nAs a result, any transaction signer (`payer`) can create and/or overwrite the voter weight record for any `owner` pubkey. Even if SPL-Governance later requires proper authority to *use* the record for governance actions, this still enables unauthorized state mutation (griefing, confusing off-chain indexers/clients, and creating latent privilege/authorization assumptions for integrators).\n",
+                    "category": "CWE-285",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Writability/access check performed after Position state mutation",
+                    "description": "In `cast_vote_v0::handler`, the code deserializes `position` as `Account<PositionV0>`, increments `num_active_votes`, and serializes the change via `position_acc.exit(&crate::ID)?` *before* checking `require!(position.is_writable, ...)`.\n\nThis is an access-control/precondition check implemented after the asset has already been accessed/modified. While Solana will roll back state on error, this ordering can still cause avoidable runtime failures and is a dangerous pattern (it relies on rollback rather than enforcing preconditions before mutation).\n",
+                    "category": "CWE-1280",
+                    "severity": "low",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Dangerous manual account creation via remaining_accounts (PDA verification assumption)",
+                    "description": "`cast_vote_v0::handler` calls `create_and_serialize_account_signed` to create `nft_vote_record_info`, where `nft_vote_record_info` is provided through `ctx.remaining_accounts`.\n\nThe code comments state that `create_and_serialize_account_signed` validates the correct PDA derived from `get_nft_vote_record_seeds(...)`. If that validation is incomplete/incorrect, the instruction becomes a dangerous primitive allowing callers to create/overwrite arbitrary accounts (e.g., any system-owned empty account) as program-owned `NftVoteRecord`s, which could enable state forgery or DoS via uncontrolled account creation.\n",
+                    "category": "CWE-749",
+                    "severity": "high",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Proposal key origin not validated within CastVoteV0 instruction",
+                    "description": "`cast_vote_v0::handler` accepts `args.proposal` and uses it to:\n- set `voter_weight_record.weight_action_target = Some(args.proposal)`, and\n- derive/create `NftVoteRecord` PDAs seeded by `(proposal, nft_mint)`.\n\nThere is no explicit validation in this instruction that `args.proposal` corresponds to a real SPL-Governance Proposal for `registrar.realm` / `registrar.governance_program_id`. The comment notes SPL-Governance checks in its own `CastVote`, but this instruction can be invoked standalone to create on-chain records for arbitrary proposal keys, which is an origin validation gap for the state created/modified by this instruction.\n",
+                    "category": "CWE-346",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "The primary security issue in the provided code is an authorization gap around writes to the `VoterWeightRecord` PDA. In `update_voter_weight_record_v0.rs`, the instruction allows any transaction signer (`payer`) to create or overwrite the `voter_weight_record` for an arbitrary `args.owner`, without requiring that `args.owner` (or a valid delegate/authority) sign or be otherwise validated. This enables unauthorized third parties to poison or reset a victim’s voter weight record for the current slot/action, potentially causing denial-of-service or unintended governance behavior if downstream instructions rely on the record’s contents.\n\nIn contrast, `cast_vote_v0.rs` includes an authority check via `resolve_governing_token_owner(...)` and `require_eq!(governing_token_owner, args.owner, ...)`, which meaningfully ties `args.owner` to a signing authority, so the same issue is not evident there.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized creation/overwrite of VoterWeightRecord in UpdateVoterWeightRecordV0",
+                    "description": "`UpdateVoterWeightRecordV0` uses a PDA derived from `[registrar, \"voter-weight-record\", args.owner]` and `init_if_needed`, but it does not require `args.owner` (or any delegated voter authority) to sign, nor does it validate that the caller is authorized to act on behalf of `args.owner`.\n\nAs a result, any user can:\n- Initialize a `VoterWeightRecord` for any target `owner` (at the program-derived address), paying rent themselves.\n- Overwrite an existing `VoterWeightRecord` for that `owner` (since it is not marked immutable and is program-owned), setting `voter_weight`, `weight_action`, and `voter_weight_expiry` for the current slot.\n- Poison the record by supplying incomplete/incorrect `remaining_accounts` such that computed `voter_weight` is reduced (including to zero), potentially interfering with the victim’s ability to successfully use governance actions that depend on this record in the same slot/action.\n\nThis is a missing access-control check on a security-relevant state update (governance voting weight).\n",
+                    "category": "CWE-862",
+                    "severity": "high",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "The primary security concern in the provided instructions is missing/insufficient authorization around writing “parametric” governance inputs (the VoterWeightRecord) and around mutating other state (PositionV0) via remaining accounts.\n\n1) `update_voter_weight_record_v0::handler` allows any transaction payer to (re)initialize and overwrite a `voter_weight_record` PDA for an arbitrary `args.owner` without requiring `args.owner` (or a delegate) to sign, and without validating that the caller is authorized to set governance voting power parameters for that owner. This is effectively a direct, unauthorized invocation path to a restricted state update (analogous to “forced browsing”), and is also an instance of incomplete mediation because access control is not performed on each update.\n\n2) The same `update_voter_weight_record_v0` path also constitutes missing write protection for a parametric value: the computed `voter_weight` and the `weight_action` fields are inputs that downstream governance logic may trust. Without write-protecting who can set these fields for a given owner, untrusted parties can manipulate apparent voting power/eligibility (at least for non-CastVote actions).\n\n3) In `cast_vote_v0::handler`, the program mutates `PositionV0` (`num_active_votes += 1`) for each `(token_account, position, nft_vote_record_info)` triple supplied via `remaining_accounts`, but the code shown does not itself enforce that the `position` belongs to `args.owner` or is otherwise authorized/related to the NFT being used; it relies on `resolve_vote_weight(...)` to do all relationship/ownership validation. If `resolve_vote_weight` is incomplete or bypassable, this becomes an incomplete-mediation issue enabling unauthorized state mutation/DoS (e.g., inflating `num_active_votes` on arbitrary positions). Even if `resolve_vote_weight` is correct, this is a fragile pattern because the access check is not explicit at the mutation site.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized overwrite of VoterWeightRecord via UpdateVoterWeightRecordV0",
+                    "description": "`update_voter_weight_record_v0::handler` takes `args.owner` as a parameter and uses it to derive and (re)initialize (`init_if_needed`) the `voter_weight_record` PDA, then overwrites its fields, but does not require `args.owner` (or an authorized delegate) to sign or otherwise prove authorization.\n\nImpact:\n- Any caller can set/refresh another user's `VoterWeightRecord` for non-CastVote actions (e.g., CreateProposal, SignOffProposal) with arbitrary remaining accounts and even with an empty set (weight 0), potentially causing denial-of-service or confusing downstream governance flows that expect the record to be authored by the voter.\n- Because this is a PDA used as an input to governance, unauthorized writes undermine the trust model of the plugin record.\n",
+                    "category": "CWE-425",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Missing write protection for governance parametric inputs (voter_weight, weight_action)",
+                    "description": "The `VoterWeightRecord` fields written by `update_voter_weight_record_v0` (notably `voter_weight`, `voter_weight_expiry`, and `weight_action`) are parametric values that downstream governance logic may use to decide whether an action is permitted and at what weight.\n\nBecause the instruction allows any caller to write these values for any `args.owner` (no owner/delegate signature required), untrusted parties can manipulate the apparent governance parameters for other users (e.g., set weight to 0 for the current slot, set action-specific records), which can lead to operational failures/DoS in governance actions that rely on these parameters.\n",
+                    "category": "CWE-1314",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Incomplete mediation when mutating PositionV0 via remaining_accounts in CastVoteV0",
+                    "description": "In `cast_vote_v0::handler`, the program deserializes each `position` from `ctx.remaining_accounts` and increments `position_acc.num_active_votes` without any explicit, local check that:\n- the `position` is owned/controlled by `args.owner` (or the resolved governing token owner), and/or\n- the `position` is the correct position corresponding to the provided `token_account`/NFT being used.\n\nThe correctness of this mutation relies entirely on `resolve_vote_weight(...)` to fully validate ownership and relationships. If that helper is incomplete or can be bypassed, an attacker could potentially mutate arbitrary `PositionV0` accounts (e.g., inflate `num_active_votes` to prevent exits), which is a classic incomplete-mediation pattern.\n",
+                    "category": "CWE-638",
+                    "severity": "medium",
+                    "confidence": 0.6
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-282",
+            "CWE-1270",
+            "CWE-285",
+            "CWE-286",
+            "CWE-1280",
+            "CWE-1267",
+            "CWE-749",
+            "CWE-287",
+            "CWE-269",
+            "CWE-923",
+            "CWE-346",
+            "CWE-1283"
+        ],
+        [
+            "CWE-927",
+            "CWE-1328",
+            "CWE-862",
+            "CWE-863",
+            "CWE-732",
+            "CWE-1230"
+        ],
+        [
+            "CWE-425",
+            "CWE-1314",
+            "CWE-638"
+        ]
+    ]
+}

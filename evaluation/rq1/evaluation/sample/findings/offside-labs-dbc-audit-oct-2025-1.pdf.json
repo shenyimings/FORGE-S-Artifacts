@@ -1,0 +1,141 @@
+{
+    "path": "reports/offside-labs-dbc-audit-oct-2025-1.pdf",
+    "project_info": {
+        "url": "https://github.com/MeteoraAg/dynamic-bonding-curve",
+        "commit_id": "92cc243be4a1f1bb7eaadda24c54b7db5fca941b",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-05-12",
+        "project_path": "contracts/offside-labs-dbc-audit-oct-2025-1.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Incorrect Rounding Direction in get_next_sqrt_price_from_output",
+            "description": "The function get_next_sqrt_price_from_output uses an incorrect rounding direction when calculating the next square root price for an exact output swap. Specifically, it rounds in a way that benefits the user rather than the protocol, which should always round to ensure users pay slightly more input tokens to protect pool liquidity. The root cause is the use of rounding_up when base_for_quote is true and rounding_down when false, which contradicts the required economic safeguards. An attacker can exploit this by repeatedly performing swaps that extract more value from the pool than they input, effectively underpaying for tokens. This leads to a direct financial impact where the pool's base or quote tokens can be drained over time through repeated exploitation.\n",
+            "severity": "High",
+            "location": [
+                "curve.get_next_sqrt_price_from_output#179-188"
+            ],
+            "files": [
+                "programs/dynamic-bonding-curve/src/curve.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Lack of Constraint for MeteoraDammMigrationMetadata Account",
+            "description": "The ix_transfer_pool_creator instruction loads the MeteoraDammMigrationMetadata account from remaining_accounts without verifying that it belongs to the same virtual_pool context. This lack of validation allows the previous pool creator to provide a MeteoraDammMigrationMetadata account from a different virtual_pool, potentially bypassing state checks. The root cause is the absence of a cross-check between the loaded account's virtual_pool field and the current instruction context. While this could allow manipulation of migration state, the impact is limited because it only affects the creator's own migration process and does not enable theft or direct financial gain. Nevertheless, it introduces state inconsistency risks and undermines the integrity of the migration logic.\n",
+            "severity": "Medium",
+            "location": [
+                "ix_transfer_pool_creator#46-52"
+            ],
+            "files": [
+                "programs/dynamic-bonding-curve/src/instructions/creator/ix_transfer_pool_creator.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Fee Reduction via Input Splitting In RateLimiter Mode",
+            "description": "When the BaseFeeMode is set to RateLimiter, users can avoid higher fees on large trades by splitting their input_amount into multiple smaller swaps, each below the reference_amount threshold. The root cause is the lack of transaction-level enforcement preventing multiple swaps within a single transaction or across consecutive transactions. This allows users to cap their effective fee rate at the lower cliff_fee_numerator instead of paying the intended escalating fees. Even with Dynamic Fee enabled, strategic splitting may reduce total fees due to fewer dynamic adjustments. The impact is a loss of expected fee revenue for the protocol, undermining the economic design of the RateLimiter mechanism and potentially encouraging spammy micro-swaps.\n",
+            "severity": "Low",
+            "location": [
+                "ix_swap#316-322"
+            ],
+            "files": [
+                "programs/dynamic-bonding-curve/src/instructions/swap/ix_swap.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing Validation on FeeRateLimiter",
+            "description": "The FeeRateLimiter.validate function lacks sufficient validation on parameters like fee_increment_bps and reference_amount, allowing for abnormal configurations. For example, setting fee_increment_bps too high can cause get_max_index to return 0, immediately applying the maximum fee rate. An extremely small reference_amount can cause large portions of input to be charged at MAX_FEE_NUMERATOR, while very small cliff_fee_numerator and fee_increment_bps values can result in excessively large max_index, leading to overflow in numerator calculations. The root cause is missing input validation bounds. This can lead to unexpected fee behaviors, including fees hitting the maximum limit unnecessarily, which degrades user experience and may cause transaction failures due to miscalculated fees.\n",
+            "severity": "Low",
+            "location": [
+                "fee_rate_limiter.get_base_fee_numerator"
+            ],
+            "files": [
+                "programs/dynamic-bonding-curve/src/base_fee/fee_rate_limiter.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Two Rounding-Ups May Lead to Larger Base Fee",
+            "description": "The trading_fee calculation in fee_rate_limiter.rs performs two separate rounding-up operations when computing first_fee and second_fee before summing them. This double rounding can result in the total fee being off by up to 1 unit more than the mathematically correct value. The root cause is the premature application of ceiling division on intermediate terms instead of applying rounding only once after summing the full numerator. Although the impact is minimal (at most 1 unit of fee overcharge), it introduces imprecision in fee calculation, which could accumulate over many transactions. This is primarily a precision issue rather than a critical vulnerability, but it affects the correctness of the fee model.\n",
+            "severity": "Informational",
+            "location": [
+                "fee_rate_limiter.get_fee_numerator_from_amount#73-81",
+                "fee_rate_limiter.get_fee_numerator_from_amount#81-91"
+            ],
+            "files": [
+                "programs/dynamic-bonding-curve/src/base_fee/fee_rate_limiter.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "VestingEscrow's Recipient Cannot Be Transferred",
+            "description": "The create_locker instruction sets update_recipient_mode to 1, meaning only the original creator of the VestingEscrow can update the recipient. This creates a problem when the pool creator is transferred, as the new creator cannot take control of the vesting escrow recipient. The root cause is the hardcoded restriction that does not account for creator changes. As a result, even after a legitimate transfer of pool ownership, the original creator retains exclusive control over the recipient address of the vesting escrow, which could lead to fund lockups or governance misalignment. This is a logic error that affects upgradability and ownership transfer semantics.\n",
+            "severity": "Informational",
+            "location": [
+                "ix_create_config#115-119"
+            ],
+            "files": [
+                "programs/dynamic-bonding-curve/src/instructions/partner/ix_create_config.rs"
+            ]
+        }
+    ]
+}

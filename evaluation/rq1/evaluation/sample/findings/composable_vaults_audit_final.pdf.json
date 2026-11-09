@@ -1,0 +1,212 @@
+{
+    "path": "reports/composable_vaults_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/ComposableFi/emulated-light-client",
+        "commit_id": "aaf20a2",
+        "address": [
+            "d78a19a",
+            "b221448",
+            "57edfe8"
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-01-19",
+        "project_path": "contracts/composable_vaults_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Ability To Initialize Multiple Times",
+            "description": "The `Initialize` function uses `init_if_needed`, which allows the staking parameters to be initialized multiple times by any caller. This creates a security risk because an attacker could repeatedly call `Initialize` with altered parameters, potentially modifying critical staking configurations and disrupting the entire protocol. The root cause is the use of `init_if_needed` instead of a one-time initialization mechanism. An attacker could exploit this by invoking the `Initialize` instruction multiple times with malicious parameters. The impact includes unauthorized alteration of staking logic, leading to potential fund loss or protocol instability.\n",
+            "severity": "critical",
+            "files": [
+                "solana/solana-ibc/programs/solana-ibc/src/storage.rs"
+            ],
+            "location": [
+                "Initialize#"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Discrepancy In Deposit Functionality",
+            "description": "The `deposit` function uses `remaining_accounts` for a cross-program invocation to `solana_ibc::cpi::set_stake`, but it lacks explicit validation checks on these accounts. Similarly, the `set_stake` CPI call does not validate the accounts passed in the `CpiContext`. This absence of validation could allow an attacker to pass malicious or incorrect accounts, potentially leading to unauthorized state changes or fund misdirection. The root cause is missing account ownership and correctness checks. Exploitation would involve crafting a malicious transaction with forged or invalid accounts in `remaining_accounts`. The impact includes potential loss of funds or corruption of staking data.\n",
+            "severity": "critical",
+            "files": [
+                "solana/solana-ibc/programs/solana-ibc/src/storage.rs"
+            ],
+            "location": [
+                "deposit#"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing Receipt Token Balance Check",
+            "description": "In the `set_service` instruction, the code sets the service for a stake that was deposited before guest chain initialization but does not explicitly check whether the depositor's `receipt_token_account` has a non-zero balance. This assumption introduces a vulnerability where a malicious user could set a service for another user's `vault_params` without proof of ownership, as the system does not verify token ownership via account balance. The root cause is the missing balance validation. An attacker could exploit this by calling `set_service` with another user's `vault_params` and an arbitrary `Service`. The impact includes unauthorized control over staking services and potential misuse of user funds.\n",
+            "severity": "critical",
+            "files": [
+                "solana/solana-ibc/programs/solana-ibc/src/storage.rs"
+            ],
+            "location": [
+                "set_service#"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Stake Mint Differentiation",
+            "description": "The vulnerability originates in the `deposit` function and concerns the lack of consideration for different token decimals in the `solana_ibc::cpi::set_stake` CPI call, particularly related to the mint of the staked amount. Without proper decimal normalization, deposits of tokens with different decimal precisions could be misinterpreted, leading to incorrect stake amounts being recorded. The root cause is the absence of decimal-aware arithmetic or validation during the stake update process. An attacker could exploit this by depositing tokens with non-standard decimals to manipulate the effective stake value. The impact includes incorrect staking calculations and potential fund loss.\n",
+            "severity": "high",
+            "files": [
+                "solana/solana-ibc/programs/solana-ibc/src/storage.rs"
+            ],
+            "location": [
+                "deposit#",
+                "solana_ibc::cpi::set_stake#",
+                "deposit#105-110"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Lack Of Sysvar Account Validation",
+            "description": "The program passes the instruction sysvar account to both `deposit` and `set_service` instructions but does not validate it in `validate_remaining_accounts` or in the `solana_ibc::cpi::set_stake` function. Missing explicit checks to ensure the provided account is indeed the correct sysvar account (e.g., instructions sysvar). An attacker could replace the instruction sysvar account with a forged one, potentially injecting unauthorized instructions into cross-program invocations. This could lead to arbitrary instruction execution, privilege escalation, or manipulation of CPI calls, resulting in fund loss or contract state corruption.\n",
+            "severity": "high",
+            "files": [
+                "solana/solana-ibc/programs/solana-ibc/src/storage.rs"
+            ],
+            "location": [
+                "deposit",
+                "set_service",
+                "solana_ibc::cpi::set_stake"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Potential Fund Lockup",
+            "description": "The `deposit` function accepts an optional `service` parameter of type `Option<Service>`, which is stored in `vault_params.service`. The withdrawal logic assumes this value is always `Some(service)`, but it can be set to `None`. The logic does not enforce that a service must be set during deposit when required for withdrawal, creating a mismatch between deposit and withdrawal assumptions. A user deposits funds with `service` set to `None`. Later, when attempting to withdraw, the withdrawal logic fails due to an `is_some()` check, preventing the user from retrieving their funds. Users may permanently lose access to their staked funds, resulting in a denial-of-service at the user level and potential loss of trust in the protocol.\n",
+            "severity": "low",
+            "files": [
+                "solana/solana-ibc/programs/solana-ibc/src/storage.rs"
+            ],
+            "location": [
+                "deposit#105-110"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "Option<Service> Allows None After Initialization",
+            "description": "The `vault_params.service` field is defined as `Option<Service>`, which allows it to be set to `None` even after the guest chain is initialized. This undermines the intended behavior where a valid service should always be present post-initialization. The use of `Option<Service>` instead of requiring a concrete `Service` type enables the possibility of having no service set, leading to potential logic inconsistencies. An attacker or malicious actor could initialize the system with a valid service and later set it to `None`, disrupting expected operations that depend on the service being available. This could result in a denial of service or inconsistent state handling, degrading system reliability and potentially enabling further logic-based attacks.\n",
+            "severity": "medium",
+            "files": [
+                "solana/solana-ibc/programs/solana-ibc/src/storage.rs"
+            ],
+            "location": [
+                "vault_params.service"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Missing 'has_one' Constraint in Withdraw",
+            "description": "The `Claim` instruction enforces a `has_one` constraint on the `rewards_token_mint` field within the `staking_params` account, ensuring a one-to-one relationship. However, the `Withdraw` instruction lacks this constraint. The absence of the `has_one` constraint in `Withdraw` creates an inconsistency in how the `staking_params` and `rewards_token_mint` relationship is validated across different instructions. An attacker could potentially manipulate the `Withdraw` instruction by providing a mismatched or unauthorized `rewards_token_mint`, bypassing the expected association. This inconsistency may lead to incorrect token withdrawals, reward distribution errors, or potential fund misdirection if not properly validated elsewhere.\n",
+            "severity": "low",
+            "files": [
+                "solana/solana-ibc/programs/solana-ibc/src/storage.rs"
+            ],
+            "location": [
+                "Withdraw"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unnecessary Signing and Seed Usage in token::transfer and burn_nft",
+            "description": "In the `deposit` function, calls to `token::transfer` do not require seeds or signed invocation, yet they are implemented with them. Similarly, `burn_nft` in `Withdraw` does not need a signed invocation but includes one, leading to inefficient code. Redundant use of signing and seed arguments in function calls where they are not required by the underlying program logic or security model. While not directly exploitable for fund theft, this inefficiency increases transaction complexity and cost, potentially opening up avenues for denial-of-fee attacks under high load. Increased computational overhead and transaction fees, reducing overall efficiency and scalability of the system.\n",
+            "severity": "informational",
+            "files": [
+                "solana/solana-ibc/programs/solana-ibc/src/storage.rs"
+            ],
+            "location": [
+                "deposit",
+                "Withdraw"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,278 @@
+{
+    "path": "reports/2025-06-23.pdf",
+    "project_info": {
+        "url": "https://github.com/orca-so/whirlpools",
+        "commit_id": "8565ac6",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-06-23",
+        "project_path": "contracts/2025-06-23.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ]
+            },
+            "title": "Malicious user can keep high adaptive fee at low cost",
+            "description": "The Orca Whirlpools program uses an adaptive fee mechanism that increases fees during high-frequency trading periods, determined by tracking the last swap timestamp. The vulnerability arises because the system updates the last_swap_timestamp even for negligible swaps (e.g., 1 smallest token unit), as long as the amount is non-zero. This allows a malicious user to artificially maintain the pool in a high-frequency trading state by periodically executing minimal swaps, thereby keeping the adaptive fee elevated without significant cost. The root cause is the lack of a threshold or significance check on the swap amount before updating the timestamp. This could lead to unfairly high fees for legitimate users, reducing capital efficiency and user trust in the pool's fee model.\n",
+            "severity": "medium",
+            "location": [
+                "AdaptiveFeeVariables.update_reference#120-148",
+                "swap_manager.rs#60"
+            ],
+            "files": [
+                "programs/whirlpool/src/manager/swap_manager.rs",
+                "programs/whirlpool/src/manager/fee_rate_manager.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Not skipping liquidity gaps when fetching the last tick group index",
+            "description": "During a swap, the Whirlpools program processes tick groups sequentially using the advance_tick_group function, which increments or decrements the tick group index by 1 without verifying whether the new tick group contains liquidity. This occurs even when the get_next_initialized_tick_index function is designed to skip over liquidity gaps. As a result, the swap loop inefficiently iterates through empty tick groups, increasing computational overhead and transaction costs. The root cause is the failure to align the fee rate manager's tick group advancement logic with the liquidity-aware tick traversal mechanism. An attacker could exploit this by creating sparse tick arrays, forcing unnecessary iterations and potentially increasing gas usage for users, though no direct fund loss occurs.\n",
+            "severity": "low",
+            "location": [
+                "swap_manager.rs#211-215",
+                "fee_rate_manager.rs#90-103"
+            ],
+            "files": [
+                "programs/whirlpool/src/manager/swap_manager.rs",
+                "programs/whirlpool/src/manager/fee_rate_manager.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Inconsistent volatility accumulator updates",
+            "description": "The volatility_accumulator is updated differently depending on whether adaptive_fee_update_skipped is enabled. In adaptive_fee_update_skipped mode, the accumulator is correctly updated when crossing tick groups via advance_tick_group_after_skip. However, when adaptive_fee_update_skipped is false, the tick_group_index is incremented via advance_tick_group without updating the volatility_accumulator, even at the end of a swap that crosses a tick boundary. This inconsistency can lead to inaccurate volatility tracking, affecting the adaptive fee calculation. The root cause is the lack of a unified update mechanism for the volatility_accumulator across both code paths. This could result in suboptimal fee adjustments, potentially undercharging or overcharging fees based on actual market conditions.\n",
+            "severity": "low",
+            "location": [
+                "fee_rate_manager.rs#158-195",
+                "swap_manager.rs#213-217"
+            ],
+            "files": [
+                "programs/whirlpool/src/manager/fee_rate_manager.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Inaccurate tick group index update conditions",
+            "description": "The swap function unconditionally calls advance_tick_group when adaptive_fee_update_skipped is false, without verifying that a tick group boundary has actually been crossed (i.e., curr_sqrt_price == bounded_sqrt_price_target). This leads to the tick_group_index being incremented even when no boundary is crossed, resulting in an incorrect index. Although the team noted that this has no real harm due to the index being memory-only and reset on subsequent swaps, it reflects a logic inconsistency. The root cause is an overly broad condition for tick group advancement. While the impact is minimal, it could confuse developers and lead to incorrect assumptions in future modifications.\n",
+            "severity": "informational",
+            "location": [
+                "swap_manager.rs#213-215",
+                "fee_rate_manager.rs#142-155"
+            ],
+            "files": [
+                "programs/whirlpool/src/manager/swap_manager.rs",
+                "programs/whirlpool/src/manager/fee_rate_manager.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Question on the adaptive fee rate cap",
+            "description": "The total_fee_rate is calculated as the sum of static_fee_rate and adaptive_fee_rate, both of which are capped individually. However, the adaptive_fee_rate is capped at FEE_RATE_HARD_LIMIT independently, meaning that when added to a non-zero static_fee_rate, the total could exceed the hard limit before being capped. The issue questions whether the adaptive_fee_rate should instead be capped at FEE_RATE_HARD_LIMIT - static_fee_rate to prevent this intermediate overflow. The root cause is a design decision on fee capping strategy. While the final total is correctly capped, the current approach allows the adaptive component to consume the entire fee budget, potentially undermining the static fee's role. The team confirmed this is intentional.\n",
+            "severity": "informational",
+            "location": [
+                "fee_rate_manager.rs#114-122",
+                "fee_rate_manager.rs#186-190"
+            ],
+            "files": [
+                "programs/whirlpool/src/manager/fee_rate_manager.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "The tick_group_index_reference is not updated in edge cases",
+            "description": "The tick_group_index_reference is not updated when the time elapsed since the last update is less than the filter_period, even though the current tick group has changed. This causes subsequent adaptive fee calculations to use an outdated reference, leading to incorrect index_delta values and thus inaccurate fee rates. For example, if two swaps occur within the filter_period, the second swap will calculate volatility based on the initial tick group, not the one set by the first swap. The root cause is the conditional update logic in update_reference. This could result in lower-than-expected fees during rapid successive trades, potentially benefiting attackers who front-run or sandwich trades.\n",
+            "severity": "informational",
+            "location": [
+                "oracle.rs#120-148",
+                "fee_rate_manager.rs#60-64"
+            ],
+            "files": [
+                "programs/whirlpool/src/state/oracle.rs",
+                "programs/whirlpool/src/manager/fee_rate_manager.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Inconsistent comments",
+            "description": "The comment in advance_tick_group_after_skip states that the tick_group_index will advance by one more if sqrt_price is not on the tick_group_size boundary, which is incorrect. The actual logic suggests the opposite: the index adjustment occurs based on boundary alignment. This misleading comment could lead to misunderstandings during code review or maintenance. The root cause is an inaccurate or outdated comment. While there is no direct security impact, it increases the risk of future bugs if developers rely on the comment for logic interpretation.\n",
+            "severity": "informational",
+            "location": [
+                "fee_rate_manager.rs#196"
+            ],
+            "files": [
+                "programs/whirlpool/src/manager/fee_rate_manager.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Unresolved comment",
+            "description": "The reset_position_range function includes a comment questioning whether the new tick range should be checked against the previous one to avoid redundant updates. Currently, the function does not perform this check, allowing users to submit transactions that reset the position to the same tick range, wasting gas. The root cause is the absence of a validation that prevents no-op updates. While not a security vulnerability, it represents a missed optimization opportunity and could be exploited to bloat the transaction history or waste user funds.\n",
+            "severity": "informational",
+            "location": [
+                "position.rs#94-95"
+            ],
+            "files": [
+                "programs/whirlpool/src/state/position.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Potential redundant checkpoint reset",
+            "description": "The reset_position_range function resets fee_growth_checkpoint_a, fee_growth_checkpoint_b, and reward growth checkpoints to zero, even though these values are used only in delta calculations with the current fee_growth_inside values. Since the absolute values do not affect the owed fees or rewards, resetting them is unnecessary. The root cause is a lack of clarity in the economic model of fee tracking. While safe, this reset is redundant and could be removed without affecting correctness, potentially improving code clarity.\n",
+            "severity": "informational",
+            "location": [
+                "position.rs#105-112"
+            ],
+            "files": [
+                "programs/whirlpool/src/state/position.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-570"
+                ]
+            },
+            "title": "Redundant condition",
+            "description": "The get_offset function contains a condition (r > 0 && rhs < 0) || (r < 0 && rhs > 0) to determine if floor division adjustment is needed. However, since rhs (derived from tick_spacing) is always positive, the (r > 0 && rhs < 0) branch is unreachable. This introduces unnecessary complexity and reduces code clarity. The root cause is a failure to account for the invariant that tick_spacing > 0. Removing the redundant condition simplifies the logic and improves maintainability.\n",
+            "severity": "informational",
+            "location": [
+                "tick_array.rs#94"
+            ],
+            "files": [
+                "programs/whirlpool/src/state/tick.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "Unused function",
+            "description": "The is_initialized function in dynamic_tick_array.rs is defined but never used. Instead, initialization checks are performed directly by reading the tick_data byte. This dead code increases the attack surface slightly and complicates audits. The root cause is incomplete code cleanup or oversight during development. Removing unused functions improves code hygiene and reduces confusion.\n",
+            "severity": "informational",
+            "location": [
+                "dynamic_tick_array.rs#36-41"
+            ],
+            "files": [
+                "programs/whirlpool/src/state/whirlpool.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "Incorrect Error Code Usage in Rent Validation",
+            "description": "The function `ensure_position_has_enough_rent_for_ticks()` returns the error `LiquidityTooHigh` when the required additional rent exceeds the tick-required rent, which is misleading. The root cause is a misinterpretation of the failure condition; the error suggests excessive liquidity when the actual issue is insufficient rent funding for extended position data. While not directly exploitable for financial gain, this could mislead clients or front-ends into taking incorrect actions based on erroneous error codes, potentially leading to failed transactions or user confusion. The impact includes degraded developer and user experience, potential misdiagnosis of issues during debugging, and possible integration flaws in downstream applications relying on precise error semantics.\n",
+            "severity": "low",
+            "location": [
+                "reset_position_range.rs#68-76"
+            ],
+            "files": [
+                "programs/whirlpool/src/manager/position_manager.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Unnecessary Rent Collection for Fixed Tick Arrays",
+            "description": "All users, including those using only fixed tick arrays, are required to pay additional rent fees that are later refunded upon position closure, increasing the initial cost of opening a position. The root cause is that the open_position instruction does not take TickArray accounts as inputs, so the program cannot conditionally skip rent collection based on tick array type. An attacker cannot directly exploit this, but all users face a higher effective transaction cost due to upfront rent payments, which could be optimized. The impact is economic inefficiency and increased barrier to entry for users, especially in low-liquidity or micro-position scenarios, though funds are eventually refunded.\n",
+            "severity": "medium",
+            "location": [
+                "open_position"
+            ],
+            "files": [
+                "programs/whirlpool/src/instructions/open_position.rs"
+            ]
+        }
+    ]
+}

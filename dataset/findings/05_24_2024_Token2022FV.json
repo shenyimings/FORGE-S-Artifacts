@@ -1,0 +1,255 @@
+{
+    "path": "reports/certora/05_24_2024_Token2022FV.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/solana-labs/solana-program-library"
+        ],
+        "commit_id": [
+            "260f80928f796fc78c81efa4dc2a7732665e5a59"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-02-01",
+        "project_path": "contracts/05_24_2024_Token2022FV.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "CPI Guard Bypass via Permanent Delegate in Transfer",
+            "description": "The contract fails to properly enforce the CpiGuard when a permanent delegate is involved during a transfer operation. The vulnerability arises because the validation logic for CPI calls does not account for the permanent delegate case, allowing a CPI call to proceed even when lock_cpi is enabled and the owner is the same as the source owner. An attacker could exploit this by invoking the transfer instruction via CPI under a context where the permanent delegate is set, thereby bypassing intended restrictions. This could lead to unauthorized or unintended token movements in contexts where CPI is meant to be locked.\n",
+            "severity": "high",
+            "location": [
+                "src/processor.rs::process_transfer#not_cpi"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1023"
+                ]
+            },
+            "title": "CPI Guard Bypass via Permanent Delegate in TransferChecked",
+            "description": "Similar to the basic transfer issue, the TransferChecked instruction does not correctly handle the case of a permanent delegate when enforcing the CpiGuard. The assertion fails because the logic assumes that the owner check is sufficient, but it does not differentiate between a regular owner and a permanent delegate. This allows a CPI call to proceed when lock_cpi is enabled and the owner matches the source owner, even though the guard should prevent it. Attackers could exploit this to perform checked transfers in contexts where CPI is supposed to be disabled, potentially violating protocol-level security assumptions.\n",
+            "severity": "high",
+            "location": [
+                "src/processor.rs::process_transfer#not_cpi"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "CPI Guard Bypass via Permanent Delegate in Burn/BurnChecked",
+            "description": "The Burn and BurnChecked instructions are also affected by the same flaw in the CpiGuard logic. When the source account has a CpiGuard with lock_cpi enabled and the call is made via CPI, the check fails to consider the permanent delegate scenario, allowing the burn operation to proceed if the owner matches the source owner. This could enable malicious actors to trigger burns through CPI in contexts where such calls should be prohibited, potentially disrupting protocol integrity or enabling unintended state changes.\n",
+            "severity": "high",
+            "location": [
+                "src/processor.rs::process_burn#not_cpi"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "If CpiGuard is present and enabled (lock_cpi is true), then Transfer, TransferChecked, TransferCheckedWithFee, and Burn are not allowed if signed by the owner",
+            "description": "1. **Description:** When the CpiGuard extension is enabled (lock_cpi is true), fund-decreasing instructions such as Transfer, TransferChecked, TransferCheckedWithFee, and Burn should not be allowed if signed by the token account owner. However, the current implementation allows these operations under certain conditions, violating the intended security model.\n2. **Cause:** The vulnerability arises because the instruction logic does not properly block owner-signed transactions when CpiGuard is active, particularly in edge cases such as self-delegation, permanent delegation, or when the account is owned by the system program or incinerator.\n3. **Exploitation:** An attacker could exploit this by crafting a CPI (Cross-Program Invocation) call where the owner signs the transaction, bypassing the intended restriction meant to enforce delegation-based control.\n4. **Impact:** This could undermine the security guarantees of CpiGuard, allowing unauthorized fund transfers that should have required a delegate signature, potentially leading to loss of funds or unintended behavior in dependent protocols.\n",
+            "severity": "low",
+            "location": [],
+            "files": [
+                "solana-program-library/token/program-2022/src/extension/cpi_guard/processor.rs",
+                "solana-program-library/token/program-2022/src/extension/cpi_guard/instruction.rs",
+                "solana-program-library/token/program-2022-test/tests/cpi_guard.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Inconsistency in detecting that an account is non-transferable between instructions Transfer, TransferChecked, and TransferCheckedWithFee and ConfidentialTransferInstruction::Transfer",
+            "description": "1. **Description:** There is an inconsistency in how non-transferable status is enforced across different instruction types. Regular transfer instructions check for the presence of the NonTransferableAccount extension on the source account, while ConfidentialTransferInstruction::Transfer checks whether the mint has the NonTransferable extension.\n2. **Cause:** The root cause is divergent logic paths in the codebase for handling transfer restrictions, relying on different extension checks depending on the instruction type.\n3. **Exploitation:** While currently not exploitable due to an invariant (all accounts of a non-transferable mint have the NonTransferableAccount extension), a future deviation from this invariant could result in inconsistent behavior, allowing unauthorized transfers via one instruction path but not the other.\n4. **Impact:** This creates a potential future vulnerability and reduces code maintainability. If the invariant is ever broken, it could allow bypassing transfer restrictions in confidential transfers, leading to unauthorized movement of tokens.\n",
+            "severity": "low",
+            "location": [],
+            "files": [
+                "solana-program-library/token/program-2022/src/extension/confidential_transfer/processor.rs",
+                "solana-program-library/token/program-2022/src/processor.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Inconsistent use of MemoTransfer between instructions Transfer, TransferChecked, and TransferCheckedWithFee and ConfidentialTransferInstruction::Transfer",
+            "description": "1. **Description:** The handling of the MemoTransfer extension differs between regular and confidential transfer instructions. In regular transfers, a self-transfer does not require a memo even if the destination has the MemoTransfer extension enabled, whereas ConfidentialTransferInstruction::Transfer always requires a memo for self-transfers.\n2. **Cause:** The inconsistency stems from separate implementation logic for confidential and non-confidential transfers without unified memo enforcement rules.\n3. **Exploitation:** This discrepancy could be exploited in systems that rely on consistent memo requirements, potentially allowing bypass of expected memo logging in self-transfers via regular instructions.\n4. **Impact:** Leads to unpredictable behavior across instruction types, undermining reliability for applications that depend on mandatory memos for compliance or auditing purposes.\n",
+            "severity": "low",
+            "location": [],
+            "files": [
+                "solana-program-library/token/program-2022/src/extension/confidential_transfer/processor.rs",
+                "solana-program-library/token/program-2022/src/processor.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "TransferCheckedWithFee succeeds when fee is 0 even if fee extension is not enabled on the mint",
+            "description": "1. **Description:** The TransferCheckedWithFee instruction succeeds even when the mint does not have the TransferFeeConfig extension enabled, as long as the specified fee is zero. This effectively makes TransferChecked redundant, as TransferCheckedWithFee can always be used instead.\n2. **Cause:** The instruction does not validate the presence of the TransferFeeConfig extension before processing, only checking the fee amount.\n3. **Exploitation:** An attacker or user could bypass extension-based access control or assumptions about fee enforcement by using TransferCheckedWithFee with zero fees on non-fee-enabled mints.\n4. **Impact:** Weakens the semantic meaning of the TransferFeeConfig extension and may lead to incorrect assumptions by clients or frontends about whether a mint supports fees, potentially affecting token economics or UI logic.\n",
+            "severity": "low",
+            "location": [],
+            "files": [
+                "solana-program-library/token/program-2022/src/extension/transfer_fee/processor.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ]
+            },
+            "title": "Mixed use of equality operator == and function spl_token_2022::cmp_pubkey() to compare public keys",
+            "description": "1. **Description:** Public keys are compared using both the Rust equality operator (==) and the spl_token_2022::cmp_pubkey() function, which internally uses sol_memcmp. This inconsistency can lead to performance degradation and potential future bugs.\n2. **Cause:** The root cause is inconsistent coding practices across different extensions, where some developers use the native Eq trait and others use the explicit cmp_pubkey function.\n3. **Exploitation:** While not directly exploitable for security breaches, this could lead to subtle bugs if the two comparison methods diverge in behavior under edge cases or future runtime changes.\n4. **Impact:** Reduces code clarity and performance, as sol_memcmp inhibits LLVM optimizations. It also increases maintenance burden and risk of incorrect comparisons if not standardized.\n",
+            "severity": "low",
+            "location": [
+                "extension/token_group/processor.rs",
+                "extension/transfer_fee/processor.rs",
+                "extension/confidential_transfer/processor.rs"
+            ],
+            "files": [
+                "solana-program-library/token/program-2022/src/processor.rs",
+                "solana-program-library/token/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Explicit use of sol_memcmp has a negative effect on performance",
+            "description": "1. **Description:** The code explicitly uses sol_memcmp for memory comparison instead of relying on Rust's built-in memcmp or compiler-optimized comparisons. This prevents LLVM from applying key optimizations.\n2. **Cause:** Direct invocation of sol_memcmp treats it as an external function call, blocking optimization passes that could inline or simplify comparison logic.\n3. **Exploitation:** Not directly exploitable, but results in suboptimal execution speed and larger compiled SBF binaries.\n4. **Impact:** Increased on-chain execution cost (compute units), slower processing, and larger program size, which can affect deployment and transaction throughput.\n",
+            "severity": "low",
+            "location": [],
+            "files": [
+                "solana-program-library/token/program-2022/src/lib.rs",
+                "solana-program-library/stake-pool/program/src/state.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "The function process_transfer in token-2022/src/processor.rs is used to implement Transfer, TransferChecked, and TransferCheckedWithFee. However, it also succeeds when called with a fee and no mint",
+            "description": "1. **Description:** The process_transfer function allows execution with a fee parameter even when no mint account is provided, which contradicts the expected requirement that fee calculations require a mint with the TransferFeeConfig extension.\n2. **Cause:** The function lacks a validation check to ensure that the mint account is present when a fee is specified.\n3. **Exploitation:** A caller could invoke the function with a fee and a null mint, potentially triggering undefined behavior or bypassing intended validation logic.\n4. **Impact:** Could lead to inconsistent state or incorrect fee handling if such calls are processed, undermining the integrity of fee enforcement mechanisms.\n",
+            "severity": "informational",
+            "location": [
+                "token-2022/src/processor.rs::process_transfer"
+            ],
+            "files": [
+                "solana-program-library/token/program-2022/src/processor.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Use of floating points in InterestBearingConfig functions",
+            "description": "1. **Description:** The InterestBearingConfig functionality uses f64 floating-point arithmetic, which is not natively supported on Solana's SBF runtime and relies on compiler-emulated libraries.\n2. **Cause:** Floating-point operations are implemented via compiler runtime libraries that may vary between compiler versions, introducing instability.\n3. **Exploitation:** Changes in compiler versions could alter floating-point behavior, leading to inconsistent results across deployments or upgrades.\n4. **Impact:** Introduces non-determinism and fragility in calculations, though the impact is mitigated as these are used only for UI display and not for on-chain logic.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "solana-program-library/token/program-2022/src/extension/interest_bearing_mint/mod.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "calculate_inverse_fee is not the exact inverse of calculate_fee",
+            "description": "1. **Description:** The function calculate_inverse_fee does not precisely reverse the operation of calculate_fee. Specifically, the mathematical identity calculate_inverse_fee(x + calculate_fee(x)) == x does not hold.\n2. **Cause:** The implementation uses approximations or rounding that prevent exact inversion, likely due to integer arithmetic constraints.\n3. **Exploitation:** Users relying on the inverse relationship for precise calculations may experience inaccuracies, especially in financial modeling or fee reconciliation.\n4. **Impact:** Could lead to confusion or incorrect assumptions by developers integrating with the fee system, potentially affecting downstream applications that depend on accurate fee recovery.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "solana-program-library/token/program-2022/src/extension/transfer_fee/mod.rs"
+            ]
+        }
+    ]
+}

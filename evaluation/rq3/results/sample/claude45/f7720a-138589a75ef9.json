@@ -1,0 +1,196 @@
+{
+    "project": "MetaPool_Liquid_Staking_NEAR_Smart_Contract_Security_Audit_Report_Halborn_Final.pdf.json",
+    "files": [
+        "dataset/contracts/MetaPool_Liquid_Staking_NEAR_Smart_Contract_Security_Audit_Report_Halborn_Final.pdf.json/metapool/src/utils.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.14285714285714285,
+        "recall": 1.0,
+        "f1": 0.25
+    },
+    "cwe_ground_truth": [
+        "CWE-1041",
+        "CWE-710"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-697",
+        "CWE-682",
+        "CWE-1164",
+        "CWE-1127",
+        "CWE-758",
+        "CWE-284",
+        "CWE-1059",
+        "CWE-1061",
+        "CWE-710",
+        "CWE-1126",
+        "CWE-1041",
+        "CWE-703",
+        "CWE-684"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "FUNCTION CAN BE REPLACED BY MACRO",
+            "description": "The contract implements a custom `assert_callback_calling()` function to ensure that only the contract itself can call certain methods, by comparing the predecessor account with the current account. This same functionality can be achieved more safely and concisely using the built-in #[private] macro provided by the NEAR SDK. The current approach duplicates functionality already handled by the framework, increasing code size and potential for errors. While not exploitable directly, it represents a deviation from best practices and reduces code readability.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Rust source code for a Solana/NEAR smart contract, I have identified several security issues arising from the specified CWE root causes:\n\n1. **CWE-682: Incorrect Calculation** - The `damp_multiplier` function contains a logical error in its condition checking. It checks `currently_distributed < max_to_distribute` but then in the else-if checks `currently_distributed > max_to_distribute + half`. This creates a gap where `currently_distributed == max_to_distribute` is not properly handled in the dampening logic, potentially leading to incorrect multiplier calculations.\n\n2. **CWE-703: Improper Check or Handling of Exceptional Conditions** - Multiple division operations throughout the code (in `proportional`, `shares_from_amount`, `amount_from_shares`, `apply_pct`, `apply_multiplier`) do not check for division by zero before performing the operation. While some functions have zero checks, they are incomplete. For example, `proportional` has no denominator zero check, and `apply_multiplier` divides by 100 without validation.\n\n3. **CWE-682: Incorrect Calculation** - The `damp_multiplier` function has a potential integer overflow issue. When calculating `max_to_distribute + half`, if `max_to_distribute` is close to u128::MAX, adding `half` could overflow, leading to incorrect comparisons and dampening calculations.\n\n4. **CWE-284: Improper Access Control** - The `assert_callback_calling` function only checks if the predecessor equals the current account, but this is insufficient for proper callback validation in cross-contract calls. An attacker could potentially craft a transaction that satisfies this check while not being a legitimate callback.\n\n5. **CWE-697: Incorrect Comparison** - In the `is_promise_success` function, the match statement uses `_ => false` which treats all non-successful promise results (including NotReady and Failed) the same way. This could mask important error conditions and lead to incorrect state transitions.\n\n6. **CWE-664: Improper Control of a Resource Through its Lifetime** - The `assert_min_balance` function checks account balance but doesn't account for pending promises or locked funds, potentially allowing the contract to approve operations that would fail due to insufficient available balance.\n\n7. **CWE-710: Improper Adherence to Coding Standards** - The `debug!` macro for production builds is empty, which could lead to dead code and confusion. The conditional compilation creates inconsistent behavior between development and production environments.\n",
+            "findings": [
+                {
+                    "title": "Incorrect Dampening Logic in damp_multiplier Function",
+                    "description": "The damp_multiplier function has a logical gap in its conditional checks. When currently_distributed equals max_to_distribute, the first condition (currently_distributed < max_to_distribute) is false, but the else-if condition (currently_distributed > max_to_distribute + half) is also false, causing the function to fall through to the complex dampening calculation when it should apply the base multiplier. This can lead to incorrect reward calculations at the boundary condition.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Missing Division by Zero Check in proportional Function",
+                    "description": "The proportional function performs division by 'denominator' without checking if it's zero. If denominator is zero, this will cause a panic and halt contract execution. This function is used by critical operations like shares_from_amount and amount_from_shares, making this a significant vulnerability.",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Potential Integer Overflow in damp_multiplier",
+                    "description": "In the damp_multiplier function, the expression 'max_to_distribute + half' could overflow if max_to_distribute is large (close to u128::MAX). This would cause incorrect comparison results in the condition 'currently_distributed > max_to_distribute + half', leading to wrong dampening calculations.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Insufficient Callback Validation",
+                    "description": "The assert_callback_calling function only verifies that predecessor_account_id equals current_account_id, which is a weak check for callback validation. In complex cross-contract scenarios, this may not provide sufficient protection against unauthorized callback invocations or reentrancy attacks.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Incomplete Promise Result Handling",
+                    "description": "The is_promise_success function treats all non-successful promise results (Failed, NotReady) identically by returning false. This masks important distinctions between different failure modes, potentially causing the contract to handle promise failures incorrectly and leading to inconsistent state.",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Inadequate Balance Check for Pending Operations",
+                    "description": "The assert_min_balance function checks the current account balance but doesn't account for funds that may be locked in pending promises or other operations. This could allow the contract to approve operations that will fail when executed due to insufficient available balance, leading to failed transactions and poor user experience.",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Inconsistent Debug Macro Behavior Between Environments",
+                    "description": "The debug! macro is defined differently for production and non-production builds (empty in production). This creates inconsistent behavior and potential dead code in production, violating coding standards and making debugging production issues more difficult. It could also lead to unexpected behavior if code relies on side effects of debug logging.",
+                    "category": "CWE-710",
+                    "severity": "low",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided Rust source code for a Solana/NEAR smart contract, I have identified several security issues and code quality problems that map to the provided CWE candidates:\n\n1. **CWE-1059 (Insufficient Technical Documentation)**: The code lacks comprehensive documentation. Critical functions like `damp_multiplier`, `shares_from_amount`, and `amount_from_shares` have minimal or no documentation explaining their purpose, parameters, return values, and potential edge cases. The `debug` macro's conditional compilation behavior is not documented.\n\n2. **CWE-1164 (Irrelevant Code)**: The `#[cfg(prod)]` version of the `debug` macro is empty and produces no code, making it irrelevant in production builds. While this might be intentional for performance, it represents code that has no effect.\n\n3. **CWE-1127 (Compilation with Insufficient Warnings)**: The code uses `#[cfg(not(prod))]` and `#[cfg(prod)]` without proper feature flags or clear compilation configuration, which could lead to unexpected behavior if the `prod` feature is not properly defined during compilation.\n\n4. **CWE-1041 (Use of Redundant Code)**: The `apply_pct` and `apply_multiplier` functions both perform similar percentage-based calculations using U256 conversions. The logic could be consolidated to reduce redundancy.\n\n5. **CWE-758 (Reliance on Undefined/Unspecified Behavior)**: The `damp_multiplier` function has a logical issue where it checks `currently_distributed < max_to_distribute` in the first condition but then checks `currently_distributed > max_to_distribute + half` in the else-if. This creates an undefined behavior gap when `currently_distributed` is exactly equal to `max_to_distribute`.\n\n6. **CWE-1126 (Declaration of Variable with Unnecessarily Wide Scope)**: In the `damp_multiplier` function, the `half` variable is declared at the beginning but is only used in specific branches of the conditional logic, representing unnecessarily wide scope.\n\n7. **CWE-1061 (Insufficient Encapsulation)**: The utility functions are all public and directly expose internal calculation logic without any validation or encapsulation. For example, `proportional` can cause division by zero if `denominator` is 0, but this is not checked or documented.\n\n8. **CWE-684 (Incorrect Provision of Specified Functionality)**: The `is_close` function's documentation states it checks if a value is within ±0.001N of the total, but the implementation uses `saturating_sub` which silently handles underflow. This could mask errors where `total` is less than `ONE_MILLI_NEAR`.\n",
+            "findings": [
+                {
+                    "title": "Insufficient Documentation for Critical Functions",
+                    "description": "The code lacks comprehensive technical documentation for critical functions such as `damp_multiplier`, `shares_from_amount`, `amount_from_shares`, and the conditional compilation behavior of the `debug` macro. This makes it difficult for auditors and maintainers to understand the intended behavior, security assumptions, and potential edge cases.",
+                    "category": "CWE-1059",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Empty Debug Macro in Production Builds",
+                    "description": "The `debug` macro when compiled with the `prod` feature flag expands to nothing, making it irrelevant code in production builds. While this may be intentional for performance, it represents code that serves no functional purpose in certain configurations.",
+                    "category": "CWE-1164",
+                    "severity": "info",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unclear Compilation Configuration for Feature Flags",
+                    "description": "The code uses `#[cfg(not(prod))]` and `#[cfg(prod)]` without clear documentation or standard feature flag definitions. This could lead to unexpected behavior if the `prod` feature is not properly configured during compilation, potentially leaving debug logging enabled in production or disabled in development.",
+                    "category": "CWE-1127",
+                    "severity": "low",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Redundant Percentage Calculation Logic",
+                    "description": "The functions `apply_pct` and `apply_multiplier` both perform similar percentage-based calculations using U256 conversions with slightly different scaling factors. This redundancy increases maintenance burden and potential for inconsistencies.",
+                    "category": "CWE-1041",
+                    "severity": "low",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Undefined Behavior Gap in damp_multiplier Function",
+                    "description": "The `damp_multiplier` function has a logical gap in its conditional checks. It checks `currently_distributed < max_to_distribute` in the first condition and `currently_distributed > max_to_distribute + half` in the else-if, but does not explicitly handle the case where `currently_distributed == max_to_distribute`. This creates ambiguity about the intended behavior at this boundary condition.",
+                    "category": "CWE-758",
+                    "severity": "medium",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Variable Declared with Unnecessarily Wide Scope",
+                    "description": "In the `damp_multiplier` function, the `half` variable is declared at the function scope but is only used in specific branches of the conditional logic (the else-if and else branches). This represents unnecessarily wide scope and could be moved closer to its usage.",
+                    "category": "CWE-1126",
+                    "severity": "info",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Insufficient Encapsulation and Input Validation",
+                    "description": "Utility functions like `proportional`, `shares_from_amount`, and `amount_from_shares` are public and directly expose internal calculation logic without proper input validation or encapsulation. For example, `proportional` can cause division by zero if `denominator` is 0, but this is not checked, validated, or documented.",
+                    "category": "CWE-1061",
+                    "severity": "high",
+                    "confidence": 0.93
+                },
+                {
+                    "title": "Potential Silent Error Masking in is_close Function",
+                    "description": "The `is_close` function uses `saturating_sub` which silently handles underflow when `total < ONE_MILLI_NEAR`. This could mask errors or unexpected states where the total is very small, potentially leading to incorrect 'close enough' determinations that don't match the documented behavior of checking ±0.001N.",
+                    "category": "CWE-684",
+                    "severity": "medium",
+                    "confidence": 0.87
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-1059",
+            "CWE-570",
+            "CWE-477",
+            "CWE-1092",
+            "CWE-1044",
+            "CWE-758",
+            "CWE-684",
+            "CWE-571",
+            "CWE-1048",
+            "CWE-1209",
+            "CWE-1127",
+            "CWE-1357",
+            "CWE-1093",
+            "CWE-1066",
+            "CWE-1177",
+            "CWE-1061",
+            "CWE-1076",
+            "CWE-1068",
+            "CWE-573",
+            "CWE-1101",
+            "CWE-1120",
+            "CWE-1164",
+            "CWE-657",
+            "CWE-1041",
+            "CWE-1065",
+            "CWE-1126"
+        ]
+    ]
+}

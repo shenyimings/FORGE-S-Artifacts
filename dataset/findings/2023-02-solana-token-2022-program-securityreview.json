@@ -1,0 +1,298 @@
+{
+    "path": "reports/2023-02-solana-token-2022-program-securityreview.pdf",
+    "project_info": {
+        "url": "https://github.com/solana-labs/solana-program-library/token/program-2022",
+        "commit_id": "50abadd819df2e406567d6eca31c213264c1c7cd",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-10-25",
+        "project_path": "contracts/2023-02-solana-token-2022-program-securityreview.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-228"
+                ],
+                "3": [
+                    "CWE-237"
+                ],
+                "4": [
+                    "CWE-238"
+                ]
+            },
+            "title": "Ok returned for malformed extension data",
+            "description": "The `get_extension_types` function in the Token-2022 program returns `Ok` when encountering malformed TLV (type-length-value) data that is truncated, instead of returning an appropriate error. This occurs because the function does not validate that the full TLV record fits within the provided data buffer before proceeding. An attacker could exploit this by crafting a malicious account with truncated TLV data, causing the program to proceed with invalid or incomplete extension data. The impact is limited to potential misinterpretation of account state, but it could lead to inconsistent behavior or future vulnerabilities if dependent logic assumes valid parsing.\n",
+            "severity": "informational",
+            "files": [
+                "token/program-2022/src/extension/mod.rs"
+            ],
+            "location": [
+                "mod.rs#get_extension_types",
+                "get_extension_types"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Missing account ownership checks",
+            "description": "Several instructions in the Token-2022 program, such as `process_reallocate`, `process_withdraw_withheld_tokens_from_mint`, and `process_withdraw_withheld_tokens_from_accounts`, do not explicitly verify that the accounts they operate on are owned by the Token Program. While some of these functions have implicit ownership enforcement via mutable data access, this is not guaranteed and could be bypassed if the logic changes. An attacker could pass accounts not owned by the Token Program, potentially leading to unauthorized state modifications or spoofing. The impact includes potential violation of access control assumptions, which could compromise the integrity of the system.\n",
+            "severity": "informational",
+            "files": [
+                "token/program-2022/src/processor.rs"
+            ],
+            "location": [
+                "processor.rs#process_reallocate",
+                "processor.rs#process_withdraw_withheld_tokens_from_mint",
+                "processor.rs#process_withdraw_withheld_tokens_from_accounts",
+                "Relevant instructions"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ],
+                "3": [
+                    "CWE-829"
+                ]
+            },
+            "title": "Use of a vulnerable dependency",
+            "description": "The audit identified the use of a vulnerable version of the `time` crate (version 0.1.44), which has a known vulnerability (RUSTSEC-2020-0071) that could lead to a segmentation fault. This vulnerability arises from improper handling of time-related operations in the underlying implementation. Although the exploitability within the Solana program context may be limited, the presence of such a dependency introduces unnecessary risk. The impact could include denial of service or undefined behavior if the vulnerable code path is triggered during execution.\n",
+            "severity": "informational",
+            "files": [
+                "Cargo.lock"
+            ],
+            "location": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-394"
+                ]
+            },
+            "title": "Large extension sizes can cause panics",
+            "description": "The `init_extension` function uses `Length::try_from(length).unwrap()` without proper error handling. If the extension size exceeds `u16::MAX`, the `try_from` call fails and the `unwrap` triggers a panic, halting program execution. This can be exploited by providing an extension with an excessively large size, leading to a denial of service. The root cause is the lack of defensive error handling around type conversion. The impact is a potential disruption of program functionality when processing large extensions.\n",
+            "severity": "informational",
+            "files": [
+                "token/program-2022/src/extension/mod.rs"
+            ],
+            "location": [
+                "mod.rs#init_extension",
+                "init_extension"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1117"
+                ]
+            },
+            "title": "Unexpected function behavior",
+            "description": "The `decode_instruction_data` function is intended to decode instruction data but does not clearly document or reflect in its name that it skips the first byte (the instruction type). This mismatch between the function's name and its actual behavior can lead to confusion and misuse by developers. The lack of clarity in code comments exacerbates the issue. While not directly exploitable, this can result in incorrect usage in future code changes, potentially introducing security flaws. The impact is primarily on code maintainability and developer ergonomics.\n",
+            "severity": "informational",
+            "files": [
+                "token/program-2022/src/instruction.rs"
+            ],
+            "location": [
+                "instruction.rs#decode_instruction_data",
+                "decode_instruction_data"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1285"
+                ],
+                "4": [
+                    "CWE-129"
+                ]
+            },
+            "title": "Out of bounds access in the get_extension instruction",
+            "description": "The `get_extension` function computes a `value_end` index based on the extension length but does not verify that this index is within the bounds of the provided TLV data. This can result in an out-of-bounds read when `pod_from_bytes` is called, leading to a program panic. The root cause is the absence of a bounds check after calculating `value_end`. An attacker could exploit this by providing truncated or malformed account data, causing a denial of service. The impact is a potential crash of the program during extension parsing.\n",
+            "severity": "low",
+            "files": [
+                "token/program-2022/src/extension/mod.rs"
+            ],
+            "location": [
+                "mod.rs#get_extension",
+                "get_extension"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ],
+                "3": [
+                    "CWE-835"
+                ]
+            },
+            "title": "Iteration over empty data",
+            "description": "The `get_extension_indices` function continues iterating past uninitialized (empty) TLV entries when the `init` flag is false, potentially processing garbage data. Since TLV records cannot be deleted, reaching an uninitialized entry should signal the end of valid data. However, the loop advances by two bytes and continues, which may lead to incorrect parsing or infinite loops in edge cases. The impact is undefined behavior during TLV traversal, which could affect program correctness and reliability.\n",
+            "severity": "informational",
+            "files": [
+                "token/program-2022/src/extension/mod.rs"
+            ],
+            "location": [
+                "mod.rs#get_extension_indices",
+                "get_extension_indices"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing check in UpdateMint instruction could result in inoperable mints",
+            "description": "The `process_update_mint` function allows setting the new authority to `Pubkey::default()` while also setting `auto_approve_new_accounts` to false. This configuration makes it impossible to approve new accounts for the mint, effectively rendering the mint inoperable. The function lacks a validation check to prevent this invalid state. An attacker or misconfigured transaction could exploit this to freeze account creation for a mint. The impact is a denial of service for mint functionality.\n",
+            "severity": "low",
+            "files": [
+                "token/program-2022/src/processor.rs"
+            ],
+            "location": [
+                "processor.rs#process_update_mint",
+                "UpdateMint"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Incorrect test data description",
+            "description": "The comments for the `MINT_WITH_EXTENSION` test constant incorrectly label the fields in the byte array. For example, it labels a field as \"extension type\" when it is actually \"account type\". This misalignment can mislead developers who rely on comments to understand test data structure. While not a direct security vulnerability, it increases the risk of incorrect modifications during development or auditing. The impact is reduced code clarity and potential for human error in test or implementation code.\n",
+            "severity": "informational",
+            "files": [
+                "token/program-2022/src/extension/mod.rs"
+            ],
+            "location": [
+                "mod.rs#MINT_WITH_EXTENSION",
+                "Test data comments"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "The Transfer and TransferWithFee instructions are identical",
+            "description": "The `Transfer` and `TransferWithFee` instructions in the confidential transfer module have identical implementations, both calling `process_transfer` with the same logic. The presence of fees is determined by the mint's extension, not the instruction used. This redundancy can confuse developers and users about the intended use of each instruction. The impact is potential misuse or misunderstanding of the API, leading to incorrect integration or assumptions about fee handling.\n",
+            "severity": "informational",
+            "files": [
+                "token/program-2022/src/extension/confidential_transfer/processor.rs"
+            ],
+            "location": [
+                "processor.rs#ConfidentialTransferInstruction::Transfer",
+                "processor.rs#ConfidentialTransferInstruction::TransferWithFee",
+                "Transfer",
+                "TransferWithFee"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Some instructions operate only on the lo bits of balances",
+            "description": "Certain instructions, such as `process_destination_for_transfer`, only update the low 16 bits (`pending_balance_lo`) of a 64-bit balance in confidential transfers, ignoring the high 48 bits. This can result in incorrect balance calculations when the value exceeds 16 bits. The root cause is incomplete handling of split balance components. An attacker could exploit this by causing large fee accruals that overflow the low bits, leading to loss of funds or incorrect state. The impact is significant and could compromise the correctness of confidential balance operations.\n",
+            "severity": "informational",
+            "files": [
+                "token/program-2022/src/extension/confidential_transfer/processor.rs"
+            ],
+            "location": [
+                "processor.rs#process_destination_for_transfer",
+                "processor.rs#process_withdraw_withheld_tokens_from_mint",
+                "processor.rs#process_withdraw_withheld_tokens_from_accounts",
+                "Encrypted balance instructions"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "Instruction susceptible to front-running",
+            "description": "The `WithdrawWithheldTokensFromAccounts` instruction is vulnerable to front-running because it relies on a zero-knowledge proof that is valid only for a specific account state. If the withheld fees change between proof generation and transaction execution, the proof fails and the transaction reverts. This allows an attacker to manipulate the timing of transactions to cause failures. The code comments acknowledge this and suggest using `HarvestWithheldTokensToMint` and `WithdrawWithheldTokensFromMint` instead. The impact is reliability issues and potential denial of service for legitimate withdrawals.\n",
+            "severity": "informational",
+            "files": [
+                "token/program-2022/src/extension/transfer_fee/instruction.rs"
+            ],
+            "location": [
+                "instruction.rs#WithdrawWithheldTokensFromAccounts"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,106 @@
+{
+    "project": "ottersec_jito_restaking_audit.pdf.json",
+    "files": [
+        "dataset/contracts/ottersec_jito_restaking_audit.pdf.json/vault_program/src/update_vault.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.16666666666666666,
+        "recall": 1.0,
+        "f1": 0.2857142857142857
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-682",
+        "CWE-435",
+        "CWE-284",
+        "CWE-193",
+        "CWE-369"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Vault Share Inflation Risk",
+            "description": "1. **Description:** An attacker can exploit the `UpdateVaultBalance` mechanism after a vault has been slashed to inflate their share of VRT tokens by depositing tokens when the token-to-share ratio is skewed.\n2. **Cause:** The share calculation does not account for prior slashing events that reduce the underlying asset balance while leaving VRT supply unchanged, allowing disproportionate minting.\n3. **Exploitation:** By depositing tokens into a slashed vault and triggering balance updates, the attacker receives more VRT tokens than fair market value, effectively stealing value from existing stakeholders.\n4. **Impact:** This leads to unfair distribution of vault ownership and economic loss for honest participants due to share inflation.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The instruction mutates `vault` state (both `withdrawable_reserve_amount` and `tokens_deposited`) based on (a) a `Config` account provided by the caller and (b) a `vault_token_account` provided by the caller. The code relies on helper loaders (`load_config`, `load_vault`, `load_vault_delegation_list`, `load_associated_token_account`) for most invariants, but within this function there are no explicit bindings ensuring the passed `config` is the correct one for the given `vault`, nor an explicit owner/program check on the token account before trusting `spl_token::state::Account::unpack`. Additionally, the accounting update pattern can lead to inconsistent internal state if deltas are double-counted or if reserves exceed actual deposits.\n",
+            "findings": [
+                {
+                    "title": "Config/Vault association not enforced in this instruction (caller can supply arbitrary Config)",
+                    "description": "`process_update_vault` reads `config.epoch_length` from the `config` account provided in `accounts[0]` and uses it to drive `vault_delegation_list.update(...)`, but the function itself does not verify that this `config` is the one associated with the `vault` being updated (e.g., `vault.config == config.key`).\nIf `load_config`/`load_vault` do not enforce this relationship, an attacker can pass a different (but valid) Config with a manipulated `epoch_length` and cause incorrect delegation-list updates and reserve accounting for the target vault.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Potential spoofed token account data used to set `vault.tokens_deposited` (missing explicit token-program owner check)",
+                    "description": "The instruction sets `vault.tokens_deposited = vault_token_account.amount` after calling `Account::unpack(&vault_token_account_data)`. `spl_token::state::Account::unpack` validates layout/length but does not, by itself, enforce that `vault_token_account.owner == spl_token::id()`.\nIf `load_associated_token_account` does not strictly check both:\n  1) the address equals the canonical ATA for (vault, supported_mint), and\n  2) the account owner is the SPL Token program,\nthen a caller could provide an arbitrary program-owned account with attacker-controlled bytes that deserialize as a token account with an inflated `amount`, corrupting `vault.tokens_deposited` and any downstream logic that relies on it.\n",
+                    "category": "CWE-707",
+                    "severity": "high",
+                    "confidence": 0.55
+                },
+                {
+                    "title": "Reserve accounting can become inconsistent with actual token balance (reserve can exceed deposits)",
+                    "description": "When `vault_delegation_list.update(...)` returns `amount_reserved_for_withdraw`, the code only ever increments:\n  `vault.withdrawable_reserve_amount += amount_reserved_for_withdraw`\nand then separately overwrites:\n  `vault.tokens_deposited = vault_token_account.amount`\nThere is no invariant enforcement such as `withdrawable_reserve_amount <= tokens_deposited` (or reconciliation if deposits decreased), nor any protection against logical double-counting if `update()` can return overlapping deltas across calls (depending on its internal state machine).\nThis can result in security-relevant incorrect state (e.g., overstated withdrawable reserves) even though arithmetic overflow is checked.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Permissionless mutation of vault accounting state may enable griefing/timing manipulation",
+                    "description": "The instruction has no signer/authority requirement and will update vault accounting for any provided vault/delegation-list pair that passes loader checks. If the protocol assumes only an authorized crank/keeper should perform these updates (or that updates should be rate-limited), this allows arbitrary users to:\n  - force state transitions at attacker-chosen times/slots,\n  - spam updates to increase compute/load (griefing),\n  - potentially influence withdraw availability timing if downstream logic depends on update cadence.\nThis is only an issue if permissionless cranking is not an intentional design choice.\n",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.45
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided `process_update_vault` function itself performs very little arithmetic. The only direct arithmetic operation is an addition guarded by `checked_add`, which prevents classic integer overflow/wraparound in this function.\n\nHowever, the function passes `config.epoch_length` directly into `vault_delegation_list.update(Clock::get()?.slot, config.epoch_length)` without validating it. If `epoch_length` can be zero (misconfiguration or maliciously initialized config), and `update()` performs divisions/modulos by `epoch_length` (a common pattern for epoch math), this can trigger a divide-by-zero. Similarly, epoch/slot boundary computations frequently have off-by-one pitfalls (e.g., inclusive vs exclusive end slot, `slot % epoch_length == 0` boundary behavior). Because `epoch_length` is unvalidated at this callsite, any such bug inside `update()` becomes reachable.\n\nNo evidence of string-length handling, bit shifting, floating-point usage, or subtraction-based underflow exists in this code.\n",
+            "findings": [
+                {
+                    "title": "Unvalidated epoch_length may trigger divide-by-zero inside vault_delegation_list.update",
+                    "description": "`process_update_vault` calls:\n`vault_delegation_list.update(Clock::get()?.slot, config.epoch_length)`\nbut does not validate that `config.epoch_length != 0`.\n\nIf `VaultDelegationList::update()` computes epoch indices using division/modulo by `epoch_length` (typical for slot/epoch math), a zero value will cause a divide-by-zero trap/abort, resulting in a denial of service for this instruction (the vault cannot be updated).\n",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Potential off-by-one exposure in epoch boundary logic due to unvalidated epoch_length usage",
+                    "description": "The instruction forwards `(current_slot, epoch_length)` into `VaultDelegationList::update()` without any sanity checks (e.g., minimum epoch length, expected epoch boundary behavior).\n\nIf `update()` contains an off-by-one error in epoch boundary calculations (common issues: treating the last slot of an epoch as inclusive/exclusive, or incorrect handling when `slot % epoch_length == 0`), the vault may reserve/roll delegation state one slot early/late. This can lead to incorrect `amount_reserved_for_withdraw` updates and incorrect `withdrawable_reserve_amount` accounting.\n\nThis is a reachable risk at this callsite because `epoch_length` is not validated here, and boundary cases are driven by `Clock::get()?.slot`.\n",
+                    "category": "CWE-193",
+                    "severity": "medium",
+                    "confidence": 0.4
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-135",
+            "CWE-191",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-1339"
+        ]
+    ]
+}

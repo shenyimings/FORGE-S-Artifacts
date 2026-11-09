@@ -1,0 +1,54 @@
+{
+    "path": "reports/Wormhole MultiGov - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": "https://github.com/wormhole-foundation/multigov",
+        "commit_id": "d899f66a7d2c11c2c077ff3fdcde130d46e2dfd7",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-01-31",
+        "project_path": "contracts/Wormhole MultiGov - Zellic Audit Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Incorrect account bindings allows admin to deduct from vester",
+            "description": "1. **Description:** The `cancel_vesting()` instruction allows an admin to cancel vesting for a vesting account, but due to improper account binding, the admin can target a vesting account associated with a different `vester_ta` (associated token account). This allows the admin to deduct the vested amount from an unrelated user's vesting balance.\n\n2. **Cause:** The vulnerability arises because the `vest` account in the instruction context is not properly constrained to the `vester_ta` used in the PDA derivation. The account validation macro lacks a `has_one = vester_ta` constraint, allowing the admin to pass in a vest account with a mismatched `vester_ta`.\n\n3. **Exploitation:** An admin (or attacker who compromises admin privileges) could invoke `cancel_vesting()` with a vest account that has a different `vester_ta` than the one associated with the actual vesting balance. This would cause the system to subtract the `vest.amount` from the global `vesting_balance.total_vesting_balance` incorrectly, affecting an innocent user's balance.\n\n4. **Impact:** Although administrative access is required (lowering likelihood), the impact is significant as it allows incorrect deduction of vesting balances, potentially leading to loss of user funds or incorrect state accounting. The report classifies the impact as \"High\" despite the low severity rating due to the nature of balance manipulation.\n",
+            "severity": "low",
+            "files": [
+                "solana/programs/staking/src/lib.rs"
+            ],
+            "location": [
+                "Vesting.cancel_vesting#lib.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Broken uniqueness invariant in binary search",
+            "description": "1. **Description:** The `update_vote_weight_window_lengths` instruction appends new window length entries with timestamps without enforcing uniqueness. This breaks a critical invariant required by the binary search algorithm used during `cast_vote`, which assumes that each timestamp maps to a single, deterministic value.\n\n2. **Cause:** The code does not validate whether a new `(window_length, timestamp)` entry has a duplicate timestamp before insertion. Binary search over a dataset with non-unique search keys can return different results depending on the dataset size and midpoint alignment, leading to non-deterministic behavior.\n\n3. **Exploitation:** An attacker (or even a legitimate user) could insert multiple window length entries with the same timestamp. When a vote is cast and the system queries for the window length at that timestamp, the result could vary depending on the current size of the dataset and how the binary search midpoint falls, leading to inconsistent vote weight calculations.\n\n4. **Impact:** The primary impact is non-deterministic behavior in vote weight computation, which undermines the reliability and fairness of the voting mechanism. While no direct fund loss is implied, this could lead to governance manipulation or disputes over vote outcomes. The issue is rated as low impact due to low likelihood and indirect consequences.\n",
+            "severity": "low",
+            "files": [
+                "solana/programs/staking/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#update_vote_weight_window_lengths"
+            ]
+        }
+    ]
+}

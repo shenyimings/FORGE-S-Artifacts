@@ -1,0 +1,170 @@
+{
+    "path": "reports/Audit_Report_ITLX-VTK_FINAL_21.pdf",
+    "project_info": {
+        "url": "https://github.com/brainstems/intellex_vesting_contracts",
+        "commit_id": "3a5d990a6ec82aee2044b5992cd57c4c7de0a967",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-04-23",
+        "project_path": "contracts/Audit_Report_ITLX-VTK_FINAL_21.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Contract As Receiver Of ft_transfer()",
+            "description": "The session_vault contract can receive tokens via the ft_transfer() function, which does not trigger the ft_on_transfer() callback where deposit accounting is performed. This creates a risk that users may accidentally transfer tokens directly to the vault using ft_transfer(), resulting in lost funds because the deposit will not be recorded. The root cause is the lack of validation in the token contract to block direct ft_transfer() calls to the vault. An attacker could exploit this by encouraging users to use ft_transfer() instead of ft_transfer_call(), leading to user funds being effectively locked in the vault without credit. The impact is loss of user funds due to incorrect accounting.\n",
+            "severity": "medium",
+            "files": [
+                "session_vault/src/account.rs",
+                "test_token/src/lib.rs"
+            ],
+            "location": [
+                "session_vault/account.rs#230-255",
+                "itlx_nep141_token/lib.rs#99-101"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Unprotected Initialization Function Can Be Frontrun",
+            "description": "The new() function, used to initialize the contract, is not protected and can be called by any external account. Since the function is marked with #[init], it can only be called once, but if not properly secured, an attacker could frontrun the legitimate deployment by calling it first, thereby taking ownership of the contract. The root cause is the absence of access control such as the #[private] macro, which restricts function calls to the contract itself. Exploitation involves monitoring the mempool and submitting a transaction to call new() before the legitimate deployer. The impact is full contract takeover, leading to loss of control and potential theft of funds or denial of service.\n",
+            "severity": "low",
+            "files": [
+                "session_vault/src/lib.rs",
+                "test_token/src/lib.rs"
+            ],
+            "location": [
+                "session_vault/lib.rs#55-66",
+                "itlx_nep141_token/lib.rs#55-70",
+                "itlx_nep141_token/lib.rs#74-93"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "Usage Of Outdated Packages",
+            "description": "The project depends on multiple outdated and vulnerable Rust crates, including chrono, cranelift-codegen, curve25519-dalek, ed25519-dalek, idna, raw-cpuid, remove_dir_all, rocksdb, shlex, time, wasmtime, instant, mach, memmap, parity-wasm, proc-macro-error, wee_alloc, borsh, lock_api, memoffset, ahash, cpufeatures, crossbeam-channel, ed25519, futures-util, near-vm-runner, and parity-secp256k1. Some of these have known security issues such as memory unsafety, segfaults, soundness issues, or are unmaintained/yanked. The root cause is failure to update dependencies despite known vulnerabilities. An attacker could exploit the contract by triggering a vulnerable dependency through a specific execution path, potentially leading to denial of service, memory corruption, or undefined behavior. The impact ranges from service disruption to potential remote code execution depending on the exploitability of the underlying vulnerabilities.\n",
+            "severity": "low",
+            "files": [
+                "Cargo.lock"
+            ],
+            "location": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-477"
+                ]
+            },
+            "title": "Usage Of Deprecated NEAR Collections",
+            "description": "The contract uses deprecated NEAR SDK collections such as UnorderedMap and LazyOption from near_sdk::collections, which are less efficient and no longer recommended. The newer near_sdk::store module provides optimized and safer alternatives. The root cause is the use of legacy APIs instead of updated SDK components. While this does not directly enable exploitation, it can lead to higher gas costs and reduced performance. There is no direct security impact, but it affects long-term maintainability and efficiency. The impact is limited to technical debt and potential future compatibility issues.\n",
+            "severity": "informational",
+            "files": [
+                "session_vault/src/lib.rs",
+                "test_token/src/lib.rs"
+            ],
+            "location": [
+                "session_vault/lib.rs#38",
+                "itlx_nep141_token/lib.rs#41"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant Contract State Validation",
+            "description": "The initialization function new() includes manual validation to ensure the contract is not already initialized, but this check is redundant because the #[init] macro provided by the NEAR SDK already enforces this rule. The root cause is unnecessary duplication of logic that is already handled by the framework. This does not introduce a security vulnerability but increases code complexity and maintenance burden. There is no exploitable vector, and the impact is purely on code clarity and auditability.\n",
+            "severity": "informational",
+            "files": [
+                "session_vault/src/lib.rs",
+                "test_token/src/lib.rs"
+            ],
+            "location": [
+                "session_vault/lib.rs#56",
+                "itlx_nep141_token/lib.rs#76"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Missing Usage Of NEAR SDK Integer Types For Input And Output",
+            "description": "The list_accounts() function uses native Rust integer types like u64 for input parameters instead of the NEAR SDK's wrapper types such as U64. The NEAR SDK provides these types to ensure proper serialization and deserialization in cross-contract calls. The root cause is deviation from NEAR best practices in type usage. While this does not lead to immediate security issues, it can cause serialization errors or unexpected behavior in certain contexts, especially when interfacing with other contracts. The impact is potential interoperability issues and reduced robustness of the API.\n",
+            "severity": "informational",
+            "files": [
+                "session_vault/src/views.rs"
+            ],
+            "location": [
+                "session_vault/views.rs#101"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "Contract Pays One Yocto On Behalf Of Claimants",
+            "description": "The claim() function pays one yoctoNEAR on behalf of the user when calling ft_transfer(), but it is not marked as #[payable]. This means the contract itself bears the cost of the attached deposit. If the token contract requires a deposit, repeated calls to claim() can be used to drain the contract's balance. The root cause is the lack of a requirement for the caller to pay the transaction fee, shifting the cost to the contract. An attacker could exploit this by automating claim requests, leading to a denial of service via fund exhaustion. The impact is depletion of the contract's NEAR balance, potentially disrupting other functionality.\n",
+            "severity": "informational",
+            "files": [
+                "session_vault/src/account.rs"
+            ],
+            "location": [
+                "session_vault/account.rs#181"
+            ]
+        }
+    ]
+}

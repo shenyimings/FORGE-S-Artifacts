@@ -1,0 +1,115 @@
+{
+    "project": "Orca-Whirpools.pdf.json",
+    "files": [
+        "dataset/contracts/Orca-Whirpools.pdf.json/programs/whirlpool/src/math/swap_math.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.14285714285714285,
+        "recall": 0.5,
+        "f1": 0.22222222222222224
+    },
+    "cwe_ground_truth": [
+        "CWE-190",
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-697",
+        "CWE-682",
+        "CWE-435",
+        "CWE-193",
+        "CWE-703",
+        "CWE-369",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Integer Overflow when swapping",
+            "description": "1. **Description:** During a swap operation, arithmetic operations on `amount_remaining` and `amount_calculated` are performed without proper overflow checks.\n2. **Cause:** The code performs subtraction and addition on unsigned integers without using checked arithmetic, which can result in integer overflow or underflow if the values are not properly bounded.\n3. **Exploitation:** An attacker could manipulate input amounts to trigger an overflow or underflow, potentially causing incorrect accounting of tokens during swaps.\n4. **Impact:** This could lead to incorrect token transfers, potentially resulting in loss of funds for users or the protocol.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The reviewed file is pure swap-step math and does not contain Solana account checks, so classic authorization issues (CWE-284) are not directly observable here. The main security-relevant risks come from (1) unvalidated parameters (notably `fee_rate`) being used in unchecked arithmetic with potential underflow/zero-division, (2) unchecked subtraction when computing `fee_amount` that can underflow due to rounding edge cases, and (3) a post-hoc “cap” of `amount_out` for exact-output swaps without recomputing dependent values (`next_price`, `amount_in`, `fee_amount`), which can create inconsistent outputs that downstream state update code may integrate incorrectly. Additionally, relying on strict equality for `is_max_swap` can be brittle when upstream math uses rounding, potentially selecting the wrong fee path.\n",
+            "findings": [
+                {
+                    "title": "Missing validation of fee_rate leads to underflow / division-by-zero in fee math",
+                    "description": "`compute_swap` uses `FEE_RATE_MUL_VALUE - fee_rate as u128` in multiple places:\n- `checked_mul_div(amount_remaining, FEE_RATE_MUL_VALUE - fee_rate, FEE_RATE_MUL_VALUE)`\n- `checked_mul_div_round_up(amount_in, fee_rate, FEE_RATE_MUL_VALUE - fee_rate)`\nbut does not validate that `fee_rate < FEE_RATE_MUL_VALUE`.\n\nIf `fee_rate == FEE_RATE_MUL_VALUE`, the denominator `FEE_RATE_MUL_VALUE - fee_rate` becomes 0 in the round-up fee computation path, causing an exceptional condition (likely error/DoS).\nIf `fee_rate > FEE_RATE_MUL_VALUE`, the subtraction underflows (in Solana BPF/release builds this wraps), producing a huge value and resulting in nonsensical fee/amount computations or conversion failures (`try_into()`), potentially bricking swaps or miscomputing fees.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unchecked subtraction when computing fee_amount can underflow due to rounding edge cases",
+                    "description": "In the input-specified, non-max-swap branch:\n  `fee_amount = amount_remaining - amount_in;`\n\nThis assumes `amount_in <= amount_remaining`. While `amount_calc` is computed as (amount_remaining net of fees) and `next_sqrt_price` is computed from `amount_calc`, `amount_in` (`amount_fixed_delta`) is later recomputed from `next_sqrt_price`. If the underlying delta math rounds up, `amount_in` can become `amount_calc + 1` (or otherwise exceed `amount_remaining`) in rare boundary cases.\n\nIn Solana release builds, `u64` subtraction underflow wraps, yielding a very large `fee_amount`. Downstream code that debits/credits tokens using `(amount_in + fee_amount)` may then overflow/underflow or attempt excessive transfers, creating a practical exploit/DoS depending on how the caller uses these values.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Capping amount_out for exact-output swaps without recomputing next_price/amount_in can desynchronize accounting",
+                    "description": "For exact-output swaps (`amount_specified_is_input == false`) the code applies:\n  `if amount_out > amount_remaining { amount_out = amount_remaining; }`\n\nHowever, `next_sqrt_price` and `amount_in` were already computed based on the pre-cap deltas. If `amount_out` is reduced post hoc, the returned tuple `{amount_in, amount_out, next_price, fee_amount}` may no longer represent a self-consistent swap step:\n- `next_price` may reflect more output extracted than `amount_out` indicates.\n- `amount_in`/`fee_amount` may correspond to the uncapped swap, while output is capped.\n\nIf downstream integration updates pool price/liquidity state using `next_price` but transfers tokens using capped `amount_out`, this mismatch can lead to invariant drift or provide slightly better execution than intended at rounding boundaries (especially if the cap triggers due to ceil/floor differences in delta computations).\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.82
+                },
+                {
+                    "title": "Brittle is_max_swap check uses strict equality and can select wrong fee path under rounding",
+                    "description": "The code determines max-swap via:\n  `let is_max_swap = next_sqrt_price == sqrt_price_target;`\n\nIf `get_next_sqrt_price` or delta computations involve rounding, boundary conditions may yield `next_sqrt_price` that is effectively at the target limit but not exactly equal (or conversely equal due to rounding despite insufficient amount). This can route execution into the wrong fee computation branch:\n- input-specified: `fee_amount = amount_remaining - amount_in` vs the round-up fee formula\nleading to fee miscalculation at the boundary.\n",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The swap math heavily relies on fixed-point / integer arithmetic. While several operations are delegated to `checked_mul_div` / `checked_mul_div_round_up` (which likely protect against intermediate overflows), there are still a few unsafe arithmetic patterns in this file:\n- The expression `FEE_RATE_MUL_VALUE - fee_rate as u128` is performed with normal unsigned subtraction, which will wrap on underflow in release builds if `fee_rate > FEE_RATE_MUL_VALUE`, and will become zero if `fee_rate == FEE_RATE_MUL_VALUE`.\n- When `amount_specified_is_input && !is_max_swap`, the fee is computed as `fee_amount = amount_remaining - amount_in` using unchecked subtraction. If rounding causes `amount_in` to exceed `amount_remaining` by 1 (or more), this will underflow/wrap.\n- The denominator `FEE_RATE_MUL_VALUE - fee_rate as u128` is used in a division inside `checked_mul_div_round_up`; if it becomes 0 (e.g., `fee_rate == FEE_RATE_MUL_VALUE`), the computation will hit a divide-by-zero path (panic or error depending on implementation), leading to transaction failure/DoS.\n",
+            "findings": [
+                {
+                    "title": "Divide-by-zero when fee_rate equals the fee rate multiplier",
+                    "description": "In `compute_swap`, the fee is computed via:\n`checked_mul_div_round_up(amount_in, fee_rate, FEE_RATE_MUL_VALUE - fee_rate)`.\nIf `fee_rate == FEE_RATE_MUL_VALUE`, the denominator becomes 0. This can trigger a divide-by-zero (or an error/panic depending on `checked_mul_div_round_up` implementation), causing the swap instruction to fail (DoS vector if an attacker can influence `fee_rate`, or configuration footgun if misconfigured).\nThe same subtraction is also used in the input-adjustment path (`amount_calc` computation), so validation should ensure `fee_rate < FEE_RATE_MUL_VALUE` and `FEE_RATE_MUL_VALUE != 0`.\n",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unsigned underflow/wraparound in fee-rate subtraction (FEE_RATE_MUL_VALUE - fee_rate)",
+                    "description": "The code performs `FEE_RATE_MUL_VALUE - fee_rate as u128` in multiple places without checked subtraction.\nIf `fee_rate > FEE_RATE_MUL_VALUE`, this unsigned subtraction underflows and wraps to a huge `u128` value in release builds, which can:\n- Corrupt `amount_calc` (input-after-fee), potentially making it unexpectedly large.\n- Corrupt the denominator used for fee calculation, producing nonsensical fees.\nThis risk depends on the actual value of `FEE_RATE_MUL_VALUE` (not shown here) and whether `fee_rate` is validated elsewhere. Relying on type bounds (u16) is insufficient if `FEE_RATE_MUL_VALUE` could be smaller than `u16::MAX`.\n",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Potential underflow in fee_amount = amount_remaining - amount_in due to rounding/off-by-one",
+                    "description": "In the branch `if amount_specified_is_input && !is_max_swap`, the fee is computed as:\n`fee_amount = amount_remaining - amount_in;`\nThis is unchecked subtraction on `u64`. The code assumes `amount_in <= amount_remaining` in this branch.\nHowever, `amount_in` comes from `get_amount_fixed_delta(...)` and may involve rounding (ceil/floor). If rounding causes `amount_in` to exceed `amount_remaining` by 1 (classic off-by-one boundary), the subtraction underflows and wraps to a very large `u64` fee, corrupting downstream accounting.\nMitigation: use `checked_sub` (returning an error) and/or enforce invariants that guarantee `amount_in <= amount_remaining` after all rounding adjustments.\n",
+                    "category": "CWE-193",
+                    "severity": "high",
+                    "confidence": 0.55
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-135",
+            "CWE-191",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-1339"
+        ]
+    ]
+}

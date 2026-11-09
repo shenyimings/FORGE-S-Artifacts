@@ -1,0 +1,144 @@
+{
+    "path": "reports-without-source/metadao_audit_final.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/metaDAOproject"
+        ],
+        "commit_id": [
+            "841f887da3899890b49841a67fed2a28a822d574"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-10-29",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-128"
+                ]
+            },
+            "title": "Improper Truncation of Liquidity Amounts",
+            "description": "The withdraw_liquidity instruction casts u128 values for total_liquidity and liquidity_to_withdraw to u64 before passing them into the get_base_and_quote_withdrawable function. When total_liquidity exceeds u64::MAX, this cast silently wraps modulo 2^64, resulting in a much smaller denominator in the proportional share calculation. The root cause is improper handling of large integer values without bounds checking or safe casting. An attacker could exploit this by depositing large amounts of liquidity, then withdrawing to receive disproportionately high base and quote token amounts due to the incorrect calculation. This could lead to the draining of the AMM's reserves, resulting in a critical loss of user funds.\n",
+            "severity": "critical",
+            "location": [
+                "futarchy/src/instructions/withdraw_liquidity.rs::WithdrawLiquidity#handle"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "AMM Invariant Violation Due to Zero Liquidity",
+            "description": "The protocol allows min_base_futarchic_liquidity and min_quote_futarchic_liquidity to be set to zero, which removes a critical invariant check during the transition from Spot to Futarchy state. Because reserve splitting uses integer division, an attacker can manipulate the spot pool (e.g., via a flash loan) to reduce base_reserves to one, which then truncates to zero when split. The root cause is the lack of a non-zero minimum liquidity enforcement. The attacker can trigger launch_proposal after manipulation, causing both pass and fail pools to initialize with zero reserves. This breaks AMM invariants, disables swaps, and can cause finalize_proposal to fail if the oracle aggregator becomes zero, effectively freezing the DAO and preventing users from withdrawing liquidity.\n",
+            "severity": "high",
+            "location": [
+                "futarchy/src/instructions/launch_proposal.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "PDA Authority Mismatch",
+            "description": "In the provide_liquidity instruction, the amm_position PDA is derived using params.position_authority as a seed, but the account is initialized with liquidity_provider.key as the stored position_authority. This creates a mismatch between the expected and stored authority. The root cause is incorrect assignment of the authority field during initialization. An attacker can exploit this by providing liquidity to another user's AmmPosition, causing a denial of service because the legitimate authority's withdrawal will fail due to the authority mismatch. Although the position authority can work around this by depositing first, the issue poses a more severe risk when integrated with other programs where the authority is a PDA, potentially leading to permanent lockup.\n",
+            "severity": "medium",
+            "location": [
+                "futarchy/src/instructions/provide_liquidity.rs::provide_liquidity"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Pool Initialization with Zero Base Reserves",
+            "description": "The provide_liquidity function allows the first depositor to initialize the pool with zero base tokens when total_liquidity is zero, because it does not enforce max_base_amount > 0. This violates the AMM invariant that both reserves must be non-zero. The root cause is missing input validation on bootstrap. An attacker or malicious user can initialize the pool with base_reserves = 0, which causes all subsequent swaps to fail due to division by zero. This renders the AMM unusable and results in a denial of service, preventing any trading or liquidity withdrawal.\n",
+            "severity": "medium",
+            "location": [
+                "futarchy/src/instructions/provide_liquidity.rs::provide_liquidity"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Lack of Dust Collection Mechanism",
+            "description": "During token redemption in redeem_tokens, integer division is used to compute payouts, which rounds down and leaves a remainder (dust) in the vault. This dust is never collected or distributed to users. The root cause is the absence of a mechanism to handle or reclaim fractional amounts. Over time, with repeated redemptions—especially with low-decimal underlying tokens—this dust can accumulate into a significant amount of locked value. While no single exploit is possible, the gradual accumulation represents a loss of user funds and degraded system efficiency, posing a medium-term financial risk.\n",
+            "severity": "medium",
+            "location": [
+                "conditional_vault/src/instructions/redeem_tokens.rs::redeem_tokens"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "Vault Lock Due to Excessive Outcome Count",
+            "description": "The initialize_conditional_vault instruction allows a high number of outcomes (e.g., 13-23) because it requires fewer accounts per outcome during initialization. However, split_tokens, merge_tokens, and redeem_tokens require both the conditional mint and user token account for each outcome, exceeding Solana's account limit per transaction during execution. The root cause is a mismatch in account requirements between initialization and interaction phases. As a result, the vault can be initialized successfully but become unusable for key operations, leading to a denial of service and permanent locking of rent lamports. This is a low-severity issue because it does not result in direct fund loss but impacts usability.\n",
+            "severity": "low",
+            "location": [
+                "conditional_vault/src/instructions/initialize_conditional_vault.rs",
+                "conditional_vault/src/instructions/split_tokens.rs",
+                "conditional_vault/src/instructions/merge_tokens.rs",
+                "conditional_vault/src/instructions/redeem_tokens.rs"
+            ],
+            "files": []
+        }
+    ]
+}

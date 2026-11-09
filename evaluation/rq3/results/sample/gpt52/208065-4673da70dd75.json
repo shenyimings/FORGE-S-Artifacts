@@ -1,0 +1,270 @@
+{
+    "project": "Sponsored CCTP Deposits from Solana Audit.md.json",
+    "files": [
+        "dataset/contracts/Sponsored CCTP Deposits from Solana Audit.md.json/programs/sponsored-cctp-src-periphery/src/instructions/deposit.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.4,
+        "recall": 0.5454545454545454,
+        "f1": 0.4615384615384615
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-664",
+        "CWE-223",
+        "CWE-691",
+        "CWE-1284",
+        "CWE-666",
+        "CWE-841",
+        "CWE-221",
+        "CWE-405",
+        "CWE-400",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-20",
+        "CWE-707",
+        "CWE-664",
+        "CWE-697",
+        "CWE-1229",
+        "CWE-1284",
+        "CWE-284",
+        "CWE-770",
+        "CWE-400",
+        "CWE-779",
+        "CWE-405",
+        "CWE-410",
+        "CWE-408",
+        "CWE-501"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Program-Sponsored Rents Allow Cheap Griefing That Starves rent_fund and Triggers Repeated Temporary DoS",
+            "description": "This vulnerability arises from the cost asymmetry in the deposit_for_burn function, where the program sponsors rent for both the UsedNonce PDA and the CCTP v2 MessageSent account. The attacker can submit deposits with minimal token amounts while maximizing the hook data size, which increases the rent cost for the MessageSent account. The root cause is the lack of on-chain enforcement of minimum deposit amounts and message size limits, combined with the off-chain quote generator not sufficiently restricting these parameters. An attacker can exploit this by repeatedly submitting such deposits, draining the rent_fund and preventing new sponsored deposits. The impact is a recurring, temporary denial of service (DoS), as the rent_fund must be replenished and the five-day reclaim window delays recovery, allowing the attacker to re-trigger the DoS at low cost.\n"
+        },
+        {
+            "title": "Destination Hook Fails Can Permanently Lock Funds",
+            "description": "The deposit_for_burn function invokes CCTP v2's deposit_for_burn_with_hook, which irreversibly burns tokens on the source chain before confirming successful execution on the destination. If the destination hook fails due to time-sensitive conditions or changing state, the transfer cannot be reversed or rescued under CCTP v2, as it lacks a replacement or unburn mechanism. The root cause is the irreversible nature of the burn operation combined with the dependency on external, potentially failing logic on the destination chain. An attacker or unfortunate user could trigger a burn where the destination conditions are not met, leading to permanent fund lockup. The impact is the permanent loss of user funds when destination-side hooks revert, even if the failure is due to transient or predictable conditions.\n"
+        },
+        {
+            "title": "Missing Rent-Fund Balance Precheck Causes Late Revert and Poor UX in deposit_for_burn",
+            "description": "The deposit_for_burn instruction does not perform an early check on the rent_fund balance before attempting to refund the user for the UsedNonce account creation. The root cause is the absence of a pre-validation step to ensure sufficient lamports are available in the rent_fund. An attacker or regular user could submit transactions when the rent_fund is low, causing the transaction to revert during the refund step after computation has already been consumed. The impact is a poor user experience and wasted transaction fees due to late reverts, as well as inefficient use of compute units, especially under high load or when the fund is near depletion.\n"
+        },
+        {
+            "title": "Repeated PDA Bump Search Wastes Compute Units",
+            "description": "The program derives the rent_fund and state PDAs without storing their bump seeds, forcing Anchor to perform a runtime search for valid bump values on every invocation. The root cause is the omission of persisted bump values in account constraints. This increases compute unit consumption, especially in high-frequency paths like deposit_for_burn. An attacker could exploit this by triggering these paths repeatedly, increasing network load and potentially causing transactions to fail due to compute limits. The impact is inflated and variable compute costs, leading to performance instability and higher transaction failure rates under load.\n"
+        },
+        {
+            "title": "Oversized CCTP Messages Can Permanently Lock Rent in MessageSent Event Accounts",
+            "description": "The deposit_for_burn function allows CCTP messages that are large enough to make the reclaim_event_account transaction exceed Solana's packet size limit due to the inclusion of the attestation with multiple signatures. The root cause is the lack of an upper bound on message size during deposit, which allows creation of MessageSent accounts that cannot be reclaimed. An attacker can exploit this by submitting deposits with messages near the size limit, causing deposit_for_burn to succeed but making reclaim_event_account always fail. The impact is permanent loss of rent funds and a griefing vector that can drain the rent_fund, disrupting service and requiring manual replenishment.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code is generally structured around a sponsored “deposit for burn” flow that relies on external CCTP programs (TokenMessengerMinterV2 / MessageTransmitterV2) for critical validation of many accounts. Several security-relevant behaviors are left permissionless (anyone can reclaim/close certain accounts) and multiple accounts are accepted as `UncheckedAccount` without local constraints, meaning safety depends on the downstream CPI programs continuing to enforce all invariants.\n\nKey issues identified from the provided CWE root-cause list:\n- CWE-284: Reclaim/close instructions are callable by any transaction without authorization checks. Even if funds are reclaimed to a program PDA, this enables griefing/premature cleanup and can disrupt off-chain/indexer workflows that expect accounts to persist for some period.\n- CWE-707 / CWE-693 / CWE-435: The program does not locally validate a large set of CPI accounts (denylist, messenger/minter PDAs, transmitters, etc.) and assumes the external CCTP programs will check everything. This is fragile against upstream changes, misconfigurations, or incomplete checks in the called programs and can manifest as account-substitution style failures when multiple “correct” components interact.\n- CWE-664 / CWE-703: The `rent_fund` resource is used as a shared pool to reimburse deposits. If it is underfunded, deposits fail (hard error), creating a denial-of-service condition; additionally, long deadlines can keep sponsored lamports locked until reclaim is possible.\n- CWE-697: Deadline comparisons use different strictness (`<` vs `>=`), producing a “cannot close at exact deadline timestamp” edge case; likely minor but can cause unexpected behavior.\n",
+            "findings": [
+                {
+                    "title": "Permissionless reclaim of MessageTransmitter event accounts (premature cleanup / griefing)",
+                    "description": "`reclaim_event_account` has no signer/authority requirement and allows any caller to invoke the CPI reclaim on an arbitrary `message_sent_event_data` account (subject to whatever checks the external MessageTransmitterV2 CPI performs).\n\nEven though reclaimed lamports are paid to `rent_fund` (a PDA), an untrusted third party can:\n- prematurely reclaim/close event data accounts, potentially breaking off-chain indexing, audits, or any consumer expecting those accounts to remain available;\n- force cleanup timing not intended by users/operators.\n\nThis is an access-control issue because a security-relevant resource lifecycle action (reclaiming/closing an event account) is not restricted to an authorized actor within this program.\n",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Permissionless closing of used-nonce accounts enables third-party cleanup timing and griefing",
+                    "description": "`reclaim_used_nonce_account` does not require any signer/authority and can be called by anyone once `quote_deadline` has passed. This allows an arbitrary third party to close a `used_nonce` account (closing proceeds go to `rent_fund`).\n\nWhile this does not directly pay the attacker, it allows untrusted callers to control the timing of a state transition (nonce record removal) that may be relevant for monitoring, dispute windows, or operational workflows. If the protocol expects only an operator/keeper to perform this cleanup, the current design is missing explicit authorization.\n",
+                    "category": "CWE-284",
+                    "severity": "low",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Account-substitution risk due to extensive UncheckedAccount usage and reliance on downstream CPI validation",
+                    "description": "In `DepositForBurn`, many security-critical accounts are declared as `UncheckedAccount` and not constrained locally, including:\n- `denylist_account`\n- `token_messenger_minter_sender_authority`\n- `message_transmitter`, `token_messenger`, `remote_token_messenger`, `token_minter`, `local_token`\n- `cctp_event_authority`\n- and in the reclaim path: `message_sent_event_data` is unchecked.\n\nThe code comments state these are “checked in CCTP”, but this program itself does not enforce PDA seeds, ownership, or address equality constraints for those accounts. This creates a fragile cross-program dependency: if the downstream CPI program omits a check, changes its invariants, or is swapped/misconfigured, an attacker may supply unexpected accounts leading to incorrect behavior (e.g., burning against unintended configurations, reclaiming the wrong accounts, or corrupting event data handling).\n\nThis is best characterized as:\n- improper neutralization/validation of structured inputs before passing to downstream components (CWE-707),\n- potential protection mechanism failure by outsourcing critical checks without defense-in-depth (CWE-693),\n- and an integration weakness where correctness depends on multiple “correctly behaving” entities continuing to agree on invariants (CWE-435).\n",
+                    "category": "CWE-707",
+                    "severity": "high",
+                    "confidence": 0.66
+                },
+                {
+                    "title": "rent_fund balance/resource lifetime not robustly managed (deposit DoS if underfunded; long lockups)",
+                    "description": "`refund_used_nonce_creation` unconditionally transfers `Rent::minimum_balance(space)` lamports from `rent_fund` to the user. If `rent_fund` is underfunded, `system_program::transfer` fails and the entire deposit flow fails, creating a denial-of-service condition for otherwise valid deposits.\n\nAdditionally, reimbursement is effectively “fronted” by `rent_fund` and only recovered when `used_nonce` is later closed (after `quote_deadline`). If quotes can have long deadlines (even if only the trusted signer can authorize them), lamports remain locked in `used_nonce` accounts for that duration, reducing the availability of `rent_fund` and increasing DoS risk.\n\nThis reflects:\n- insufficient control of a shared resource across its lifetime (funds move rent_fund -> user now, and only later return to rent_fund) (CWE-664),\n- and failure to handle the exceptional condition of insufficient funds gracefully (hard failure, no fallback/partial behavior) (CWE-703).\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Edge-case inconsistency in deadline comparisons may prevent closing exactly at the deadline",
+                    "description": "`deposit_for_burn` rejects quotes only when `quote.deadline < current_time`, allowing `deadline == now`.\n`reclaim_used_nonce_account` rejects closing when `quote_deadline >= current_time`, meaning it only allows closing when `quote_deadline < now`.\n\nAt `current_time == quote_deadline`, deposits are allowed but the used nonce cannot be reclaimed until the next timestamp tick. This is likely minor, but it is a security-relevant comparison edge case that can cause unexpected cleanup timing.\n",
+                    "category": "CWE-697",
+                    "severity": "info",
+                    "confidence": 0.62
+                }
+            ]
+        },
+        {
+            "reasoning": "The code is primarily a wrapper around CCTP v2 CPIs. The main security risks are not classic “funds theft”\nbut DoS/resource-exhaustion and cross-program trust-boundary hazards.\n\n(1) The program uses a shared PDA (`rent_fund`) to sponsor/advance lamports (refund of UsedNonce creation,\nplus paying rent for the CCTP MessageSent event account via CPI). There are no guardrails (rate limits,\nper-user quotas, minimum rent_fund balance checks with graceful failure modes, or mandatory cleanup).\nAn attacker who can obtain valid quotes can repeatedly create accounts that keep `rent_fund` temporarily\ndepleted, causing subsequent deposits to fail.\n\n(2) The instruction design indirectly creates unbounded on-chain resources: a new `used_nonce` PDA per quote\nand a new arbitrary keypair for `message_sent_event_data` per deposit. Because rent is sponsored from `rent_fund`,\nan attacker can force the protocol to allocate/fund many accounts, growing state and consuming the sponsor pool.\n\n(3) Many CPI accounts are declared `UncheckedAccount` and are not validated by this program (ownership, seeds,\nrelationship to the invoked program, etc.). The code relies on the downstream CCTP programs to enforce all\ninvariants. If those downstream checks are incomplete or change, this program may end up operating on\nattacker-chosen accounts (trust-boundary violation / wrong-sphere exposure). Additionally, `message_sent_event_data`\nis not validated as “uninitialized system-owned account” before CPI, which can lead to unexpected failures or\nmisuse depending on the downstream program’s expectations.\n",
+            "findings": [
+                {
+                    "title": "Shared rent_fund PDA can be depleted to block deposits (sponsored lamports DoS)",
+                    "description": "`deposit_for_burn` always calls `refund_used_nonce_creation`, transferring `Rent::minimum_balance(space)`\nfrom the shared `rent_fund` PDA to the caller. Separately, the CPI `deposit_for_burn_with_hook` uses\n`event_rent_payer = rent_fund`, meaning `rent_fund` also sponsors the rent for `message_sent_event_data`.\nThere are no throttles/quotas and no requirement that the caller later reclaims/cleans up the created\naccounts.\n\nAn attacker with access to valid quotes can repeatedly invoke `deposit_for_burn`, causing `rent_fund`\nto become temporarily underfunded. Once `rent_fund` lacks lamports, the refund transfer and/or the CCTP CPI\nwill fail, preventing other users from depositing (DoS).\n",
+                    "category": "CWE-400",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Insufficient sponsor pool: protocol-level resource pool can be exhausted",
+                    "description": "The `rent_fund` account is a finite pool used to sponsor per-deposit rent/refunds, but the program does not\nenforce a maximum number of concurrent sponsored deposits, minimum balance thresholds, or per-user limits.\nBecause reclaims (`reclaim_event_account` and `reclaim_used_nonce_account`) are separate actions, the system\ncan reach a state where many deposits are “in flight” and the pool cannot serve new requests.\n\nThis enables an attacker to crowd out legitimate users by consuming the pool capacity (even if funds may be\nrecoverable later).\n",
+                    "category": "CWE-410",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Unbounded creation of program-related accounts (used_nonce + event accounts) enables state/rent bloat",
+                    "description": "Each successful `deposit_for_burn` creates:\n- a new `used_nonce` PDA (one per quote nonce), and\n- a new `message_sent_event_data` address (arbitrary signer keypair).\n\nSince the rent is effectively sponsored/advanced through `rent_fund` (refund for `used_nonce` creation and\nevent rent payer in the CPI), an attacker can force the system to create many accounts without a strong\nin-protocol bound, increasing state footprint and operational burden for reclaim/cleanup. This is an\nemergent resource that can be used to violate intended availability policies.\n",
+                    "category": "CWE-1229",
+                    "severity": "medium",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Unchecked CPI account inputs rely entirely on downstream validation (trust-boundary / wrong-sphere risk)",
+                    "description": "Multiple accounts forwarded into CPIs are `UncheckedAccount` and are not validated in this program,\nincluding `message_transmitter`, `token_messenger`, `remote_token_messenger`, `token_minter`, `local_token`,\n`denylist_account`, and various authorities.\n\nThe code assumes the downstream CCTP programs fully validate these accounts (seeds/ownership/relationships).\nIf any downstream check is missing, weakened, or changes in an upgrade, attacker-supplied accounts could\nbe used, potentially causing:\n- operations to be performed against the wrong state accounts,\n- bypass/misapplication of denylist/authority logic,\n- incorrect message/event handling.\n\nThis is a classic cross-program trust-boundary hazard: this program imports resources/authority decisions\nfrom another sphere without local defense-in-depth checks.\n",
+                    "category": "CWE-501",
+                    "severity": "medium",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "message_sent_event_data not validated as uninitialized/system-owned (unexpected CPI behavior / DoS)",
+                    "description": "`message_sent_event_data` is only constrained as `#[account(mut)] pub message_sent_event_data: Signer<'info>`,\nwith a comment that it should be “Any non-PDA uninitialized address.” The program does not actually enforce:\n- system ownership,\n- zero data length / uninitialized state,\n- expected lamports state.\n\nIf the downstream CCTP program assumes a specific initialization/ownership state, a user can supply a signer\naccount that violates those assumptions, potentially causing CPI failure (DoS) or unexpected behavior,\ndepending on downstream handling.\n",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.62
+                }
+            ]
+        },
+        {
+            "reasoning": "The main security risk in this file comes from subsidizing account creation (via `rent_fund`) without any on-chain throttling or bounding of the lifetime of the subsidized resources. Specifically, `DepositForBurn` always creates a new `used_nonce` PDA (unique per nonce) and then transfers the rent-exempt minimum for that account from the program-controlled `rent_fund` to the user, effectively lending rent_fund lamports into a large number of `used_nonce` accounts. Those lamports are only recovered when the `used_nonce` accounts are later closed (after `quote_deadline`), but there is no on-chain limit on how many such accounts can be created per user/time window, and there is no bound on how far in the future `quote_deadline` may be. This enables resource exhaustion / DoS of `rent_fund`, blocking legitimate deposits.\n\nAdditionally, the instruction emits the quote signature and other fields into logs via events, increasing log size per deposit; while each event is bounded, it is still attacker-triggerable bloat. Finally, several critical CPI-related accounts are `UncheckedAccount` and `message_sent_event_data` lacks local syntactic/type constraints (e.g., “system-owned, empty”), relying entirely on downstream CPI programs to reject malformed inputs. This is a common source of fragility if downstream checks change or are incomplete.\n",
+            "findings": [
+                {
+                    "title": "Rent-fund can be exhausted by unbounded subsidized UsedNonce account creation",
+                    "description": "`DepositForBurn` initializes a fresh `used_nonce` PDA for each `quote.nonce` and immediately calls `refund_used_nonce_creation()`, transferring the rent-exempt minimum from `rent_fund` to the caller.\n\nBecause there is no on-chain throttling/limit per signer, an attacker who can obtain many valid quotes can create a very large number of `used_nonce` accounts, effectively moving lamports out of `rent_fund` and into those PDAs. Those lamports are only returned when the PDAs are later closed (after `quote_deadline`), so the attacker can temporarily (or for long periods) deplete `rent_fund`, causing future deposits to fail at the refund transfer step and resulting in a denial of service for legitimate users.\n\nThis is especially impactful because the subsidy is automatic and deterministic (minimum_balance for the fixed `UsedNonce` size), making cost asymmetry favorable to the attacker when the protocol relies on `rent_fund` for liveness.\n",
+                    "category": "CWE-770",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Asymmetric resource consumption: attacker can lock program funds with minimal on-chain work",
+                    "description": "The design shifts the cost of maintaining many `used_nonce` accounts to the shared `rent_fund` pool. An attacker’s marginal effort is simply submitting more deposits with distinct nonces (and valid signatures), while the program’s marginal resource commitment is reserving additional rent-exempt lamports per nonce until each account becomes closable and someone actually closes it.\n\nThis creates an amplification vector where one actor can force the system to commit significant shared resources (lamports reserved in PDAs; operational failures when `rent_fund` is low) without a proportional, enforceable on-chain cost or quota.\n",
+                    "category": "CWE-405",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "No upper bound on quote.deadline enables long-term locking of subsidized resources",
+                    "description": "The only deadline validation is:\n  - reject if `quote.deadline < get_current_time(state)?`\n\nThere is no maximum deadline horizon enforced on-chain. If the signer of quotes (off-chain) ever issues (intentionally or accidentally) quotes with far-future deadlines, `used_nonce.quote_deadline` will prevent closing those accounts until that far-future time, extending the period that `rent_fund` lamports remain locked in `used_nonce` PDAs.\n\nEven if the off-chain service is expected to behave, on-chain bounding is an important defense-in-depth measure to prevent operational mistakes and to reduce the blast radius of key compromise.\n",
+                    "category": "CWE-1284",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Excessive logging of user-supplied/signature material via events",
+                    "description": "`deposit_for_burn` emits `SponsoredDepositForBurn` including `signature: params.signature.to_vec()` and other quote fields every time. While the signature length is fixed, this still increases log volume and compute per call and is entirely attacker-triggerable (anyone with a valid quote can force emission).\n\nIn aggregate, this can bloat transaction logs and complicate monitoring/forensics, and it marginally increases compute usage for an already CPI-heavy instruction.\n",
+                    "category": "CWE-779",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "The code is largely straightforward and does not contain loops, recursion, range scans, or any data/resource-iteration patterns that would implicate CWE-606, CWE-1050, CWE-407, or CWE-1094. It also does not process compressed/XML/network payloads (so CWE-409, CWE-776, CWE-406, CWE-1072 are not applicable).\n\nOne performance/abuse-relevant issue does exist under CWE-408 (Incorrect Behavior Order: Early Amplification): in `deposit_for_burn`, the program performs a CPI transfer (and rent calculation) to refund the user before authenticating the request (signature validation) and before rejecting invalid/expired quotes. While Solana instruction execution is atomic (so state changes are reverted if the instruction later fails), an attacker can still force the program to perform extra compute-heavy work (CPI + sysvar access) before failing validation, increasing compute consumption per failed call and enabling a compute-amplification style nuisance/DoS attempt via repeated invalid transactions.\n",
+            "findings": [
+                {
+                    "title": "CPI refund executed before quote authentication (early compute amplification)",
+                    "description": "In `deposit_for_burn`, the function calls `refund_used_nonce_creation(&ctx)?;` before performing the primary authentication/authorization step `validate_signature(...)` and before checking `quote.deadline` / `quote.source_domain`.\n\n`refund_used_nonce_creation` performs:\n- `Rent::get()?` sysvar access and rent computation, and\n- a CPI to `system_program::transfer` from `rent_fund` to the caller (`signer`).\n\nEven though the transaction will be reverted if `validate_signature` or later checks fail (Solana atomicity), this ordering still allows an attacker to submit invalid quotes/signatures and force the program to execute an extra CPI and sysvar access before failing. This increases compute used per rejected request and can be abused as a compute-amplification nuisance/DoS vector (especially under congestion), matching CWE-408's \"expensive operation before authentication\" pattern.\n\nMitigation: perform `validate_signature` and basic quote checks (deadline, domain, etc.) before executing the refund transfer CPI. If the refund must occur even on failures, consider separating it into a distinct instruction with strict gating.\n",
+                    "category": "CWE-408",
+                    "severity": "low",
+                    "confidence": 0.78
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-669",
+            "CWE-913",
+            "CWE-74",
+            "CWE-1229",
+            "CWE-400",
+            "CWE-20",
+            "CWE-172",
+            "CWE-665",
+            "CWE-228",
+            "CWE-410",
+            "CWE-463",
+            "CWE-668",
+            "CWE-240",
+            "CWE-138",
+            "CWE-580",
+            "CWE-221",
+            "CWE-1329",
+            "CWE-116",
+            "CWE-662",
+            "CWE-666",
+            "CWE-118",
+            "CWE-404",
+            "CWE-704",
+            "CWE-610",
+            "CWE-170",
+            "CWE-496",
+            "CWE-1426",
+            "CWE-501",
+            "CWE-706",
+            "CWE-673",
+            "CWE-911",
+            "CWE-487",
+            "CWE-922",
+            "CWE-372",
+            "CWE-495"
+        ],
+        [
+            "CWE-1173",
+            "CWE-1286",
+            "CWE-1285",
+            "CWE-1246",
+            "CWE-771",
+            "CWE-779",
+            "CWE-405",
+            "CWE-920",
+            "CWE-770",
+            "CWE-1288",
+            "CWE-1287",
+            "CWE-1284",
+            "CWE-1289",
+            "CWE-179",
+            "CWE-1235"
+        ],
+        [
+            "CWE-408",
+            "CWE-407",
+            "CWE-1176",
+            "CWE-606",
+            "CWE-1050",
+            "CWE-1094",
+            "CWE-776",
+            "CWE-406",
+            "CWE-1084",
+            "CWE-1072",
+            "CWE-409"
+        ]
+    ]
+}

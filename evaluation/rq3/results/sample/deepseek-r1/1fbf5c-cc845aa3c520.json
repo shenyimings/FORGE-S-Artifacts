@@ -1,0 +1,72 @@
+{
+    "project": "blocksec_memefarming_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_memefarming_v1.0-signed.pdf.json/contracts/boost-farming/src/actions_of_farmer_seed.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-358",
+        "CWE-664",
+        "CWE-682",
+        "CWE-666",
+        "CWE-372",
+        "CWE-693"
+    ],
+    "cwe_detected": [
+        "CWE-435"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Improper Decreasing Logic of farmer_count",
+            "description": "1. **Description:** The `farmer_count` field tracks the number of non-empty `FarmerSeed` entries in the `Seed`. However, when removing a `FarmerSeed`, the logic does not verify whether the entry was previously non-empty.\n2. **Cause:** The function `unlock_and_unstake_seed()` allows unstaking zero tokens, which may correspond to an already empty `farmer_seed`. The count is decremented regardless of the prior state.\n3. **Exploitation:** A user could repeatedly call the function with zero amount, causing `farmer_count` to be incorrectly decremented even when no actual removal occurs.\n4. **Impact:** The `farmer_count` becomes an inaccurate representation of the actual number of active farmers, potentially affecting metrics or logic that depend on this count.\n"
+        },
+        {
+            "title": "Incorrect Timestamp in Roll Back Logic",
+            "description": "1. **Description:** In `callback_withdraw_seed()`, when a withdrawal promise fails, the system rolls back the state using `add_withdraw_seed()`. However, during rollback, the `apply_timestamp` is set to the current block timestamp.\n2. **Cause:** The function `add_withdraw_seed()` always sets `apply_timestamp = env::block_timestamp()` regardless of whether this is a new withdrawal or a rollback of a failed one.\n3. **Exploitation:** After a failed withdrawal, the timestamp is reset, forcing the user to wait another full `delay_withdraw_sec` period before retrying, even though the original delay had already elapsed.\n4. **Impact:** Users experience unnecessary delays in withdrawing funds after a failed attempt, degrading user experience and potentially affecting liquidity.\n"
+        },
+        {
+            "title": "Incorrect Calculation of decreased_seed_power",
+            "description": "1. **Description:** In `unlock_and_unstake_seed()`, the `decreased_seed_power` logged in the `SeedUnlock` event only accounts for the unlocking portion of the operation and ignores the unstaking component.\n2. **Cause:** The calculation logic fails to aggregate both the unlocked and unstaked amounts when computing the total reduction in seed power.\n3. **Exploitation:** An attacker cannot directly exploit this, but it misrepresents the actual change in seed power in emitted events.\n4. **Impact:** Off-chain systems relying on the `SeedUnlock` event for analytics or UI updates will display incorrect data, leading to potential misinterpretation of user actions.\n"
+        },
+        {
+            "title": "Lack of assert_one_yocto Check",
+            "description": "1. **Description:** The function `withdraw_seed()` performs a token transfer but does not include a `assert_one_yocto()` check to ensure the caller has attached at least one yoctoNEAR, which is a common pattern to prevent unauthorized calls in NEAR-based contracts. (Note: This may be less relevant on Solana, but the audit appears to reference NEAR patterns.)\n2. **Cause:** The absence of a mandatory small payment check could allow unauthorized or replayed calls if not otherwise protected.\n3. **Exploitation:** If the function relies on `assert_one_yocto()` as an access control mechanism and it is missing, an attacker might invoke the function without proper authorization.\n4. **Impact:** Potential for unauthorized execution if the function depends on payment attachment for security, though the project notes that earnings stop after withdrawal, reducing risk.\n"
+        },
+        {
+            "title": "Lack of Minimum Deposit Check",
+            "description": "1. **Description:** The function `unlock_and_unstake_seed()` does not verify that the remaining `free_amount` and `locked_amount` in `farmer_seed` are above `seed.min_deposit` after the operation.\n2. **Cause:** Missing validation logic to prevent leaving dust amounts that fall below the minimum deposit threshold.\n3. **Exploitation:** Users could leave negligible balances in their `farmer_seed`, fragmenting state and potentially violating the design principle of maintaining meaningful deposits.\n4. **Impact:** Accumulation of dust balances increases state bloat and contradicts the intended design of the staking mechanism, possibly affecting efficiency and gas costs.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract contains a critical vulnerability in the withdrawal process due to improper handling of state consistency during cross-contract calls. Specifically, the `withdraw_seed` function updates the farmer's withdrawal state and persists it to storage before initiating a cross-contract token transfer. This creates a window where the contract state is inconsistent with the actual token allocation. If the token transfer fails, the callback attempts to revert the farmer's state but does so without considering potential intermediate state changes made by other transactions. This can lead to state corruption, incorrect accounting of funds, and loss of user assets. The issue stems from improper interaction between the token transfer operation and the contract's state management logic.\n",
+            "findings": [
+                {
+                    "title": "Cross-Contract Call Race Condition in Withdrawal Handling",
+                    "description": "The `withdraw_seed` function updates the farmer's withdrawal record and persists it to storage before initiating a cross-contract token transfer. If the token transfer fails, the `callback_withdraw_seed` function attempts to revert the state by either adding the amount back to the farmer's withdrawal record or moving it to lostfound. However, this callback executes in a separate transaction and may run after other transactions have modified the same farmer's state. This can result in:\n- Overwriting of intermediate state changes made to the farmer's records\n- Incorrect accounting of withdrawal amounts\n- Loss of user funds if callback reverts overwrites newer state\n- Inconsistency between contract state and actual token allocations\n",
+                    "category": "CWE-435",
+                    "severity": "critical",
+                    "confidence": 0.99
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

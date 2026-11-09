@@ -1,0 +1,76 @@
+{
+    "path": "reports-without-source/Chainflip Solana - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/chainflip-io/chainflip-sol-contracts"
+        ],
+        "commit_id": [
+            "cea567305393b70730e9ca0011aebd3a096705a5"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-07-29",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-188"
+                ]
+            },
+            "title": "Size calculation for program accounts",
+            "description": "The vault program uses core::mem::size_of to compute the size of program accounts during initialization, which relies on Rust's native memory layout rather than Borsh serialization used by the Anchor framework. This is currently not an issue because the current data types happen to have the same size under both Rust and Borsh serialization. However, the root cause of the vulnerability is the assumption that Rust's size_of will always match Borsh's serialized size, which does not hold for all types. If future changes introduce types with differing serialized and in-memory sizes, the allocated account space could be insufficient, leading to potential runtime errors or data corruption. This could be exploited by an attacker if such a change is made without updating the size calculation, resulting in a denial of service or undefined behavior during account deserialization.\n",
+            "severity": "informational",
+            "location": [
+                "vault program::DataAccount#space"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Potential seed collision",
+            "description": "PDA accounts in both the vault and swap-endpoint programs are derived using seeds that do not include constant prefixes, relying solely on dynamic values like deposit_channel_associated_token_account.key(). The cause of this vulnerability is the lack of namespace separation via hardcoded string prefixes, which increases the risk of seed collisions if different account types are derived using similar dynamic inputs. An attacker could potentially exploit this by crafting inputs that result in a PDA collision, leading to unintended account overwrites or initialization of accounts they control. While no immediate impact is expected, this could lead to privilege escalation or state corruption in future versions if account derivation logic evolves without addressing this issue. The impact is currently low due to the controlled context of PDA usage, but it represents a latent risk.\n",
+            "severity": "informational",
+            "location": [
+                "vault::deposit_channel_associated_token_account",
+                "swap-endpoint::PDA derivation"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-179"
+                ]
+            },
+            "title": "The CloseEventAccounts event emitted without validating event account",
+            "description": "In the CloseEventAccounts instruction, the swap-endpoint program attempts to deserialize the SwapEvent account before validating its public key. The root cause is the incorrect order of validation: the program only checks the account's key after deserialization succeeds, but if deserialization fails (e.g., due to a reorg or corrupted state), it emits a CantDeserializeEventAccount event without first confirming the account's legitimacy. This could be exploited by a malicious actor submitting an invalid or forged event account to trigger unnecessary event emissions or potentially manipulate off-chain monitoring systems that consume these events. While the direct security impact is minimal—since the event is likely used for debugging—this could lead to log pollution, incorrect state assumptions by external systems, or complicate incident response. The lack of pre-deserialization validation reduces the robustness of the system.\n",
+            "severity": "informational",
+            "location": [
+                "swap-endpoint::CloseEventAccounts"
+            ],
+            "files": []
+        }
+    ]
+}

@@ -1,0 +1,1182 @@
+{
+    "path": "reports/VAR-Potlock-250113-GrantPicks-V3.pdf",
+    "project_info": {
+        "url": "https://github.com/PotLock/grantpicks",
+        "commit_id": "902900a",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-04-30",
+        "project_path": "contracts/VAR-Potlock-250113-GrantPicks-V3.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Missing list ID validation allows unauthorized registration changes",
+            "description": "The unregister() and update_registration() functions allow the owner or admin of a list to modify registrations associated with a given list_id. However, while these functions verify that the caller is authorized for the provided list_id, they fail to validate that the specified list_id matches the list_id stored in the registration record itself. This omission enables a malicious user to create their own list, gain ownership privileges, and manipulate registration records belonging to a different list. An attacker could exploit this by unregistering legitimate entries or altering registration statuses in a list they do not own, as long as they control a list with the same ID. This compromises the integrity of the registration system, particularly in the context of voting rounds, where an attacker could approve their own registration to the voting whitelist or remove a legitimate user\u2019s registration, thereby influencing the outcome of the voting process.\n",
+            "severity": "critical",
+            "files": [
+                "stellar/contract/lists/src/methods.rs",
+                "stellar/contract/lists/src/internal.rs"
+            ],
+            "location": [
+                "ListsContract.unregister",
+                "ListsContract.update_registration"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Unrestricted voting can lead to project votes stuffing",
+            "description": "The vote() function in the round contract implements basic eligibility checks using blacklisting and whitelisting mechanisms and ensures each voter can only vote once. However, it does not prevent vote duplication within a single voting transaction. Specifically, there is no validation to ensure that the votes vector contains unique entries, allowing a voter to submit multiple votes for the same project pair. Even if a whitelist is enforced, a whitelisted user can include duplicate project-pair indices in their vote submission, effectively stuffing votes for a preferred project. This flaw creates two attack vectors: if no whitelist is used, an attacker can generate multiple addresses to cast numerous votes; if a whitelist is used, a single whitelisted user can still submit multiple identical votes. Since project funding is directly tied to vote count, this can lead to unfair fund distribution and financial loss for legitimate projects.\n",
+            "severity": "critical",
+            "files": [
+                "stellar/contract/round/src/core.rs"
+            ],
+            "location": [
+                "RoundContract.vote"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "Incorrect validation allows projects to apply even after voting has started",
+            "description": "The apply_to_round() and unapply_from_round() functions rely on validate_voting_not_started() to ensure that project applications are only processed before voting begins. However, the function incorrectly compares the current time against round.voting_end_ms instead of round.voting_start_ms. As a result, the validation passes as long as the current time is before the voting period ends, allowing projects to apply or unapply even after voting has already started. This logic error undermines the assumption that applications are closed once voting begins. Attackers can exploit this to manipulate the set of approved projects during active voting, potentially affecting vote validity and pair indexing. This leads to inconsistencies in the voting process and could allow last-minute project entries that were not subject to prior review or eligibility checks.\n",
+            "severity": "high",
+            "files": [
+                "stellar/contract/round/src/validation.rs"
+            ],
+            "location": [
+                "RoundContract.validate_voting_not_started#1-7"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Lack of validation for admin_only_registrations flag allows unauthorized registrations",
+            "description": "The register_batch() function in the ListsContract allows batch registrations to a list and is intended to permit non-admin users to register only if the list allows public registrations (controlled by the admin_only_registrations flag). However, the function does not check this flag before allowing non-admin users to register. As a result, even if a list is configured to restrict registrations to admins only, non-admin users can still register successfully, bypassing the intended access control. This flaw stems from missing conditional logic that should gate public registration attempts based on the flag\u2019s value. An attacker can exploit this to gain unauthorized access to restricted lists, such as whitelists or eligibility lists, which may confer privileges or voting rights. This compromises the integrity of list-based access control mechanisms within the protocol.\n",
+            "severity": "high",
+            "files": [
+                "stellar/contract/lists/src/methods.rs"
+            ],
+            "location": [
+                "ListsContract.register_batch"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Premature payout nullification due to unenforced compliance period",
+            "description": "The process_payout() function handles payouts for winning projects and includes a check for KYC verification status when a compliance period is defined. However, it does not enforce that the compliance period has actually ended before processing payouts. If a project has not yet passed KYC at the time of function execution, its payout is immediately nullified and marked as paid, even if it could still complete verification within the compliance window. This means a round owner can prematurely trigger payout processing, resulting in eligible projects losing their funding despite being able to meet requirements later. The impact is a permanent denial of funds to valid recipients due to timing rather than actual ineligibility. This undermines the fairness and reliability of the payout system, especially in rounds requiring post-win verification.\n",
+            "severity": "high",
+            "files": [
+                "stellar/contract/round/src/internal.rs"
+            ],
+            "location": [
+                "RoundContract.process_payouts#1-8"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-1325"
+                ]
+            },
+            "title": "Unbounded growth of project payouts mapping leading to payout deletion",
+            "description": "The ProjectPayoutIds contract key stores a vector of payout IDs for each project across all rounds in a single ledger entry, which has a 128 KB size limit. Because any round owner can assign payouts to any project, a malicious actor can flood this vector with dummy payouts, exhausting storage. This leads to two critical issues: first, when set_payouts() is called with clear_existing = true, it clears all payouts for the project across all rounds, not just the current one, causing unintended data loss. Second, the process_payouts() function iterates over all stored payout IDs for a project, including those from other rounds. A bloated vector can cause unbounded iteration, exceeding Soroban\u2019s resource limits and causing a denial of service. This design flaw allows a malicious round owner to disrupt payout processing and delete legitimate payouts from unrelated rounds.\n",
+            "severity": "high",
+            "files": [
+                "stellar/contract/round/src/storage_key.rs"
+            ],
+            "location": [
+                "RoundContract.ContractKey::ProjectPayoutIds"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "Storing all project registrations in one ledger entry causes storage exhaustion",
+            "description": "The ApplicantToProjectID ledger key stores all project registrations in a single entry, regardless of the applicant, with a 128 KB size limit. Since any user can register a project via the apply() function, a malicious user can register a large number of dummy projects, filling the storage limit. Once full, no new applicants can register their projects, resulting in a denial-of-service condition for legitimate users. This centralized storage model creates a single point of failure for the registration system. The lack of per-applicant storage keys makes the system vulnerable to resource exhaustion attacks, where an attacker can disrupt core functionality by consuming shared storage capacity, thereby preventing protocol growth and participation.\n",
+            "severity": "high",
+            "files": [
+                "stellar/contract/project-registry/src/methods.rs"
+            ],
+            "location": [
+                "ProjectRegistryContract.apply"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Ownership change is not persisted to storage",
+            "description": "The transfer_ownership() function updates the ownership field in memory but fails to call write_config() to persist the change to on-chain storage. As a result, although the configuration object is updated locally, the new owner is not written to the ContractKey::Config entry. This leads to a discrepancy between the intended ownership state and the actual stored state. Any subsequent access control checks that read from storage will still recognize the old owner, rendering the ownership transfer ineffective. This flaw can cause operational failures in scenarios where immediate ownership transfer is required, such as emergency management or governance transitions. The root cause is the omission of a critical persistence step after state modification.\n",
+            "severity": "medium",
+            "files": [
+                "stellar/contract/round/src/internal.rs"
+            ],
+            "location": [
+                "RoundContract.transfer_ownership"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Rounds\u2019 owners cannot blacklist users",
+            "description": "The flag_voters() function uses validate_not_blacklist(), which reverts if the voter is *not* already blacklisted. This logic is inverted: it prevents blacklisting users who are not currently blacklisted, which is the exact scenario when a new blacklist action should be allowed. Instead, the function should use validate_blacklist() to ensure the user is not already blacklisted before adding them. Due to this error, round owners cannot add new users to the blacklist, undermining their ability to enforce participation rules. This impacts the contract\u2019s governance model by removing a key moderation tool, allowing potentially malicious actors to continue applying or voting without restriction.\n",
+            "severity": "medium",
+            "files": [
+                "stellar/contract/round/src/voting_writer.rs",
+                "stellar/contract/round/src/validation.rs"
+            ],
+            "location": [
+                "RoundContract.flag_voters",
+                "RoundContract.validate_not_blacklist#1-7"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ]
+            },
+            "title": "Challenges mechanism can be used for griefing attacks",
+            "description": "The challenge_payouts() function allows anyone to create challenges on payouts at any time, without enforcing the defined cooldown period. Additionally, it lacks access control, meaning any user can invoke it repeatedly. Since unresolved challenges block critical functions like process_payout() and redistribute_vault(), an attacker can continuously submit challenges to prevent payout finalization indefinitely. This creates a griefing vector where an attacker can disrupt the entire payout pipeline, freezing funds and preventing distribution. The absence of time-based and role-based restrictions makes the challenge system vulnerable to abuse, turning a safety mechanism into a denial-of-service tool.\n",
+            "severity": "medium",
+            "files": [
+                "stellar/contract/round/src/admin_writer.rs"
+            ],
+            "location": [
+                "RoundContract.challenge_payouts"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-1325"
+                ]
+            },
+            "title": "Function register_batch is vulnerable to griefing attacks",
+            "description": "The register_batch() function populates three storage mappings: RegistrantList(Address), RegistrationIDs(Address), and ListRegistration(u128), each stored as a ledger entry with a 128 KB limit. A malicious user can exploit this by either repeatedly registering to the same list (filling ListRegistration) or by registering a victim to many lists (filling victim-specific vectors). This leads to storage exhaustion, preventing legitimate registrations. List-specific exhaustion blocks all users from joining a list, while user-specific exhaustion prevents a targeted user from registering to any new lists. These attacks exploit the lack of rate limiting and access control, allowing arbitrary users to consume shared or personal storage resources, resulting in denial-of-service conditions at both individual and system levels.\n",
+            "severity": "medium",
+            "files": [
+                "stellar/contract/lists/src/methods.rs"
+            ],
+            "location": [
+                "ListsContract.register_batch"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Collection of approved projects can be altered during voting",
+            "description": "The add_approved_project() and remove_approved_project() functions allow round admins to modify the approved projects list without checking whether the voting phase has already started. Since votes are submitted using pair indices derived from the approved projects vector, changing the list during voting alters the pairing structure and index mappings. For example, adding a new project shifts existing pair indices, causing previously cast votes to be interpreted incorrectly. A vote intended for pair (2,4) at index 4 might be misread as (2,3) after a new project is inserted. This leads to vote misalignment, where user intent is not preserved, potentially invalidating votes or distorting results. The lack of a voting-phase lock enables manipulation of the voting mechanics by privileged actors.\n",
+            "severity": "medium",
+            "files": [
+                "stellar/contract/round/src/approval_writer.rs"
+            ],
+            "location": [
+                "RoundContract.add_approved_project",
+                "RoundContract.remove_approved_project"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ]
+            },
+            "title": "Function deposit_to_round is vulnerable to grief attacks",
+            "description": "The deposit_to_round() function allows deposits of any amount, including zero, and stores each deposit ID in a per-round Deposit(round_id) vector with a 128 KB size limit. A malicious user can perform numerous zero-value deposits, rapidly filling the storage vector. Once full, no further deposits can be recorded, blocking legitimate contributions. This creates a low-cost griefing attack that disrupts the funding mechanism of a round. The absence of a minimum deposit threshold and deposit count limit makes the system susceptible to resource exhaustion via negligible transactions, undermining the reliability of the deposit system.\n",
+            "severity": "medium",
+            "files": [
+                "stellar/contract/round/src/deposit_writer.rs"
+            ],
+            "location": [
+                "RoundContract.deposit_to_round#1-11"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Referrer fee deduction without recipient causes loss of funds",
+            "description": "The deposit_to_round() function calculates a referrer_fee based on the deposit amount and deducts it unconditionally. However, the fee is only transferred if a referrer_id is provided. If referrer_id is None, the fee is still deducted from the deposit but not sent to any address, resulting in permanent loss of funds. This occurs because the deduction logic is not gated on the presence of a valid referrer. An attacker can exploit this by making deposits without a referrer, effectively burning a portion of the deposit. The impact is direct financial loss for depositors and reduced funding for the round, undermining trust in the fee distribution mechanism.\n",
+            "severity": "medium",
+            "files": [
+                "stellar/contract/round/src/deposit_writer.rs"
+            ],
+            "location": [
+                "RoundContract.deposit_to_round#1-8"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-1325"
+                ]
+            },
+            "title": "Storage limitations in votedRoundIds mapping",
+            "description": "The protocol stores all voting records under a single Ledger Key (VotedRoundIds), which maps a voter to a vector of round IDs. This design leads to unbounded growth of a single Ledger Entry, which is constrained by Soroban's 128 KB size limit per entry. The root cause is the lack of voter-specific storage keys, resulting in centralized accumulation of data. An attacker or natural growth could eventually exhaust the storage capacity by adding more voting records. Once the limit is reached, new votes cannot be recorded, leading to a denial-of-service condition that disrupts the voting functionality of the protocol.\n",
+            "severity": "medium",
+            "files": [
+                "stellar/contract/round/src/data_type.rs"
+            ],
+            "location": [
+                "ContractKey::VotedRoundIds"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Admins can steal rounds\u2019 funds",
+            "description": "The set_redistribution_config() function allows administrators to redirect leftover funds from a round to any address. The vulnerability arises because this function can be called before payouts are processed, enabling an untrusted admin to divert all round funds prematurely. The root cause is insufficient access control, as the function does not restrict callers to the round owner. An attacker with admin privileges could exploit this by changing the redistribution address and triggering the payout early. This would result in complete loss of funds for the round, undermining the integrity of the grant distribution process.\n",
+            "severity": "medium",
+            "files": [
+                "stellar/contract/round/src/admin_writer.rs"
+            ],
+            "location": [
+                "set_redistribution_config()"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ],
+                "3": [
+                    "CWE-480"
+                ]
+            },
+            "title": "Applying to round in batch mode doesn\u2019t handle video check properly",
+            "description": "The apply_to_round_batch() function incorrectly validates video requirements for projects. When a round requires videos, the function panics if a project *has* a video, which is the opposite of the intended behavior. The root cause is a logical inversion in the conditional check (using `if has_video` instead of `!has_video`). This flaw prevents valid projects with videos from being added in batch mode. While not directly exploitable for financial gain, it disrupts administrative operations and creates inconsistency with non-batch application logic, reducing usability and reliability.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/project-registry/src/methods.rs"
+            ],
+            "location": [
+                "apply_to_round_batch()"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Round details can be updated during voting",
+            "description": "The update_round() function allows critical round parameters such as application period, voting whitelist, and expected amount to be modified even after voting has started. The root cause is missing state validation to prevent changes during active voting. This allows round owners or admins to alter key details that voters rely on, potentially misleading participants or manipulating outcomes. The impact is a degradation of trust in the voting process, as decisions may be based on outdated or inconsistent information, compromising the fairness and transparency of the protocol.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/admin_writer.rs"
+            ],
+            "location": [
+                "update_round()"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Function apply_to_round_batch doesn\u2019t check black and white-lists",
+            "description": "The apply_to_round_batch() function does not enforce blacklisting or whitelisting checks when adding multiple projects, unlike the single-application counterpart. The root cause is the omission of validation logic present in other functions. This allows admins to bypass access controls and add blacklisted or unwhitelisted projects in bulk. The impact is a violation of protocol rules governing eligibility, potentially enabling malicious or ineligible projects to participate, which undermines the integrity of the selection and voting process.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/project-registry/src/methods.rs"
+            ],
+            "location": [
+                "apply_to_round_batch()"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-1325"
+                ]
+            },
+            "title": "Function upvote is vulnerable to griefing attacks",
+            "description": "The upvote() function allows any user to upvote a list once per address but does not limit the number of addresses that can be used. The root cause is the use of an unbounded data structure (a growing list of upvoters) without rate limiting or scalable storage design. A malicious actor can create many accounts and repeatedly call the function to bloat the upvote collection. Eventually, the ledger entry will hit the 128 KB size limit, preventing legitimate users from upvote and causing a denial-of-service condition for the feature.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/lists/src/methods.rs"
+            ],
+            "location": [
+                "upvote()"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Function remove_resolved_challenges removes all challenges instead of resolved ones",
+            "description": "The remove_resolved_challenges() function is intended to clean up resolved challenges but instead deletes all challenges. The root cause is a logic error where a new empty map is created and only resolved challenges are removed from it (which has no effect), then the original challenge list is overwritten with this empty map. This happens because the function iterates over the original list but modifies a separate, initially empty structure. An admin calling this function would unintentionally erase all challenges, including unresolved ones, leading to loss of dispute data and potential financial or governance disputes.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/admin_writer.rs"
+            ],
+            "location": [
+                "remove_resolved_challenges()"
+            ]
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "Admins can maliciously redirect project payout funds",
+            "description": "The update_project() function allows project admins to change the payout_address, which determines where project funds are sent. The root cause is excessive permissions granted to admins who may not be as trusted as the project owner. A malicious admin could update the payout address to their own wallet and steal future payouts. Although the impact is limited to the project level, it represents a significant financial risk if exploited. The issue was resolved by removing the payout_address field entirely.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/project-registry/src/methods.rs"
+            ],
+            "location": [
+                "update_project()"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Project details can be changed any time",
+            "description": "The update_project() function allows project owners and admins to modify descriptive fields (e.g., name, image_url, video_url) at any time, including after voting. The root cause is the absence of immutability constraints on fields that influence voter decisions. A malicious actor could change project details post-vote to misrepresent the project, undermining the validity of past votes. This creates a trust issue, as voters cannot rely on the consistency of information, potentially leading to disputes or loss of confidence in the platform.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/project-registry/src/methods.rs"
+            ],
+            "location": [
+                "update_project()"
+            ]
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Registration status persists after list deletion",
+            "description": "The is_registered() function returns true for accounts that were registered to a list even after the list has been deleted. The root cause is the lack of a check for the existence of the list before validating registration status. This allows deleted lists to still confer registration status, potentially granting unauthorized access to features like voting or whitelisting. The impact is a security bypass that could allow users to perform actions they should no longer be eligible for, compromising access control mechanisms.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/lists/src/internal.rs"
+            ],
+            "location": [
+                "is_registered()"
+            ]
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Vault redistribution can be triggered before voting",
+            "description": "The redistribute_vault() function does not verify that the voting period has completed before allowing fund redistribution. The root cause is missing validation of the round phase, relying only on cooldown and compliance checks. If those periods are not set, an attacker or admin could trigger redistribution immediately, sending all funds to the designated address before voting occurs. This would halt the funding campaign prematurely, resulting in a complete denial of service for the round and loss of intended grant distribution.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/admin_writer.rs"
+            ],
+            "location": [
+                "redistribute_vault()"
+            ]
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Function review_application can approve the same project more than once",
+            "description": "The review_application() function does not prevent duplicate approvals of the same project. The root cause is the lack of a check to see if the project is already in the approved list before adding it. This allows an admin to approve a project multiple times, resulting in duplicate entries. During voting and payout, this can cause incorrect vote pairing and multiple payouts to the same project, leading to unfair fund distribution and potential financial loss due to over-allocation.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/project-registry/src/methods.rs"
+            ],
+            "location": [
+                "review_application()"
+            ]
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ]
+            },
+            "title": "Incomplete and redundant parameter updates in update_round",
+            "description": "The update_round() function fails to update certain parameters (use_vault, application_wl_list_id, referrer_fee_basis_points) while redundantly updating others (allow_applications, expected_amount) that have dedicated functions with proper validation. The root cause is inconsistent parameter handling and missing logic. This leads to usability issues where expected configurations are ignored, and critical validations are bypassed, increasing the risk of misconfiguration and reducing the reliability of round management.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/admin_writer.rs"
+            ],
+            "location": [
+                "update_round()"
+            ]
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Unrestricted deposits can lead to issues",
+            "description": "The deposit_to_round() function allows deposits at any time except when the round is deleted, without restricting deposits to the intended funding window. The root cause is the absence of time-based validation. Deposits made after redistribution lock funds indefinitely, and deposits during voting can distort voter incentives. Additionally, a round with remaining balance cannot be deleted, creating operational issues. This leads to fund loss, governance disruption, and poor user experience.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/deposit_writer.rs"
+            ],
+            "location": [
+                "deposit_to_round()"
+            ]
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "Centralization risk",
+            "description": "The protocol grants excessive control to the round owner and admins, including the ability to change contract code, control KYC, assign payouts arbitrarily, and resolve disputes. The root cause is a centralized authorization model with no safeguards like multi-sig or timelock. If a private key is compromised, an attacker could steal funds or manipulate outcomes. Even without compromise, this design undermines decentralization goals and introduces systemic risk due to reliance on trusted parties.\n",
+            "severity": "low",
+            "files": [
+                "near/contract/src/payouts.rs",
+                "near/contract/src/applications.rs",
+                "near/contract/src/lib.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack of upper bound check over protocol and referrer fees",
+            "description": "The initialize(), owner_set_protocol_fee_config(), and create_round() functions do not enforce maximum limits on protocol_fee_basis_points and referrer_fee_basis_points. The root cause is missing input validation for fee parameters. An attacker or erroneous input could set fees up to or exceeding 100%, leading to excessive or total loss of user deposits. This undermines user trust and economic sustainability by allowing potentially catastrophic fee configurations.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/factory.rs"
+            ],
+            "location": [
+                "initialize()",
+                "owner_set_protocol_fee_config()",
+                "create_round()"
+            ]
+        },
+        {
+            "id": 30,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ]
+            },
+            "title": "Function apply_to_round doesn\u2019t check application period",
+            "description": "The apply_to_round() function does not enforce the application period for admins and round owners, only checking that voting has not started. The root cause is inconsistent validation logic compared to other functions like review_application. This creates a discrepancy in access control, allowing privileged users to add applications outside the intended timeframe. While not directly exploitable for financial gain, it undermines process integrity and fairness in project selection.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/project-registry/src/methods.rs"
+            ],
+            "location": [
+                "apply_to_round()"
+            ]
+        },
+        {
+            "id": 31,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Insufficient input validation in set_voting_period function",
+            "description": "The set_voting_period() function only checks that the start time is before the end time, but lacks additional safeguards. The root cause is incomplete input validation. This allows admins to set overlapping periods with the application phase, unreasonably short voting windows, or even past timestamps. These misconfigurations can invalidate the voting process, prevent participation, or create confusion, leading to a breakdown in governance and loss of trust.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/admin_writer.rs"
+            ],
+            "location": [
+                "set_voting_period()"
+            ]
+        },
+        {
+            "id": 32,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Owner transfer mistake is irreversible",
+            "description": "1. **Description:** If ownership is transferred to an invalid address, it cannot be recovered.\n2. **Cause:** No ownership recovery or multi-step transfer mechanism.\n3. **Exploitation:** Accidental transfer leads to permanent loss of control.\n4. **Impact:** Irreversible administrative lockout.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/internal.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 33,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Risk of exceeding deposited funds in payouts",
+            "description": "1. **Description:** Payouts can be assigned in excess of the available vault balance.\n2. **Cause:** No validation that total payouts <= vault balance.\n3. **Exploitation:** Admin assigns more than available, causing partial or failed payouts.\n4. **Impact:** Funding shortfalls and project dissatisfaction.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/payout_writer.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 34,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect recipient address used for payouts",
+            "description": "1. **Description:** Payouts may be sent to the wrong address due to incorrect assignment.\n2. **Cause:** Logic error in recipient address selection.\n3. **Exploitation:** Funds sent to unintended recipients, possibly malicious.\n4. **Impact:** Loss of funds and incorrect distribution.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/payout_writer.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 35,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Potential unauthorized deletion of registrations by untrusted account",
+            "description": "1. **Description:** Registrations can be deleted by accounts without proper authority.\n2. **Cause:** Missing access control on deletion function.\n3. **Exploitation:** Attacker removes legitimate registrations.\n4. **Impact:** Denial of service for legitimate users and data loss.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/lists/src/methods.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 36,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Owner transfer mistake is irreversible",
+            "description": "The transfer_ownership() function allows the current owner to directly transfer ownership rights without requiring confirmation or acceptance from the proposed new owner. This lack of a two-step verification process means that if the owner mistakenly inputs an incorrect address, the transfer is executed immediately and cannot be reversed. The root cause is the absence of a confirmation mechanism, which is a common safeguard in ownership transfer patterns. An attacker could potentially exploit human error by influencing the owner to input a malicious address, although this would require social engineering rather than a direct technical exploit. The impact of a successful mistake includes permanent loss of administrative control over the contract, potentially affecting critical functions such as upgrades or fund management.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/internal.rs"
+            ],
+            "location": [
+                "RoundContract.transfer_ownership()"
+            ]
+        },
+        {
+            "id": 37,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Risk of exceeding deposited funds in payouts",
+            "description": "The set_payouts() function in the RoundContract calculates the total of newly assigned payouts and compares it against the vault balance, but it fails to account for previously assigned payouts. This flaw stems from incomplete validation logic that only checks the current batch of payouts rather than the cumulative total across all payout assignments. As a result, an admin could repeatedly call set_payouts() with new allocations that individually stay under the vault balance but collectively exceed it. While no direct malicious exploitation vector was identified, this could lead to over-allocation of funds, creating financial discrepancies. The impact includes potential loss of funds if future protocol upgrades rely on accurate payout accounting or if the system attempts to distribute more than available.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/payout_writer.rs"
+            ],
+            "location": [
+                "RoundContract.set_payouts()"
+            ]
+        },
+        {
+            "id": 38,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect recipient address used for payouts",
+            "description": "The set_payouts() function assigns payout recipients using payout_input.recipient_id, which refers to the project applicant, instead of the project's designated payout address specified during registration. This discrepancy arises from a logic error in mapping the correct recipient field, leading to funds being sent to an unintended address. An attacker could exploit this by registering a project with a different applicant and payout address, then manipulating the system to receive funds at the applicant address. The impact includes misallocation of funds and potential loss if the applicant address is not controlled by the intended recipient. Additionally, using the applicant ID for KYC checks introduces compliance risks if the wrong entity is verified.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/payout_writer.rs"
+            ],
+            "location": [
+                "RoundContract.set_payouts()"
+            ]
+        },
+        {
+            "id": 39,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ],
+                "4": [
+                    "CWE-638"
+                ]
+            },
+            "title": "Potential unauthorized deletion of registrations by untrusted account",
+            "description": "The unregister() function allows the registered_by account to delete a registration even if that account is no longer a trusted admin or owner of the list. The root cause is the lack of a real-time authorization check to verify that the registered_by account still holds valid permissions within the current list configuration. This creates a privilege escalation risk where a previously trusted account retains deletion rights after being demoted or removed. An attacker who previously had admin rights could exploit this to remove legitimate registrations, disrupting list integrity. The impact includes unauthorized modification of registration data and potential denial of service for affected users.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/lists/src/methods.rs"
+            ],
+            "location": [
+                "ListsContract.unregister()"
+            ]
+        },
+        {
+            "id": 40,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Identical pairs in get_pairs_to_vote function",
+            "description": "The get_pairs_to_vote() function uses Soroban\u2019s pseudo-random number generator to create project pairs for voting comparisons but does not prevent duplicate pairs from being generated. This is caused by the absence of deduplication logic after pair generation. Since randomness can produce repeated indices, the same project pair may appear multiple times in the voting list. An attacker could potentially manipulate input or timing to increase duplication, though this would be probabilistic. The impact includes reduced voting efficiency, skewed vote distribution due to overrepresentation of certain pairs, and inconsistencies in downstream vote aggregation processes that assume unique comparisons.\n",
+            "severity": "low",
+            "files": [
+                "stellar/contract/round/src/pair.rs"
+            ],
+            "location": [
+                "RoundContract.get_pairs_to_vote()"
+            ]
+        },
+        {
+            "id": 41,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Round can be completed several times",
+            "description": "The set_round_complete() function allows multiple calls to mark a round as complete without checking whether it has already been completed. This is due to missing state validation before updating the round status. As a result, multiple admins can invoke the function redundantly, leading to repeated executions. While the core state may remain unchanged, each call consumes gas and may update timestamps unnecessarily. The impact includes wasted transaction costs, potential timestamp inconsistencies, and confusion in systems relying on a single completion event. Although not directly exploitable for financial gain, it degrades system efficiency and reliability.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/round/src/admin_writer.rs"
+            ],
+            "location": [
+                "RoundContract.set_round_complete()"
+            ]
+        },
+        {
+            "id": 42,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Predicate can_vote isn\u2019t consistent with vote function",
+            "description": "The can_vote() view function returns true if an account is on the whitelist, without checking if it is also on the blacklist, while the vote() function reverts if the account is on both lists. This inconsistency is caused by divergent logic paths in two functions that should enforce the same rules. An attacker could exploit this by being whitelisted and blacklisted simultaneously, causing users to believe they can vote when they cannot. The impact includes user confusion, failed transactions, and wasted gas fees when users attempt to vote based on incorrect eligibility information from can_vote().\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/round/src/voting_writer.rs"
+            ],
+            "location": [
+                "RoundContract.can_vote()"
+            ]
+        },
+        {
+            "id": 43,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Predicate can_vote wrongly returns true in corner cases",
+            "description": "The can_vote() function incorrectly returns true when a round requires whitelisting but no whitelist identifier is provided. This occurs because the function checks round.use_whitelist_voting but fails to validate that round.voting_wl_list_id is present before returning true. The root cause is incomplete condition checking in edge cases. An attacker could exploit this by creating or manipulating a round configuration to omit the whitelist ID, misleading users into believing they can vote. The impact includes failed vote transactions, user frustration, and unnecessary gas expenditure due to false eligibility reporting.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/round/src/voting_writer.rs"
+            ],
+            "location": [
+                "RoundContract.can_vote()"
+            ]
+        },
+        {
+            "id": 44,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Failure to update the updated_ms field",
+            "description": "The update_project(), update_list(), and update_registration() functions fail to update the updated_ms field, which is intended to track the last modification timestamp of entities. This omission is due to missing timestamp assignment logic in these functions. The root cause is a maintainability oversight where state changes do not trigger metadata updates. The impact includes inaccurate tracking of entity modifications, which can break dependent logic such as audit trails, event triggers, or UI refresh mechanisms that rely on updated_ms. This reduces transparency and may lead to incorrect assumptions about data freshness.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/project-registry/src/methods.rs",
+                "stellar/contract/lists/src/methods.rs"
+            ],
+            "location": [
+                "ProjectRegistry.update_project()",
+                "ListsContract.update_list()",
+                "ListsContract.update_registration()"
+            ]
+        },
+        {
+            "id": 45,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect cover_img_url assignment in list getters",
+            "description": "The list getter functions (e.g., get_list(), get_lists()) incorrectly assign the description field value to the cover_img_url field when constructing the response. This logic error stems from a mistaken field mapping in the return structure. The root cause is likely a copy-paste or naming confusion during development. An attacker could exploit this by crafting a malicious description to spoof a valid image URL, though the primary impact is functional: applications consuming this data will display incorrect or broken images, leading to poor user experience and potential misrepresentation of list content.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/lists/src/methods.rs"
+            ],
+            "location": [
+                "ListsContract.get_list()",
+                "ListsContract.get_lists()",
+                "ListsContract.get_lists_for_owner()",
+                "ListsContract.get_lists_for_registrant()",
+                "ListsContract.get_upvoted_lists_for_account()"
+            ]
+        },
+        {
+            "id": 46,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Function set_number_of_votes isn\u2019t restricted enough",
+            "description": "The set_number_of_votes() function allows admins to set the number of required votes per voter without validating that the value is feasible given the number of possible project pairs. Additionally, it lacks an upper bound check (e.g., capping at 10), unlike the create_round() function. The root cause is incomplete input validation and inconsistency in constraint enforcement. An attacker with admin privileges could set an excessively high number of votes, making it impossible for users to submit valid votes. The impact includes denial of service for voting, invalid submissions, and disruption of the voting process due to unachievable requirements.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/round/src/admin_writer.rs"
+            ],
+            "location": [
+                "RoundContract.set_number_of_votes()"
+            ]
+        },
+        {
+            "id": 47,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Typos, redundant code and other minor issues",
+            "description": "The codebase contains various maintainability issues including unused variables (e.g., total_amount_paid), unused functions (e.g., read_old_projects()), duplicate functions (e.g., validate_round_detail_update() and validate_round_detaul()), misleading names (e.g., validate_has_voted() should be validate_has_not_voted()), and commented-out code. These issues arise from incomplete refactoring and poor code hygiene. While not directly exploitable, they increase maintenance burden, reduce readability, and may lead to logic errors if deprecated code is mistakenly reused. The impact includes higher risk of bugs, confusion during audits, and inefficient debugging due to lack of clarity and unnecessary complexity.\n",
+            "severity": "informational",
+            "files": [
+                "near/contract/src/payouts.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 48,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Insufficient sanity checks over rounds\u2019 periods",
+            "description": "The validate_round_detail() function does not prevent setting the application or voting start times in the past, nor does it enforce a minimum duration for these periods. The root cause is incomplete validation logic during round creation. An attacker could create a round with a start time in the past, making it immediately invalid or unusable, or set an extremely short voting window to limit participation. The impact includes operational failures, unfair voting conditions, and potential denial of service for legitimate participants due to poorly configured rounds.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/round/src/validation.rs"
+            ],
+            "location": [
+                "RoundContract.validate_round_detail()"
+            ]
+        },
+        {
+            "id": 49,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Function is_registered behaves in a strange way",
+            "description": "The is_registered() function returns true if a given account has any registration on any list when both list_id and required_status are None. This behavior is problematic because any user can create a list and register an account, allowing manipulation of the function's output. The root cause is a design flaw in handling null parameters, where the function interprets \"any registration\" as \"registered\" without context. An attacker could exploit this by registering a target address on a dummy list to falsely indicate eligibility. The impact includes potential security vulnerabilities in systems relying on this function for access control or eligibility checks.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/lists/src/internal.rs"
+            ],
+            "location": [
+                "ListsContract.is_registered()"
+            ]
+        },
+        {
+            "id": 50,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Inconsistency in assigning update_ms field",
+            "description": "The updated_ms field is initialized differently across contracts: the lists contract sets it to the current time, while the round contract's apply_to_round() functions initialize it to None. This inconsistency stems from divergent design choices in state initialization logic. Although both approaches are technically valid, the lack of uniformity increases cognitive load and maintenance risk. The impact includes confusion for developers and potential bugs when integrating cross-contract logic that assumes consistent timestamp behavior, reducing code reliability and readability.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/project-registry/src/methods.rs",
+                "stellar/contract/lists/src/methods.rs"
+            ],
+            "location": [
+                "RoundContract.apply_to_round()",
+                "RoundContract.apply_to_round_batch()",
+                "ListsContract.create_list()"
+            ]
+        },
+        {
+            "id": 51,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Function set_expected_amount doesn\u2019t check the time of invocation",
+            "description": "The set_expected_amount() function allows updating the expected_amount parameter at any time before the round ends, even during the voting phase. This is problematic because the parameter is informational and should be fixed before voting begins to ensure fairness. The root cause is missing time-based access control. An attacker with admin rights could change the value during voting to influence voter behavior. The impact includes manipulation of voter perception and potential unfair influence on voting outcomes, undermining the integrity of the process.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/round/src/admin_writer.rs"
+            ],
+            "location": [
+                "RoundContract.set_expected_amount()"
+            ]
+        },
+        {
+            "id": 52,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Payouts can be set before voting ends",
+            "description": "The set_payouts() function does not verify whether the voting phase has concluded before allowing payout configuration. This allows admins to set payouts based on incomplete or inaccurate voting results. The root cause is missing state validation that links payout assignment to voting completion. An attacker with admin privileges could prematurely allocate funds to projects, potentially biasing the outcome or creating irreversible financial commitments. The impact includes unfair fund distribution, loss of trust in the process, and potential financial loss if payouts are based on partial data.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/round/src/payout_writer.rs"
+            ],
+            "location": [
+                "RoundContract.set_payouts()"
+            ]
+        },
+        {
+            "id": 53,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Insufficient checks when setting new application period",
+            "description": "The set_application_config() function lacks validation to ensure the application period start time is not in the past, that the duration is meaningful, and that the application end time precedes the voting start time. Additionally, it does not enforce setting start_ms and end_ms to None when allow_applications is false. The root cause is incomplete input validation and state management. An attacker could configure invalid periods, such as overlapping application and voting phases or past-dated starts, disrupting round operations. The impact includes operational inconsistencies, unfair participation windows, and potential denial of service due to unworkable round configurations.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/round/src/application_writer.rs"
+            ],
+            "location": [
+                "RoundContract.set_application_config()"
+            ]
+        },
+        {
+            "id": 54,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Lists are not checked for existence before updating",
+            "description": "1. **Description:** The functions `change_voting_wl_list_id` and `change_application_wl_list_id` allow admins to update the whitelist list identifiers used for eligibility checks in the protocol. However, these functions do not verify that the new list ID corresponds to an existing list.\n2. **Cause:** The root cause is the lack of a validation check to confirm the existence of the list associated with the provided list ID before updating the configuration.\n3. **Exploitation:** An admin could inadvertently or maliciously set a non-existent list ID, which would disrupt eligibility checks that depend on these lists.\n4. **Impact:** This leads to a denial of service, as the protocol will be unable to perform proper eligibility checks, potentially blocking legitimate users from participating.\n",
+            "severity": "informational",
+            "files": [
+                "stellar/contract/round/src/internal.rs"
+            ],
+            "location": [
+                "internal.change_voting_wl_list_id",
+                "internal.change_application_wl_list_id"
+            ]
+        }
+    ]
+}

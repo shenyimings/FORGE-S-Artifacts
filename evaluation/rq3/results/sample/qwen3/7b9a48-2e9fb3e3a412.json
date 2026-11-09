@@ -1,0 +1,43 @@
+{
+    "project": "blocksec_ref_exchange_v4.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_exchange_v4.0_signed.pdf.json/ref-exchange/src/account_deposit.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-666",
+        "CWE-664",
+        "CWE-826"
+    ],
+    "cwe_detected": [],
+    "vuln_ground_truth": [
+        {
+            "title": "Improper Account Unregistration",
+            "description": "1. **Description:** The contract allows for account unregistration, but does not properly handle or validate the state of the account before unregistering, potentially leading to inconsistent storage or loss of user funds. Specifically, the function `storage_unregister()` fails to check whether the `legacy_tokens` field of the account is empty before proceeding with unregistration.\n2. **Cause:** The function only checks if the `tokens` map is empty (via `account_deposit.tokens.is_empty()`), but does not validate the `legacy_tokens` field, which could still hold token balances.\n3. **Exploitation:** A malicious or misinformed user could unregister their account while still having tokens recorded in `legacy_tokens`, leading to loss of those tokens. An attacker could also exploit this to force the system into an invalid state.\n4. **Impact:** Users may permanently lose tokens tracked in the `legacy_tokens` field, resulting in financial loss or denial of service for affected accounts.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code is part of a NEAR-based smart contract handling user deposits and withdrawals of tokens and NEAR. After analyzing the code with respect to the given CWEs, several issues are identified.\n\nFirst, in the `withdraw` function, while access control is enforced via `assert_one_yocto()` and checking `predecessor_account_id`, the actual withdrawal logic allows any user to initiate a withdrawal from their own account. However, the function does not validate whether the `token_id` is a valid or authorized token, relying solely on the balance check. This could be acceptable if all token IDs are pre-validated via whitelisting, but the `withdraw` function does not re-check the whitelisting or frozen status of the token beyond the initial `assert_no_frozen_tokens`. Still, the main issue lies elsewhere.\n\nSecond, a critical issue exists in the `internal_save_account` function: it calls `account.assert_storage_usage()` which enforces that `near_amount >= storage_usage()`. However, during the callback in `exchange_callback_post_withdraw`, if a withdrawal fails, the system attempts to re-deposit tokens into the user's account via `deposit_with_storage_check`. If this fails due to insufficient storage, the funds are sent to the owner as \"lostfound\". However, there is no protection mechanism ensuring that only authorized tokens can be deposited into the `lostfound` account — the check `self.whitelisted_tokens.contains(token_id)` is performed, which is correct. So this part is safe.\n\nThird, and most importantly, in the `deposit_with_storage_check` function, when a new token is inserted, it inserts `amount` directly and then checks storage. If the check fails, it removes the token. However, the insertion of `amount` assumes the token is not already present — but this function is called during failed withdrawal recovery. If a malicious actor could manipulate storage costs or byte costs (though unlikely in practice), this could be abused. However, no direct calculation errors are present.\n\nThe most significant finding is in `unregister_tokens`: it allows a user to unregister tokens after paying 1 yoctoNEAR, but it does not validate whether the token is frozen or otherwise restricted beyond the balance check. However, the `assert_no_frozen_tokens` is not called in `unregister_tokens`, unlike in `withdraw`. This means a user could potentially unregister a frozen token as long as its balance is zero, which may be intentional.\n\nHowever, upon deeper inspection, the real issue lies in `internal_deposit`: it checks that either the token is whitelisted OR the account already has a balance for it. This means a non-whitelisted token can be deposited if the account previously had a balance — but that balance could have been set by a prior malicious registration if `deposit` were callable externally. But `internal_deposit` is marked as `pub(crate)`, so it's not externally accessible. Thus, this is safe.\n\nAfter thorough analysis, no critical vulnerabilities stemming from the listed CWEs were found. The code uses proper access control (`assert_one_yocto`, predecessor checks), correct storage enforcement, and proper error handling in callbacks. All balance operations are checked for underflow via `assert!`, and storage arithmetic is done safely.\n\nTherefore, no security findings are reported.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

@@ -1,0 +1,91 @@
+{
+    "project": "Light Protocol Audit Report.pdf.json",
+    "files": [
+        "dataset/contracts/Light Protocol Audit Report.pdf.json/program/src/poseidon_merkle_tree/processor.rs",
+        "dataset/contracts/Light Protocol Audit Report.pdf.json/program/src/poseidon_merkle_tree/instructions.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-691",
+        "CWE-362"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-284",
+        "CWE-682",
+        "CWE-435"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Modification of shared state is not an atomic operation",
+            "description": "1. **Description:** The Merkle tree account maintains a shared state across all users, and modifications to this state must be atomic to preserve data integrity. However, the current implementation allows non-atomic and concurrent updates due to an incomplete locking mechanism.\n2. **Cause:** The lock is bound to the signer's public key instead of the temporary storage account (tmp_storage_pda), allowing multiple instructions from the same signer but different temporary accounts to proceed concurrently. Additionally, state modifications occur mid-instruction sequence (e.g., line 65 in instructions.rs), breaking atomicity.\n3. **Exploitation:** An attacker can exploit this by sending two shielded transactions, each missing the final instruction. Due to the flawed lock, the second transaction’s intermediate state is accepted. The attacker then completes the first transaction, advancing the next_index while retaining the second transaction’s state. Finally, a third full transaction incorporates the second transaction’s UTXO into the Merkle root without the corresponding deposit.\n4. **Impact:** This allows an attacker to insert a leaf into the Merkle tree without depositing funds, enabling theft of arbitrary amounts from the shielded pool.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code contains multiple security-relevant issues rooted in the provided CWE set. The most severe is improper access control around “signer” authority: `process_instruction` never checks `signer.is_signer`, so an attacker can supply any arbitrary account as the “signer” and still pass the pubkey comparisons used for locking, enabling unauthorized locking and subsequent Merkle tree updates. Additionally, the lock itself is permissionless (anyone can acquire it), which enables griefing/DoS. The temporary storage PDA appears to be a shared, long-lived state machine (driven by `current_instruction_index`), but HASH steps are not protected by the lock and can be invoked by anyone, allowing cross-user interference (interaction bug). Finally, several code paths can panic due to unchecked indexing/slice operations and missing bounds checks, which is a reliable denial-of-service vector on Solana (program abort). There are also arithmetic operations that may underflow/wrap if on-chain state is corrupted/maliciously initialized.\n",
+            "findings": [
+                {
+                    "title": "Missing `is_signer` verification allows spoofed authority for locking and updates",
+                    "description": "In `process_instruction`, the first account is treated as `signer`, but the program never checks `signer.is_signer`.\nAll authorization is effectively reduced to comparing `*signer.key` with `pubkey_locked`, which can be satisfied by passing a non-signer account with the desired pubkey.\n\nImpact:\n- An attacker can call the LOCK_START path to set `pubkey_locked` to an arbitrary pubkey without a signature.\n- The attacker can then continue MERKLE_TREE_UPDATE_* and ROOT_INSERT steps by repeatedly supplying the same non-signer pubkey as `signer`, modifying the Merkle tree without any real signature-based authorization.\n\nAffected code:\n- `process_instruction`: uses `let signer = next_account_info(account)?;` but never checks `signer.is_signer`.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Permissionless locking enables denial-of-service and griefing",
+                    "description": "The LOCK_START branch allows any caller to acquire the lock whenever `time_locked == 0` or the lock has expired, with no admin/owner gating.\nThis enables arbitrary third parties to repeatedly lock the Merkle tree and block legitimate users from completing their multi-step update flow.\n\nEven with the slot-based expiration, an attacker can continually relock on expiration boundaries (and due to the missing `is_signer` check, can do so without signatures as well).\n\nAffected code:\n- `process_instruction` LOCK_START branch: sets `time_locked` and `pubkey_locked` for any caller.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unprotected HASH steps allow cross-user interference with shared temporary state",
+                    "description": "The HASH_* instruction path does not verify the Merkle tree lock holder (`pubkey_locked`) at all.\nIt calls `_process_instruction(..., &mut tmp_storage_pda_data, &mut self.unpacked_merkle_tree)` which mutates `tmp_storage_pda_data` state (Poseidon permutation rounds, etc.).\n\nIf `TmpStoragePda` is shared across users/flows (as implied by `current_instruction_index` and a single tmp PDA), then any user can interfere mid-flight:\n- Corrupt another user’s in-progress hash/merkle update computation.\n- Advance/alter internal hash state and round counters out of sequence.\n\nThis is a classic “multiple correctly-behaving entities” integration flaw: the hash component and lock component behave “correctly” alone, but together the system permits cross-actor state corruption.\n\nAffected code:\n- `process_instruction` HASH_0..HASH_3 branch: no `pubkey_check` against `pubkey_locked`.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unchecked indexing can panic (program abort) via out-of-bounds `IX_ORDER` access",
+                    "description": "Several branches index `IX_ORDER[tmp_storage_pda_data.current_instruction_index]` without first confirming\n`current_instruction_index < IX_ORDER.len()`. While the first two branches have a bounds guard,\nthe HASH_* branch and ROOT_INSERT branch do not.\n\nIf `current_instruction_index` is equal/greater than `IX_ORDER.len()`, the program will panic on index,\naborting the program (DoS for that instruction and potentially for any user relying on that state machine).\n\nAffected code:\n- `else if IX_ORDER[tmp_storage_pda_data.current_instruction_index] == HASH_0 || ...`\n- `else if IX_ORDER[tmp_storage_pda_data.current_instruction_index] == ROOT_INSERT`\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Potential panics from unchecked lengths and indices (Pubkey::new, init bytes, tree indices)",
+                    "description": "Multiple locations can panic due to unchecked assumptions about lengths/indices:\n\n1) `Pubkey::new(&merkle_tree_pda_data.pubkey_locked)` assumes `pubkey_locked` is 32 bytes.\n   However, `new()` initializes `pubkey_locked: vec![0]` (length 1). If such a value is ever used\n   (or if account data is malformed), `Pubkey::new` may panic due to invalid slice length.\n   - Used in `process_instruction` (update branch and ROOT_INSERT lock check).\n\n2) `initialize_new_merkle_tree_from_bytes` copies `init_bytes[i]` for `i in 0..unpacked_init_merkle_tree.bytes.len()`\n   without checking that `init_bytes` is at least that long, which can panic if `init_bytes` is shorter.\n\n3) `merkle_tree_pubkey_check` indexes `MERKLE_TREE_ACC_BYTES_ARRAY[merkle_tree_index as usize]` with `unwrap()` and no range check.\n   A malformed `merkle_tree_index` (from `TmpStoragePda`) can panic via out-of-range indexing.\n\n4) In `insert_1_inner_loop`, indexing into `filled_subtrees[current_level]` and slicing `ZERO_BYTES_MERKLE_TREE_18[current_level*32..]`\n   can panic if `current_level` is out of expected bounds.\n\nThese panics are exceptional-condition handling failures that can be triggered by malformed on-chain state or\nby driving the state machine into unexpected values, causing program abort (DoS).\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Arithmetic wrap/underflow risk when deriving leaf indices from mutable on-chain state",
+                    "description": "`leaf_pda_account_data.left_leaf_index = merkle_tree_pda_data.next_index - 2;`\ncan underflow/wrap if `next_index < 2` due to corrupted or maliciously initialized MerkleTree account data.\nOn Solana BPF builds (release), integer underflow may wrap, yielding a very large index and potentially\nbreaking downstream logic that trusts this stored index.\n\nSimilar state-dependent calculations occur in:\n- `insert_0_double`: `current_index = next_index / 2` and the full-tree check relies on correct `next_index`.\n\nAffected code:\n- `process_instruction` ROOT_INSERT branch (left_leaf_index computation)\n- `insert_0_double` (current_index derivation and capacity check)\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.65
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

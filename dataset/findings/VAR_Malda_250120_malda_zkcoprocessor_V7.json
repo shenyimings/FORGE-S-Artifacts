@@ -1,0 +1,522 @@
+{
+    "path": "reports/VAR_Malda_250120_malda_zkcoprocessor_V7.pdf",
+    "project_info": {
+        "url": "https://github.com/malda-protocol/malda-zk-coprocessor",
+        "commit_id": "2095dda1",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-05-20",
+        "project_path": "contracts/VAR_Malda_250120_malda_zkcoprocessor_V7.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Arbitrary data committed to journal permits spoofed mints",
+            "description": "The vulnerability arises because the data committed to the journal in the `main()` function of balance_of.rs is derived entirely from the output of a view call, without validating that the queried addresses are legitimate mToken contracts. This lack of validation allows an attacker to create a spoofed contract that returns arbitrary balance values for any account and token. The attacker can then generate a valid ZK proof based on this fake data, which the on-chain contract will accept during verification via `_mintExternal`. As a result, the protocol will process mints based on fraudulent balance changes, leading to unauthorized minting of tokens.\nThe root cause is the failure to validate critical environment data (such as asset, account, and chainId) against trusted sources like zkVmInput. Instead, these values are taken directly from untrusted view call outputs. An attacker exploits this by deploying a malicious contract that mimics the balanceOf interface and returns manipulated balances. The impact is severe: attackers can steal funds directly from the protocol by minting tokens they do not own, undermining the integrity of the entire system.\n",
+            "severity": "critical",
+            "files": [
+                "malda_rs/src/viewcalls.rs"
+            ],
+            "location": [
+                "balance_of.rs.main()",
+                "mErc20Host._mintExternal",
+                "V-MLDZK-VUL-001"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Balance queries performed on incorrect addresses due to padding",
+            "description": "In the `validate_balance_of_call()` function, an unnecessary 12-byte padding is added when constructing EVM call data for balance queries. The account address is already left-padded to 32 bytes when converted via `into_word()`, so the additional padding shifts the actual address bytes, resulting in a corrupted call data structure. This causes the balance query to be executed on an incorrect address, leading to a return value of zero or invalid state.\nThe root cause is redundant manual padding in the call data construction logic. An attacker could potentially exploit this by crafting inputs that amplify the effect of incorrect address resolution, although the primary impact is on legitimate users. The impact is that users cannot reliably use the cross-chain functionality, as balance checks will fail or return incorrect results, effectively breaking core protocol operations.\n",
+            "severity": "high",
+            "files": [
+                "malda_rs/src/viewcalls.rs",
+                "methods/guest/guest_utils/src/validators.rs"
+                
+            ],
+            "location": [
+                "validate_balance_of_call().call_data",
+                "get_balance_call_input()",
+                "V-MLDZK-VUL-002"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-1293"
+                ]
+            },
+            "title": "Hard-Coded Sequencers",
+            "description": "The sequencer addresses for various chains (e.g., Optimism, Base, Linea) are hard-coded in the circuit logic, making them static and inflexible. If any of these sequencer private keys are compromised\u2014especially on testnets\u2014an attacker can sign blobs with a mismatched chain ID (e.g., using a testnet key to impersonate a mainnet sequencer). This allows the creation of fraudulent proofs that pass verification because the circuit does not validate the chain ID against the sequencer identity.\nThe root cause is the static definition of sequencer addresses in constants without runtime validation. An attacker exploits this by leveraging a leaked testnet key to forge proofs for mainnet operations. The impact includes potential fund theft and forced re-deployment of the circuit. Additionally, the protocol becomes operationally fragile, requiring recompilation and redeployment for any sequencer change, increasing maintenance risk.\n",
+            "severity": "low",
+            "files": [
+                "malda_rs/src/constants.rs"
+            ],
+            "location": [
+                "guest_utils/src/constants.rs.OPTIMISM_SEQUENCER",
+                "guest_utils/src/constants.rs.BASE_SEQUENCER",
+                "guest_utils/src/constants.rs.LINEA_SEQUENCER",
+                "validate_opstack_env()",
+                "V-MLDZK-VUL-003"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-348"
+                ]
+            },
+            "title": "Optimistic update used in light client",
+            "description": "The light client implementation in `build_beacon_chain()` uses the latest optimistic header from the store without waiting for finality. Since optimistic headers can be reorganized, an attacker who triggers a reorg can invalidate previously accepted state updates, leading to double-spending or inconsistent state interpretation by the protocol.\nThe root cause is the reliance on non-finalized data in a security-critical context. An attacker exploits this by executing a chain reorganization (e.g., via a 51% attack or temporary fork), causing the protocol to accept transactions that are later reverted. The impact is potential loss of funds due to double-spends, especially in high-value transfers, and reduced trust in the protocol's consistency.\n",
+            "severity": "low",
+            "files": [
+                "malda_rs/src/viewcalls_ethereum_light_client.rs"
+            ],
+            "location": [
+                "validators_ethereum_light_client.rs.build_beacon_chain",
+                "V-MLDZK-VUL-004"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "balanceOf used in place of getProofData",
+            "description": "Initially, the system used the `balanceOf` view call instead of the intended `getProofData` function to retrieve balance information. This is problematic because `balanceOf` reflects instantaneous balances that can change non-monotonically, whereas `getProofData` is designed to provide verifiable, monotonic balance updates suitable for cross-chain proofs.\nThe root cause is the use of an incorrect function during early development. If left unpatched, an attacker could exploit timing-dependent balance fluctuations (e.g., flash loans) to generate false proofs. The impact is incorrect protocol behavior, including failed mints or unauthorized access, due to reliance on volatile balance snapshots rather than auditable proof data.\n",
+            "severity": "informational",
+            "files": [
+                "malda_rs/src/viewcalls.rs"
+            ],
+            "location": [
+                "validate_balance_of_call()",
+                "V-MLDZK-VUL-005"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Unused/duplicate program constructs",
+            "description": "The codebase includes redundant functions such as `public_key_to_address()` in cryptography.rs, which duplicates functionality already provided by the Alloy library. This introduces unnecessary maintenance overhead and risks divergence from upstream security updates.\nThe root cause is code duplication instead of dependency reuse. While not directly exploitable, this increases the attack surface and maintenance burden. The impact is reduced code maintainability and potential future vulnerabilities if the duplicated logic is not kept in sync with Alloy. Third-party auditors or developers may also be misled about the source of truth for critical functions.\n",
+            "severity": "informational",
+            "files": [
+                "malda_utils/src/cryptography.rs"
+            ],
+            "location": [
+                "guest_utils/src/cryptography.rs.public_key_to_address",
+                "V-MLDZK-VUL-006"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Light client circuit may accept future blocks",
+            "description": "The `verify_update()` function in the light client does not properly validate the `signature_slot` against the current time or chain clock, allowing blocks from the future to be accepted. This violates consensus rules and can lead to protocol desynchronization.\nThe root cause is the missing on-chain validation of the block's slot time. An attacker could submit a block with a future timestamp, causing the light client to accept an invalid state. The impact is divergence from the canonical Ethereum chain, potentially leading to incorrect state transitions and loss of interoperability with other clients.\n",
+            "severity": "informational",
+            "files": [
+                "malda_utils/src/cryptography.rs"
+            ],
+            "location": [
+                "L1ChainBuilder::verify_update",
+                "V-MLDZK-VUL-007"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Helios 0.6.0 missing checks",
+            "description": "The implementation relies on Helios version 0.6.0, which lacks critical validation checks such as `is_valid_header()` in `verify_bootstrap()` and fails to validate finalized headers at genesis. These omissions were fixed in Helios 0.7.0.\nThe root cause is the use of an outdated version of a critical dependency. An attacker could exploit this by submitting a malformed header that bypasses validation, potentially causing the light client to accept an invalid chain state. The impact is a divergence between Malda\u2019s view of the blockchain and the true canonical chain, especially in edge cases like chain restarts or emergency scenarios.\n",
+            "severity": "informational",
+            "files": [
+                "malda_rs/src/viewcalls_ethereum_light_client.rs"
+            ],
+            "location": [
+                "validators_ethereum_light_client.rs",
+                "V-MLDZK-VUL-008"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-311"
+                ],
+                "3": [
+                    "CWE-312"
+                ],
+                "4": [
+                    "CWE-318"
+                ]
+            },
+            "title": "Hardcoded RPC with API keys",
+            "description": "RPC URLs in the codebase, such as `RPC_URL_LINEA`, include hardcoded API keys in plaintext. These keys are exposed in the source code and can be abused by attackers to exhaust rate limits, incur costs, or perform denial-of-service attacks on the project\u2019s infrastructure.\nThe root cause is the lack of environment-based configuration for sensitive credentials. An attacker exploits this by using the leaked keys to spam requests, leading to service degradation or financial loss. The impact includes operational disruption and increased maintenance costs due to the need to rotate keys and redeploy updated binaries.\n",
+            "severity": "informational",
+            "files": [
+                "malda_rs/src/constants.rs"
+            ],
+            "location": [
+                "malda_rs/src/constants.rs.RPC_URL_LINEA",
+                "V-MLDZK-VUL-009"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-347"
+                ]
+            },
+            "title": "Signature may be malleable",
+            "description": "The `signature_from_bytes()` function only checks if the input is at least 65 bytes long but does not enforce an exact length. It also accepts any value for the `v` component instead of restricting it to valid Ethereum values (0 or 1). This allows malleable signatures to be processed.\nThe root cause is insufficient input validation in signature parsing. While this does not currently affect the protocol, it could expose third-party integrations to replay attacks if they rely on signature uniqueness. The impact is potential future vulnerabilities in systems that assume non-malleability, undermining trust in signed messages.\n",
+            "severity": "informational",
+            "files": [
+                "malda_utils/src/cryptography.rs"
+            ],
+            "location": [
+                "cryptography.rs.signature_from_bytes",
+                "V-MLDZK-VUL-010"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ]
+            },
+            "title": "Typos and Incorrect comments",
+            "description": "The code contains minor issues such as typos and misleading comments, including the `Withdrawal` struct in types.rs, which appears to be copied from Alloy but lacks proper attribution in documentation.\nThe root cause is lack of documentation hygiene. While not a direct security risk, this can lead to developer confusion, especially for new contributors. The impact is reduced code clarity and potential errors during maintenance or extension of the codebase.\n",
+            "severity": "informational",
+            "files": [
+                "malda_utils/src/types.rs"
+            ],
+            "location": [
+                "V-MLDZK-VUL-011"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Best practices",
+            "description": "In `get_user_balance_zkvm_input()`, the logic uses a `match` expression to select an RPC URL but then uses a separate `if-else` block that assumes only LINEA and LINEA_SEPOLIA fall into the `else` branch. This assumption is not enforced, making the code fragile and error-prone when new chains are added.\nThe root cause is inconsistent control flow design. The impact is increased maintenance cost and potential logic errors when extending support to new chains, as the implicit assumption may be overlooked. This reduces code robustness and scalability.\n",
+            "severity": "informational",
+            "files": [
+                "malda_rs/src/viewcalls.rs"
+            ],
+            "location": [
+                "malda_rs/src/viewcalls.rs.get_user_balance_zkvm_input",
+                "V-MLDZK-VUL-012"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Execution blocks assumed to be V3",
+            "description": "The `try_from()` implementation for `ExecutionPayload` assumes that all blocks are from the V3 topic, where the payload starts at byte 32. However, future upgrades (e.g., Isthmus) will use V4 topics that include withdrawals, changing the payload offset. Additionally, V1/V2 blocks would have their first 32 bytes incorrectly stripped.\nThe root cause is hardcoding a parsing scheme without version detection. The impact is that the circuit may fail to support future network upgrades or misinterpret historical blocks, potentially allowing invalid block data to be accepted and compromising cross-chain state validity.\n",
+            "severity": "informational",
+            "files": [
+                "malda_utils/src/types.rs"
+            ],
+            "location": [
+                "types.rs.<ExecutionPayload as TryFrom<&SequencerCommitment>>::try_from",
+                "V-MLDZK-VUL-013"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "The OP Stack environment validation will fail for Ethereum Sepolia",
+            "description": "The function `get_ethereum_block_hash_via_opstack()` uses `OPTIMISM_CHAIN_ID` when calling `validate_opstack_env()`, even when the actual chain is `ETHEREUM_SEPOLIA_CHAIN_ID`. This causes validation to fail because it expects the Optimism mainnet sequencer instead of the Sepolia one.\nThe root cause is incorrect chain ID usage in validation logic. The impact is that OP Stack environment validation fails for Ethereum Sepolia, breaking functionality on that testnet. Users attempting cross-chain operations involving Sepolia will face failures, reducing test coverage and developer experience.\n",
+            "severity": "informational",
+            "files": [
+                "malda_utils/src/validators.rs"
+            ],
+            "location": [
+                "validators.rs.get_ethereum_block_hash_via_opstack",
+                "validate_opstack_env()",
+                "V-MLDZK-VUL-014"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "OP L1 path accepts fraudulent state",
+            "description": "The function validate_opstack_env_with_l1_inclusion() validates an OpStack L2 block by checking that the root claim matches the expected OutputRootProof, the L2 block number has not been challenged, and a fixed time delay has passed since the dispute game's creation. However, the logic incorrectly assumes that the absence of a challenge to the L2 block number implies validity, which is not true because a dispute can only be initiated if the claimed L2 block number differs from the pre-image of the root claim. Thus, a fraudulent root claim with a matching block number cannot be challenged.\n\nThe root cause is flawed validation logic that does not verify whether the dispute game has fully resolved. Instead, it relies on a time delay (TIME_DELAY_OP_CHALLENGE), which does not guarantee finality. An attacker could exploit this by submitting a fraudulent L2 block in a dispute game with a correct block number, bypassing challenge mechanisms.\n\nExploitation involves creating a dispute game with a fraudulent state root but a valid block number, allowing the attacker to pass validation after the time delay. This could lead to forged proofs being accepted on the host chain.\n\nThe impact includes the potential for an attacker to mint unbacked mTokens on the host chain by forging valid-looking proofs. Additionally, blocks under active dispute may be prematurely accepted due to reliance on time-based checks instead of resolution status.\n",
+            "severity": "critical",
+            "files": [
+                "malda_utils/src/validators.rs"
+            ],
+            "location": [
+                "validate_opstack_env_with_l1_inclusion()"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-115"
+                ]
+            },
+            "title": "Wrong chain ID used",
+            "description": "The functions get_validated_block_hash_linea() and get_validated_block_hash_opstack() use the Linea or Optimism chain ID when calling get_ethereum_block_hash_via_opstack(), which expects Ethereum or Sepolia chain IDs. This mismatch causes the system to always fetch a block hash from the Ethereum testnet, leading to incorrect validation.\n\nThe root cause is the improper propagation of chain IDs across validation functions. Instead of mapping OP-Stack or Linea chain IDs to their corresponding L1 chain IDs, the functions directly pass the L2 chain ID, resulting in incorrect L1 block validation.\n\nAn attacker could exploit this by submitting a fraudulent dispute game on the Sepolia testnet that attests to a false view of the Optimism blockchain. Since the system validates against testnet data, this could be used to generate redeemable proofs on the host chain.\n\nThe impact includes the possibility of fund theft via forged proofs and denial of service for Linea users, who may be unable to perform L1-inclusion proofs. This issue is compounded by V-MLDZK2-VUL-001, which allows bypassing full dispute resolution.\n",
+            "severity": "critical",
+            "files": [
+                "malda_utils/src/validators.rs"
+            ],
+            "location": [
+                "get_validated_block_hash_linea()",
+                "get_validated_block_hash_opstack()"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Incorrect inequality used for L1 inclusion",
+            "description": "The function validate_linea_env_with_l1_inclusion() incorrectly implements the L1 inclusion check by asserting that the current L2 block number on L1 is less than or equal to the claimed block number. This effectively performs an L1 exclusion check, allowing blocks not yet included on L1 to pass validation.\n\nThe root cause is a logic error in the inequality comparison. The function should ensure that the claimed block has already been included on L1, but instead it allows future block numbers, undermining the security of the slow lane.\n\nAn attacker could exploit this by generating proofs for L2 blocks that have not yet been recorded on L1, leveraging sequencer bugs or re-orgs to create fraudulent claims. Conversely, valid blocks already on L1 may fail validation if their number is lower than the latest, preventing legitimate users from accessing funds.\n\nThe impact includes reduced security of the L1 inclusion path, potential for fraudulent proof generation, and denial of service for legitimate users. The issue is partially mitigated by reversing the inequality, but relying solely on block numbers remains insufficient for re-org protection.\n",
+            "severity": "medium",
+            "files": [
+                "malda_utils/src/validators.rs"
+            ],
+            "location": [
+                "validate_linea_env_with_l1_inclusion()"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "OP-Stack slow path checks wrong state root",
+            "description": "The function get_validated_block_hash_opstack() uses the env_header's state_root instead of the last_block's state_root when validating L1 inclusion for OP-Stack chains. This mismatch prevents the validation of longer block chains, as it requires the env_header and last_block to have the same length.\n\nThe root cause is incorrect parameter usage in the validation flow. The function passes the environment header's state root to validate_opstack_env_with_l1_inclusion(), which expects the last block's state_root, breaking the chain validation logic.\n\nAn attacker could exploit the broken L1 inclusion path by forcing reliance on the Malda sequencer, but the primary impact is on legitimate users who cannot use the slow lane for cross-chain operations.\n\nThe impact is that no valid L1-inclusion proofs can be made for Optimism, rendering the slow lane non-functional and forcing users to depend on the Malda sequencer for fund access, increasing centralization risk.\n",
+            "severity": "medium",
+            "files": [
+                "malda_utils/src/validators.rs"
+            ],
+            "location": [
+                "get_validated_block_hash_opstack()"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-347"
+                ]
+            },
+            "title": "Sequencer commitment not verified in the slow lane",
+            "description": "The function get_validated_block_hash_opstack() does not verify the sequencer's signature on the last block when validate_l1_inclusion is true. While L1 inclusion is checked, the absence of sequencer commitment verification weakens the security model of the slow lane.\n\nThe root cause is a design decision to skip sequencer validation in the slow lane, under the assumption that L1 inclusion is sufficient. However, this creates a discrepancy between the fast and slow lanes, where the latter is less secure.\n\nAn attacker could exploit this by submitting a block that is included on L1 but not signed by the legitimate sequencer, especially in scenarios involving dispute games. This could allow forged proofs to be accepted if combined with other vulnerabilities.\n\nThe impact is a reduction in the security guarantee of the slow lane, making it potentially less secure than the fast lane. Although L1 inclusion provides some safety, the lack of sequencer validation opens the door to denial-of-service and potential theft when combined with other issues like V-MLDZK2-VUL-001 and V-MLDZK2-VUL-002.\n",
+            "severity": "informational",
+            "files": [
+                "malda_utils/src/validators.rs"
+            ],
+            "location": [
+                "get_validated_block_hash_opstack()"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unused rust code",
+            "description": "The codebase contains unused Rust constructs, specifically the IOptimismPortal2 interface in malda_utils/src/types.rs. This unused code adds unnecessary complexity and increases maintenance burden.\n\nThe root cause is leftover code from prior development iterations that was not removed during refactoring or cleanup.\n\nWhile not directly exploitable, an attacker could potentially manipulate or extend this unused code if it were later reintroduced or misused, leading to unintended behavior.\n\nThe impact is primarily on code maintainability and clarity. Unused code can become outdated, confuse developers, and introduce bugs if accidentally referenced in future updates.\n",
+            "severity": "informational",
+            "files": [
+                "malda_utils/src/types.rs"
+            ],
+            "location": [
+                "IOptimismPortal2"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Fraudulent games may DoS the slow lane",
+            "description": "The function validate_opstack_env_with_l1_inclusion() retrieves the latest dispute game index from the Dispute Game Factory and assumes it corresponds to the block being validated. However, this approach is vulnerable to spam attacks where an attacker creates numerous spurious games, shifting the latest index away from the legitimate game.\n\nThe root cause is the reliance on the latest game index without validating its relevance to the target block. The function does not accept a specific game index as input, making it susceptible to index manipulation.\n\nAn attacker could exploit this by flooding the Dispute Game Factory with fake games, causing the slow lane to fetch an incorrect or non-existent game, leading to proof validation failure.\n\nThe impact is a denial-of-service condition where legitimate users cannot generate proofs because the system cannot locate the correct dispute game, forcing reliance on the Malda sequencer.\n",
+            "severity": "informational",
+            "files": [
+                "malda_utils/src/validators.rs"
+            ],
+            "location": [
+                "validate_opstack_env_with_l1_inclusion()"
+            ]
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ],
+                "3": [
+                    "CWE-1111"
+                ]
+            },
+            "title": "Missing comments",
+            "description": "Several newly added functions and interfaces, including validate_linea_env_with_l1_inclusion() and IL1MessageService, lack documentation comments. This reduces code readability and maintainability.\n\nThe root cause is incomplete documentation practices during development, where implementation was prioritized over code clarity.\n\nWhile not directly exploitable, the absence of comments increases the risk of misinterpretation by developers or auditors, potentially leading to incorrect modifications or missed vulnerabilities.\n\nThe impact is reduced code maintainability and increased risk of future bugs due to poor understanding of function behavior, arguments, and expected panics.\n",
+            "severity": "informational",
+            "files": [
+                "malda_utils/src/validators.rs",
+                "malda_utils/src/lib.rs"
+            ],
+            "location": [
+                "validate_linea_env_with_l1_inclusion()",
+                "IL1MessageService"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1357"
+                ],
+                "3": [
+                    "CWE-1104"
+                ]
+            },
+            "title": "Compilation issues",
+            "description": "The project fails to compile due to the inclusion of the \"sequencer_v2\" package in the workspace members list in Cargo.toml, which appears to be an obsolete or broken dependency.\n\nThe root cause is outdated configuration in the build manifest, where deprecated or non-functional crates are still referenced.\n\nThis issue prevents successful compilation and deployment, acting as a build-time denial of service.\n\nThe impact is that developers cannot build the project without manual intervention, hindering development, testing, and auditing efforts.\n",
+            "severity": "informational",
+            "files": [
+                "Cargo.toml"
+            ],
+            "location": [
+                "Cargo.toml"
+            ]
+        }
+    ]
+}

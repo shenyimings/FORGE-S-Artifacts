@@ -1,0 +1,97 @@
+{
+    "path": "reports/zenith-dbc-audit-may-2025.pdf",
+    "project_info": {
+        "url": "https://github.com/MeteoraAg/dynamic-bonding-curve",
+        "commit_id": "df65206a8aee89c2a9f752d6b1e0a5fa75ffa71c",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-05-15",
+        "project_path": "contracts/zenith-dbc-audit-may-2025.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "validate_single_swap_instruction() can be bypassed with wrapper program",
+            "description": "The validate_single_swap_instruction() function is intended to prevent large swaps from being split into multiple smaller swaps within a single transaction to avoid higher fees under the rate limiter mechanism. However, the function only checks top-level instructions and does not account for CPI (Cross-Program Invocation) calls from a wrapper program. This allows an attacker to bypass the validation by using a wrapper program that performs multiple swap CPIs, as the instruction index check will either be zero or mismatch the bonding curve program ID. As a result, the function terminates early and permits multiple swaps in one transaction, undermining the rate-limiting mechanism. This could allow whale snipers to avoid higher fees and gain an unfair advantage, negatively impacting fair market access for regular users.\n",
+            "severity": "medium",
+            "location": [
+                "ix_swap.rs#268-297"
+            ],
+            "files": [
+                "programs/dynamic-bonding-curve/src/instructions/ix_swap.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ]
+            },
+            "title": "Snipers can bypass rate limiter fee by splitting over multiple transactions",
+            "description": "The rate limiter mechanism is designed to penalize large swaps by increasing fees when the input amount exceeds a reserved threshold, thus discouraging whale snipers from manipulating prices. However, attackers can circumvent this by splitting a large swap into multiple smaller transactions, each below the reserved amount threshold. Since the rate limiter only evaluates individual transaction sizes, this strategy allows snipers to avoid higher fees entirely. While this behavior may be considered within the intended design, it reduces the effectiveness of the rate limiter in preventing front-running and unfair advantages, especially if not combined with other fee mechanisms like dynamic fees.\n",
+            "severity": "low",
+            "location": [
+                "fee_rate_limiter.rs"
+            ],
+            "files": [
+                "programs/dynamic-bonding-curve/src/base_fee/fee_rate_limiter.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "transfer_pool_creator() fails to validate MeteoraDammMigrationMetadata account",
+            "description": "The transfer_pool_creator function allows the current pool creator to transfer ownership, with additional checks during migration to a DAMM pool requiring that LP tokens are locked and claimed. However, the function does not validate that the MeteoraDammMigrationMetadata account passed via remaining_accounts belongs to the correct virtual pool. This lack of validation enables a malicious pool creator to use a different, valid migration metadata account (from another pool) where LP conditions are already satisfied, thereby bypassing the ownership transfer restrictions. This could lead to premature transfer of control over a pool, potentially disrupting governance or migration processes.\n",
+            "severity": "low",
+            "location": [
+                "ix_transfer_pool_creator.rs#45-52"
+            ],
+            "files": [
+                "programs/dynamic-bonding-curve/src/instructions/migration/meteora_damm/mod.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Incorrect documentation for get_total_trading_fee()",
+            "description": "The inline documentation for the get_total_trading_fee() function incorrectly states that the maximum fee numerator is capped at 50%. However, in the current release, this cap has been increased to 99%. While this does not introduce a functional vulnerability, it can mislead developers and auditors about the actual fee limits enforced by the system. Incorrect documentation may lead to incorrect assumptions in integrations or security reviews, potentially resulting in flawed economic models or unexpected behavior in downstream applications.\n",
+            "severity": "informational",
+            "location": [
+                "config.rs#64"
+            ],
+            "files": [
+                "programs/dynamic-bonding-curve/src/state/config.rs"
+            ]
+        }
+    ]
+}

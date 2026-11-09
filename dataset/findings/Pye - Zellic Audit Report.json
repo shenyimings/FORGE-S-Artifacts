@@ -1,0 +1,173 @@
+{
+    "path": "reports-without-source/Pye - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/pyefi/pye-program-library"
+        ],
+        "commit_id": [
+            "3edf2d78e7251fb98486f4918df648b7e9b7d73c"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-12-11",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "Uninitialized transient stake account can be stolen",
+            "description": "The vulnerability arises when a solo validator bond matures and the handle_maturity instruction is called, which merges the transient stake account into the bond's main stake account. This operation leaves the transient stake account in an uninitialized state with zero lamports, which would normally be closed due to rent exemption rules. However, an attacker can front-run the transaction by sending enough lamports to keep the account alive, preventing closure. Once the account is left uninitialized, the attacker can reinitialize it under their control, effectively stealing it by setting themselves as the authorized staker and withdrawer. The root cause is the failure to ensure the transient stake account is properly closed or reinitialized in a secure manner. This flaw allows an attacker to manipulate yield calculations by depositing lamports into the stolen transient account and redeeming yield tokens (YTs) at an inflated rate, thereby stealing funds from the bond or draining the global counter party (GCP). The impact includes financial loss for legitimate users and potential depletion of protocol funds.\n",
+            "severity": "critical",
+            "location": [
+                "handle_maturity instruction",
+                "SoloValidatorBond::calculate_lamports_for_yt"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ]
+            },
+            "title": "Uninitialized stake account can be stolen",
+            "description": "After a solo validator bond matures, the counter_party_update_liquid_reserve instruction is used to unstake lamports from the bond's stake account into the liquid reserve. If the unstaking operation would leave the stake account with zero balance, the account is deinitialized. However, due to Solana's stake account behavior, this leaves the account uninitialized and vulnerable to rent exploitation. An attacker can send rent-exempt lamports in the same transaction to prevent the account from being closed, then reinitialize it under their control. The root cause is the reliance on automatic account closure via rent exemption without enforcing explicit deinitialization or access control. This allows the attacker to take ownership of the stake account and manipulate yield calculations, as the account's balance is included in redemption logic. The impact is that the attacker can drain the global counter party by inflating their yield returns, leading to loss of funds for legitimate users.\n",
+            "severity": "critical",
+            "location": [
+                "counter_party_update_liquid_reserve instruction",
+                "stake account deinitialization logic"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Fee can be front-run on deposit/withdraw",
+            "description": "The vulnerability lies in the dynamic fee settings controlled by the fee admin via the update_fee_settings instruction. The deposit_fee_bps and counter_party_fee_bps parameters can be changed at any time, and there is no delay or user-specified slippage mechanism. A malicious fee admin can observe a pending deposit or withdrawal transaction and front-run it by setting the fee to the maximum allowed (9,999 BPS), effectively capturing nearly the entire value of the user's transaction. The root cause is the lack of time-locked fee changes and absence of user-defined slippage protection. This enables an insider or compromised admin to exploit users during high-value transactions. The impact includes significant financial loss for users during deposits or withdrawals, undermining trust in the protocol's fairness and economic model.\n",
+            "severity": "high",
+            "location": [
+                "update_fee_settings instruction",
+                "deposit logic",
+                "withdraw logic"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Linear-yield reduction for late staking",
+            "description": "The yield token (YT) minting formula uses a linear decay based on time until maturity, calculated as (maturity_ts - now) / (maturity_ts - issuance_ts). This design fails to account for compound interest or time-weighted contributions, allowing users who deposit just before maturity to receive a disproportionately high share of yield relative to their time in the pool. The root cause is the use of a linear rather than exponential or time-integrated model for yield distribution. An attacker can exploit this by cycling through multiple bonds, depositing large amounts at the last moment to capture outsized yields without contributing meaningfully to long-term staking. The impact is an unfair distribution of rewards that disincentivizes early participation and distorts the economic model, potentially leading to loss of funds for early stakers.\n",
+            "severity": "medium",
+            "location": [
+                "calc_yt_to_mint function"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Redeeming later is better for YT holders",
+            "description": "The redemption cache is set on the first redemption event after bond maturity, fixing the principal token (PT) value to 1 SOL. However, if the underlying LST continues to earn yield after this point, the value of PTs increases relative to SOL, and any subsequent yield accrual benefits YT holders instead. The root cause is the early fixation of the redemption rate without accounting for ongoing yield accumulation. This creates a misalignment of incentives where delaying redemption benefits YT holders at the expense of PT holders. While the impact is limited in practice due to likely early redemptions, it still introduces economic inefficiency and potential disputes over fair value distribution. Users are incentivized to delay redemption, which could lead to coordination issues or front-running behavior.\n",
+            "severity": "low",
+            "location": [
+                "set_redemption_cache_if_none function"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "Redeeming can be blocked by empty GCP",
+            "description": "The global counter party (GCP) provides liquidity for users redeeming PTs or YTs for SOL. However, the fee admin has unrestricted access to withdraw SOL from the GCP via the counter_party_withdraw_sol instruction. If the GCP is drained, users cannot redeem for SOL unless they have more than 1 SOL to redeem as stake directly. The root cause is the lack of safeguards or minimum balance requirements for the GCP. A malicious or compromised fee admin can block small redemptions by emptying the GCP, effectively freezing funds for users with less than 1 SOL. The impact is denial of service for small holders, even though their funds are backed by the bond. This undermines user experience and accessibility, especially for retail participants.\n",
+            "severity": "low",
+            "location": [
+                "counter_party_withdraw_sol instruction",
+                "redemption logic for SOL"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Fee-deposit accounts are missing associated-token-account constraint",
+            "description": "During deposits, fee wallets for PTs and YTs are passed in by the user without validation that they are associated token accounts (ATAs) for the protocol_fee_wallet. This allows users to pass arbitrary token accounts as fee destinations, potentially creating multiple non-standard fee accounts. The root cause is the absence of an ATA constraint in the account validation. This leads to fragmentation of fee collection, making it difficult for the protocol to aggregate and manage fees efficiently. While funds are not lost, operational overhead increases and fee recovery becomes error-prone. The impact is reduced maintainability and potential loss of revenue due to misdirected or forgotten fee accounts.\n",
+            "severity": "low",
+            "location": [
+                "fee_wallet_pt and fee_wallet_yt account validation"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing referrer-account constraint",
+            "description": "The referrer account in stake pool deposits lacks a constraint ensuring it matches the bond's LST-fee wallet. Although referral fees are intended to go to the protocol's fee wallet, the program does not enforce this, allowing users to set arbitrary referrer accounts. The root cause is the missing account validation in the instruction handler. This can result in missed protocol revenue if users omit or misconfigure the referrer field. The impact is economic loss due to uncollected fees, especially in cases where the front-end does not enforce correct defaults. This weakens the protocol's ability to monetize referrals reliably.\n",
+            "severity": "low",
+            "location": [
+                "referrer account in deposit instruction"
+            ],
+            "files": []
+        }
+    ]
+}

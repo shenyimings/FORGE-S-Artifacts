@@ -1,0 +1,113 @@
+{
+    "path": "reports/blocksec_linear_v1.0_signed.pdf",
+    "project_info": {
+        "url": "https://github.com/linear-protocol/LiNEAR",
+        "commit_id": "fdbacc68c98205cba9f42c130d464ab3114257b6",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-04-01",
+        "project_path": "contracts/blocksec_linear_v1.0_signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Precision loss",
+            "description": "The vulnerability arises in the `internal_calculate_distribution` function where division is performed before multiplication when calculating `reward_per_session`, leading to potential precision loss due to integer truncation in Rust. The root cause is the order of arithmetic operations\u2014division before multiplication\u2014which truncates the result because Rust integers do not support fractional values. An attacker could exploit this by manipulating deposit or reward scenarios where small reward portions are calculated, causing systematic underpayment due to truncation. Users may receive fewer rewards than expected, leading to economic loss and reduced trust in the protocol's fairness.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/linear/src/farm.rs"
+            ],
+            "location": [
+                "Farm.internal_calculate_distribution#125"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "User\u2019s available balance may be locked temporarily",
+            "description": "When users deposit NEAR tokens, the amount is directly added to their `unstaked` balance. If they immediately call `unstake` or `unstake_all`, the funds become locked for up to 8 epochs. The contract design does not distinguish between available and unstaked balances, treating all deposited funds as immediately eligible for unstaking, which triggers the lock-up period. A user unaware of this behavior might deposit and attempt to unstake immediately, only to find their funds locked, creating a poor user experience and potential liquidity issues. This may temporarily lock user funds, leading to frustration and potential loss of trust, especially if not properly communicated via frontend warnings.\n",
+            "severity": "low",
+            "files": [
+                "contracts/linear/src/internal.rs"
+            ],
+            "location": [
+                "Linear.internal_deposit#13-24"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Unlimited reward distribution to beneficiaries",
+            "description": "The contract allows setting beneficiaries with fractional weights but does not enforce that the total weight across all beneficiaries must not exceed 100%. The `assert_valid` function only checks individual fraction validity (numerator \u2264 denominator), but no global check exists on the sum of all beneficiary fractions. An attacker with owner privileges could add multiple beneficiaries with excessive total weights, causing over-distribution of minted LiNEAR tokens. This could dilute the token supply, reduce token price, and harm the economic model of the protocol.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/linear/src/owner.rs"
+            ],
+            "location": [
+                "Linear.set_beneficiary#21-25",
+                "Fraction.assert_valid#21-27"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-410"
+                ]
+            },
+            "title": "Users\u2019 unstaking requests may not be satisfied in time",
+            "description": "The `get_num_epoch_to_unstake` function returns a fixed number of epochs (`NUM_EPOCHS_TO_UNLOCK`) without considering validator pool liquidity. The function does not dynamically adjust based on available staked NEAR in validator pools, ignoring cases where insufficient funds are available to fulfill unstaking requests. An attacker could stake large amounts and then unstake, forcing other users' withdrawals to be delayed beyond the expected unlock period due to lack of available funds. Users may experience unexpected delays in accessing their unstaked funds, undermining reliability and user trust in the unstaking mechanism.\n",
+            "severity": "low",
+            "files": [
+                "contracts/linear/src/validator_pool.rs"
+            ],
+            "location": [
+                "ValidatorPool.get_num_epoch_to_unstake#199-201"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ]
+            },
+            "title": "Function epoch_update_rewards may not work due to unlimited beneficiaries",
+            "description": "The `epoch_update_rewards` function calls `internal_distribute_staking_rewards`, which iterates over all beneficiaries to distribute rewards. If the number of beneficiaries is very large, this loop may consume more gas than allowed. There is no limit on the number of beneficiaries, and the reward distribution is implemented as an unbounded loop, making it vulnerable to gas exhaustion. An attacker could register a large number of beneficiaries, causing the `epoch_update_rewards` function to fail due to insufficient gas, thereby halting reward distribution. This could disrupt critical protocol functionality (reward distribution), leading to a denial of service for legitimate users and potential economic instability.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/linear/src/epoch_actions.rs"
+            ],
+            "location": [
+                "EpochActions.epoch_update_rewards#129-153",
+                "Internal.internal_distribute_staking_rewards#200-209"
+            ]
+        }
+    ]
+}

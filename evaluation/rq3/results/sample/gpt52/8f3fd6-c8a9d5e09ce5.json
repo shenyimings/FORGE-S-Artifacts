@@ -1,0 +1,122 @@
+{
+    "project": "blocksec_burrowland_pyth_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrowland_pyth_v1.0-signed.pdf.json/contracts/contract/src/lib.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2,
+        "recall": 0.25,
+        "f1": 0.22222222222222224
+    },
+    "cwe_ground_truth": [
+        "CWE-666",
+        "CWE-372",
+        "CWE-664",
+        "CWE-826"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-710",
+        "CWE-410",
+        "CWE-703",
+        "CWE-400"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Lack of Check in remove_token_pyth_info()",
+            "description": "The function remove_token_pyth_info() is responsible for removing Pyth oracle information for a given token ID but fails to verify whether the token is still in use by active user positions. The root cause is the absence of a pre-check to ensure that no user accounts are currently relying on the price data for that token. An attacker with administrative privileges (or a malicious admin) could remove the Pyth info for a token that is still actively used, rendering users unable to adjust or manage their positions involving that token. This could lead to a partial denial-of-service for affected users, preventing them from performing critical operations like liquidation or withdrawal, thus negatively impacting user experience and protocol reliability.\n"
+        },
+        {
+            "title": "Lack of Check in add_token_pyth_info()",
+            "description": "The function add_token_pyth_info() allows the admin to register or overwrite Pyth oracle information for a token ID without verifying whether the token was previously registered. The root cause is the direct insertion into the token_pyth_info map without a prior existence check. This could allow an admin to accidentally or maliciously overwrite existing configurations, potentially leading to incorrect price handling or unexpected behavior in financial calculations. An attacker with admin access could exploit this to silently change token configurations, introducing subtle bugs or manipulation vectors. The impact includes potential configuration drift, loss of data integrity, and increased risk of operational errors, especially if updates are not logged or monitored.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided `lib.rs` mainly wires modules and exposes a small set of administrative methods. The key security-relevant issues visible in this file stem from (1) storing on-chain state in `std::collections::HashMap` (instead of NEAR persistent collections), which is generally non-standard and can introduce nondeterminism/upgrade fragility; (2) unbounded growth and expensive cloning/serialization of large in-contract maps, which can lead to resource exhaustion and denial-of-service as the contract state grows; and (3) a “view-like” getter (`get_token_pyth_info`) incorrectly declared with `&mut self`, turning it into a change method and creating unexpected control-flow/operational behavior.\n",
+            "findings": [
+                {
+                    "title": "Persistent on-chain state stored in std::collections::HashMap (nondeterminism / consensus & upgrade fragility)",
+                    "description": "The contract stores multiple persistent state fields as `std::collections::HashMap`:\n- `last_prices: HashMap<TokenId, Price>`\n- `last_lp_token_infos: HashMap<String, UnitShareTokens>`\n- `token_pyth_info: HashMap<TokenId, TokenPythInfo>`\n\nUsing Rust's standard `HashMap` inside contract state is a non-standard pattern on NEAR. `HashMap` iteration/serialization ordering is not a stable, explicitly-defined contract API guarantee and can vary (e.g., due to hashing/implementation details). If any logic (now or in upgrades/migrations) implicitly relies on iteration order or deterministic serialization, this can lead to nondeterministic behavior across builds/upgrades and make state migrations brittle.\n\nNEAR contracts typically use `LookupMap` / `UnorderedMap` for large/dynamic collections to avoid these risks and to ensure predictable storage behavior.\n",
+                    "category": "CWE-710",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Unbounded in-state HashMaps can cause state bloat and per-call (de)serialization DoS",
+                    "description": "The same `HashMap` fields are serialized/deserialized as part of the contract's entire state on each call. As these maps grow, every transaction pays increasing cost to load/store the whole contract state, potentially making the contract unusable (gas/time limits) once the maps become large.\n\nAdditionally, `get_token_pyth_info` clones and returns the entire `token_pyth_info` map. If this map becomes large, this creates an expensive operation that can exceed gas or memory limits. Even if the caller pays gas, the contract can become practically “bricked” once state reaches a certain size because *all* methods need to load/store the bloated state.\n",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Getter declared as a change method (`&mut self`) causes unexpected behavior and operational failure modes",
+                    "description": "`get_token_pyth_info` is declared as:\n  `pub fn get_token_pyth_info(&mut self) -> HashMap<TokenId, TokenPythInfo>`\neven though it only clones and returns data and does not mutate state.\n\nOn NEAR, `&mut self` makes it a change method (transaction) rather than a view method. This can:\n- prevent cheap/standard RPC view calls for reading oracle config data,\n- force users/integrators to send transactions (gas fees, latency),\n- create unexpected control-flow assumptions in off-chain components and integrations that treat it as a view,\n- increase attack surface for resource exhaustion (transactions repeatedly forcing full-state serialization + cloning).\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided `lib.rs` shows the core contract state and a few admin/public methods. While many behaviors are implemented in other modules (not provided), there are still observable security-relevant design choices in this file.\n\nThe main risk stems from storing unbounded `std::collections::HashMap` fields (`last_prices`, `last_lp_token_infos`, `token_pyth_info`) directly inside the persisted contract state. On NEAR, these are Borsh-serialized as part of the whole `Contract` state blob; any write to contract state can require (de)serializing these maps, making gas and memory cost grow with their size (O(n)). If any public entrypoint (e.g., oracle updates) can grow or mutate these maps over time, this can lead to a denial of service where routine operations exceed gas / memory limits.\n\nSeparately, `get_token_pyth_info` returns a full cloned `HashMap` without pagination/limits. As the map grows, this view method can exceed practical response/compute limits, harming availability and downstream infrastructure, and is another manifestation of uncontrolled resource consumption.\n",
+            "findings": [
+                {
+                    "title": "Unbounded in-state HashMaps can cause O(n) state (de)serialization DoS",
+                    "description": "`Contract` stores `last_prices: HashMap<TokenId, Price>`, `last_lp_token_infos: HashMap<String, UnitShareTokens>`,\nand `token_pyth_info: HashMap<TokenId, TokenPythInfo>` as plain Rust `HashMap`s in the persisted state.\n\nOn NEAR, the entire contract state is Borsh-(de)serialized on each call that reads/writes state. As these `HashMap`s grow,\nthe cost of (de)serialization and memory usage increases with the size of the maps. If any reachable method (likely in other\nmodules such as oracle/price receiver paths) inserts/updates entries over time, an attacker can potentially drive these maps\nto a size where otherwise-valid operations start failing due to gas/memory limits, resulting in denial of service.\n\nSafer pattern: use `near_sdk::collections` (e.g., `LookupMap`/`UnorderedMap`) for large/unbounded mappings, and design bounded\nupdates and paginated reads.\n",
+                    "category": "CWE-400",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unbounded full-map getter (`get_token_pyth_info`) enables resource exhaustion / availability issues",
+                    "description": "`get_token_pyth_info(&mut self) -> HashMap<TokenId, TokenPythInfo>` returns `self.token_pyth_info.clone()` with no\npagination or maximum size constraints.\n\nIf `token_pyth_info` becomes large (e.g., many tokens configured over time), this function will allocate and serialize the\nentire map for the response, potentially exceeding compute/memory/response size limits and causing the method to fail or\ndegrade availability (and potentially impacting RPC nodes/indexers calling it).\n\nSafer pattern: return paginated results (e.g., `(from, limit)`), or provide per-key getters rather than cloning the entire map.\n",
+                    "category": "CWE-410",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-669",
+            "CWE-913",
+            "CWE-1229",
+            "CWE-400",
+            "CWE-665",
+            "CWE-410",
+            "CWE-668",
+            "CWE-580",
+            "CWE-221",
+            "CWE-1329",
+            "CWE-662",
+            "CWE-666",
+            "CWE-118",
+            "CWE-404",
+            "CWE-704",
+            "CWE-610",
+            "CWE-496",
+            "CWE-501",
+            "CWE-706",
+            "CWE-673",
+            "CWE-911",
+            "CWE-487",
+            "CWE-922",
+            "CWE-372",
+            "CWE-495"
+        ]
+    ]
+}

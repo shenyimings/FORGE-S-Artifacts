@@ -1,0 +1,322 @@
+{
+    "project": "sec3_invariant_report.pdf.json",
+    "files": [
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/lib.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/swap.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/change_fee_receiver.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/math.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/transfer_position_ownership.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/initialize_oracle.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/structs/position.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/create_fee_tier.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/util.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.25,
+        "recall": 0.35294117647058826,
+        "f1": 0.2926829268292683
+    },
+    "cwe_ground_truth": [
+        "CWE-669",
+        "CWE-665",
+        "CWE-707",
+        "CWE-664",
+        "CWE-697",
+        "CWE-190",
+        "CWE-682",
+        "CWE-909",
+        "CWE-456",
+        "CWE-435",
+        "CWE-1284",
+        "CWE-691",
+        "CWE-1164",
+        "CWE-710",
+        "CWE-1041",
+        "CWE-20",
+        "CWE-834"
+    ],
+    "cwe_detected": [
+        "CWE-680",
+        "CWE-455",
+        "CWE-284",
+        "CWE-128",
+        "CWE-190",
+        "CWE-682",
+        "CWE-362",
+        "CWE-703",
+        "CWE-400",
+        "CWE-369",
+        "CWE-704",
+        "CWE-665",
+        "CWE-1339",
+        "CWE-664",
+        "CWE-908",
+        "CWE-691",
+        "CWE-770",
+        "CWE-191",
+        "CWE-1419"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect pool key after pool ownership transfer",
+            "description": "This issue arises from a copy-paste error in the transfer_position_ownership instruction where the new position's pool field is incorrectly set to the recipient's key instead of the original pool key. The cause is a simple programming mistake at line 67, where *self.recipient.key is assigned instead of removed_position.pool. This leads to corruption of the pool reference in the transferred position, making it point to an invalid or non-existent pool. An attacker could potentially exploit positions with incorrect pool keys to disrupt accounting or cause failed transactions. The impact is medium as it corrupts state integrity and may lead to loss of access or incorrect behavior, though it does not directly enable fund theft.\n"
+        },
+        {
+            "title": "Arithmetic overflows",
+            "description": "Multiple variables across the codebase are susceptible to arithmetic overflow due to insufficient type safety and lack of runtime overflow checks. The root causes include using narrow integer types (e.g., u32 for head counters, u128 for position_iterator) and performing unchecked arithmetic operations on values like timestamps, tick indices, and fee accumulators. For example, decrementing owner_list.head without underflow protection or incrementing position_iterator without bounds checking could lead to wraparound. An attacker could exploit these overflows to manipulate state, bypass logic, or cause unexpected behavior. The impact is low because the protocol uses runtime checks in some places and the likelihood of hitting exact overflow conditions may be low, but the potential for state corruption exists.\n"
+        },
+        {
+            "title": "Not resetting the last position after moving",
+            "description": "In the transfer_position_ownership instruction, when moving the last position into the slot of the removed one, the original last position is not reset to a default or empty state. The cause is the omission of a reset step (e.g., *last_position = Default::default()) after transferring its data. This leaves stale data in the last position account, which could be misinterpreted as a valid position in future operations. An attacker might exploit this by triggering edge cases where the stale position is accessed, potentially leading to incorrect state transitions or double usage. The impact is low as it affects internal state consistency but does not directly enable fund loss.\n"
+        },
+        {
+            "title": "Inconsistent tick checks",
+            "description": "There is inconsistency in how tick bounds are validated across the codebase. Some functions allow tick == MAX_TICK while others enforce strict inequality (tick < MAX_TICK). The root cause is a lack of unified validation logic and unclear specification on whether MAX_TICK is a valid state. This can lead to unpredictable behavior when positions are created or modified at boundary ticks. An attacker could potentially exploit the discrepancy to create edge-case positions that behave differently than expected during swaps or fee calculations. The impact is low as it primarily affects edge-case correctness rather than core functionality.\n"
+        },
+        {
+            "title": "Missing checks on tick_spacing",
+            "description": "The create_fee_tier instruction does not validate that tick_spacing is non-zero, despite tick_spacing being used in arithmetic operations like division and bit shifting. The root cause is the absence of a basic input validation check. A zero tick_spacing would lead to division-by-zero errors or infinite loops in tick-related calculations. An attacker could create a fee tier with tick_spacing = 0, causing subsequent operations (e.g., pool creation, swaps) to fail or panic. The impact is low as it leads to denial of service for specific pools rather than global fund loss.\n"
+        },
+        {
+            "title": "Inconsistent access control in change_protocol_fee",
+            "description": "The change_protocol_fee instruction uses an access control check that depends on the current fee_receiver being the admin. However, if the fee_receiver has been changed to a non-admin account via change_fee_receiver, the access control will permanently fail. The root cause is a flawed dependency between two independent state-changing functions. This creates a situation where the protocol fee cannot be updated after a fee receiver change, effectively locking the fee at its current value. The impact is low as it results in a loss of protocol governance flexibility but does not compromise fund security.\n"
+        },
+        {
+            "title": "Inconsistent amount_out and amount_in in swap",
+            "description": "In the swap logic, when the output amount exceeds the specified limit, amount_out is clamped to the limit, but amount_in is not adjusted accordingly. The root cause is incomplete logic in the swap amount capping mechanism. This leads to inconsistency between input and output amounts, potentially causing incorrect slippage calculations or user confusion. While the protocol may still function safely, the discrepancy could affect accounting accuracy or frontend interpretations. The impact is informational as it does not break core functionality or lead to fund loss.\n"
+        },
+        {
+            "title": "Redundancies in PDA seeds and account checks",
+            "description": "The code contains redundant checks and seed constructions. For example, in the swap instruction, checking reserve_x.owner and reserve_x.mint is redundant if reserve_x is already verified via PDA derivation. Similarly, including the program_id in PDA seeds is unnecessary since it is already part of the address derivation. The root cause is over-cautious or copy-pasted validation logic. While safe, these redundancies increase code complexity and gas costs slightly. The impact is informational as they do not introduce vulnerabilities but represent suboptimal design.\n"
+        },
+        {
+            "title": "Swap exceeds computation limit",
+            "description": "The swap instruction contains a loop that iterates through ticks until remaining_amount is zero, which can exceed Solana's compute limit under certain conditions. The root cause is the unbounded loop and lack of early termination when liquidity reaches zero. As shown in the PoC, the loop continues even when liquidity is zero, leading to unnecessary iterations and potential out-of-memory errors. An attacker could craft a scenario with many ticks and zero liquidity to force transaction failure, causing denial of service. The impact is informational as it affects reliability but not security per se.\n"
+        },
+        {
+            "title": "Oracle can be set but is not used",
+            "description": "The initialize_oracle instruction allows setting an oracle address, but the oracle is not used anywhere in the current code. The root cause is an incomplete or placeholder feature. This raises questions about future plans and potential attack surfaces if the oracle is later activated without proper safeguards. The impact is informational as it does not affect current functionality but may indicate technical debt or undocumented design choices.\n"
+        },
+        {
+            "title": "Redundant account and access control",
+            "description": "The change_fee_receiver instruction includes a program_authority account that is not used in the handler logic, making it redundant. Additionally, the #[access_control] macro duplicates a constraint already enforced by the account validation. The root cause is inconsistent code design and overuse of access control patterns. While not insecure, it increases complexity and gas usage. The impact is informational as it reflects poor code hygiene but no direct risk.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After thorough analysis of the Solana smart contract code, I have identified several security vulnerabilities stemming from the provided CWE categories:\n\n1. **CWE-284 (Improper Access Control)**: In `transfer_position_ownership.rs`, the `handler` function incorrectly assigns `self.recipient.key` to both `new_position.owner` and `new_position.pool` fields (line 58-59). The `pool` field should retain the original pool reference from `removed_position.pool`, not be set to the recipient's key. This represents improper access control as it could allow positions to be associated with incorrect pools.\n\n2. **CWE-682 (Incorrect Calculation)**: In `swap.rs`, the swap handler has a critical flaw in fee handling. When `by_amount_in` is false and `remaining_amount` is non-zero after a tick crossing that doesn't occur (lines 189-195), the code adds the remaining amount as a fee. However, this is incorrect because in \"by_amount_out\" mode, the remaining amount represents the desired output tokens, not input tokens that should be charged as fees. This leads to incorrect fee calculations and potential loss of user funds.\n\n3. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: In `swap.rs`, when crossing ticks, the code attempts to find the tick account in `remaining_accounts` (lines 167-175). If the tick is not found, it returns `TickNotFound` error. However, there's no validation that all required tick accounts are provided upfront, and the error handling doesn't prevent partial state changes that may have already occurred in the swap, potentially leaving the pool in an inconsistent state.\n\n4. **CWE-691 (Insufficient Control Flow Management)**: In `swap.rs`, the control flow for tick crossing has a complex condition (line 186) that checks `!x_to_y || is_enough_amount_to_cross`. This asymmetric handling between x_to_y and y_to_x directions could lead to inconsistent behavior. When `x_to_y` is true, the tick is crossed unconditionally, but when false, it requires `is_enough_amount_to_cross` to be true. This inconsistency in control flow could lead to unexpected price movements and liquidity states.\n\n5. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: In `change_fee_receiver.rs`, the `handler` function allows changing the fee receiver without any checks on accumulated fees or ongoing operations. This could lead to a situation where fees accumulated before the change are claimed by a new receiver, or fees are lost if the change happens during active swaps.\n",
+            "findings": [
+                {
+                    "title": "Incorrect Pool Assignment in Position Transfer",
+                    "description": "In the `transfer_position_ownership` handler, when creating a new position for the recipient, the `pool` field is incorrectly set to `self.recipient.key` instead of preserving the original `removed_position.pool` value. This causes the transferred position to reference the recipient's address as the pool instead of the actual pool address, breaking the position-pool relationship and potentially allowing unauthorized access to pool operations.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Incorrect Fee Calculation in Swap by Amount Out",
+                    "description": "In the swap handler, when `by_amount_in` is false and a tick crossing doesn't occur due to insufficient amount, the remaining amount is incorrectly added as a fee (lines 189-195 in swap.rs). In 'by_amount_out' mode, the remaining amount represents desired output tokens, not input tokens. Treating it as a fee leads to incorrect accounting where users are charged fees on tokens they never received, resulting in loss of funds.",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Missing Tick Account Validation Leading to Inconsistent State",
+                    "description": "The swap function relies on finding tick accounts in `remaining_accounts` during execution (lines 167-175). If a required tick account is not provided, the function fails with `TickNotFound` error. However, by this point, the pool state may have already been partially modified (fees added, amounts calculated). There's no validation upfront to ensure all required tick accounts are present, and no rollback mechanism for partial state changes, potentially leaving the pool in an inconsistent state.",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Asymmetric Tick Crossing Logic Between Swap Directions",
+                    "description": "The tick crossing logic in the swap handler has asymmetric behavior between x_to_y and y_to_x directions (line 186). When `x_to_y` is true, ticks are crossed unconditionally (`!x_to_y || is_enough_amount_to_cross`), but when false, crossing requires `is_enough_amount_to_cross` to be true. This inconsistency can lead to different liquidity states and price movements depending on swap direction, potentially allowing manipulation or unexpected behavior in edge cases.",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unprotected Fee Receiver Change Without Fee Settlement",
+                    "description": "The `change_fee_receiver` function allows the admin to change the pool's fee receiver without any checks on accumulated protocol fees or ongoing operations. This could result in accumulated fees being claimed by a new receiver who didn't earn them, or fees being lost if the change occurs during active swaps. There's no mechanism to settle or transfer existing fees before the receiver change.",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "After thoroughly analyzing the provided Solana smart contract code against the specified CWE candidates, I have identified several potential security issues:\n\n1. **CWE-190 (Integer Overflow or Wraparound)**: In `swap.rs`, the swap handler performs arithmetic operations on token amounts and liquidity values. While Rust's checked arithmetic is used in some places, there are instances where operations like `total_amount_in += result.amount_in + result.fee_amount` could potentially overflow if not properly bounded. The code uses `TokenAmount(u64)` which could wrap around with large values.\n\n2. **CWE-128 (Wrap-around Error)**: Related to the above, in `math.rs`, functions like `get_delta_x` and `get_delta_y` return `Option<TokenAmount>` to handle overflow cases, but the calling code in `compute_swap_step` uses `.unwrap_or(TokenAmount(u64::MAX))` which could mask overflow conditions and lead to incorrect calculations.\n\n3. **CWE-369 (Divide By Zero)**: In `math.rs`, the function `get_next_sqrt_price_x_up` performs division operations. While there are assertions like `assert!(!liquidity.is_zero())`, these are runtime checks that could panic. The function `calculate_max_liquidity_per_tick` also performs division with `checked_div` but doesn't handle the None case explicitly in all paths.\n\n4. **CWE-682 (Incorrect Calculation)**: In `swap.rs`, the swap logic calculates `remaining_amount` and updates it in a loop. The calculation `remaining_amount -= result.amount_in + result.fee_amount` could lead to underflow if not properly validated, potentially causing incorrect swap amounts.\n\n5. **CWE-362 (Race Condition)**: In `transfer_position_ownership.rs`, the function modifies two position lists (`owner_list` and `recipient_list`) and multiple position accounts. If this operation is interrupted or if multiple transactions execute concurrently, it could lead to inconsistent state where positions are duplicated or lost.\n\n6. **CWE-665 (Improper Initialization)**: In `position.rs`, the `modify` function updates tick liquidity and pool state. However, if the function fails partway through (e.g., after updating lower_tick but before updating upper_tick), the state could be left inconsistent.\n\n7. **CWE-704 (Incorrect Type Conversion or Cast)**: In `util.rs`, `get_current_timestamp()` uses `try_into().unwrap()` to convert `i64` to `u64`. If the timestamp is negative (which shouldn't happen but isn't impossible in edge cases), this will panic rather than handle the error gracefully.\n\n8. **CWE-1339 (Insufficient Precision)**: In `math.rs`, the `calculate_price_sqrt` function uses fixed-point arithmetic with specific precision. The comments indicate expected vs real values with precision differences, which could accumulate in complex calculations and lead to incorrect pricing.\n\n9. **CWE-400 (Uncontrolled Resource Consumption)**: In `swap.rs`, the swap handler has a `while !remaining_amount.is_zero()` loop that iterates through ticks. While there are checks, a malicious actor could potentially craft inputs that cause excessive iterations, consuming computational resources.\n\n10. **CWE-191 (Integer Underflow)**: In `swap.rs`, the line `remaining_amount -= result.amount_out` could underflow if `result.amount_out` is greater than `remaining_amount`, though the logic should prevent this.\n",
+            "findings": [
+                {
+                    "title": "Potential Integer Overflow in Swap Amount Accumulation",
+                    "description": "In the swap handler, `total_amount_in` and `total_amount_out` are accumulated in a loop using `+=` operations. With large swap amounts or many iterations, these could overflow the u64 bounds of TokenAmount, leading to incorrect token transfer amounts.",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unsafe Unwrap on Overflow Conditions in Delta Calculations",
+                    "description": "The `compute_swap_step` function uses `.unwrap_or(TokenAmount(u64::MAX))` when calculating delta amounts. This masks overflow conditions and could lead to incorrect swap calculations when liquidity or price differences are extreme.",
+                    "category": "CWE-128",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Potential Division by Zero in Price Calculations",
+                    "description": "While assertions check for zero liquidity in some functions, the division operations in `get_next_sqrt_price_x_up` and related functions could panic if liquidity becomes zero through unexpected state transitions.",
+                    "category": "CWE-369",
+                    "severity": "medium",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Race Condition in Position Transfer",
+                    "description": "The `transfer_position_ownership` function modifies multiple accounts (two position lists and multiple positions) without atomic guarantees. Concurrent transactions could lead to inconsistent state where positions are duplicated or lost.",
+                    "category": "CWE-362",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Incomplete State Update on Partial Failure",
+                    "description": "The `modify` function in position.rs updates multiple related states (ticks, pool, position). If the function fails after partial updates, the contract state could become inconsistent with mismatched tick and pool liquidity values.",
+                    "category": "CWE-665",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Unsafe Type Conversion in Timestamp Handling",
+                    "description": "The `get_current_timestamp` function uses `try_into().unwrap()` to convert i64 to u64 without proper error handling. While negative timestamps are unlikely, this could cause a panic in edge cases.",
+                    "category": "CWE-704",
+                    "severity": "low",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Precision Loss in Fixed-Point Price Calculations",
+                    "description": "The `calculate_price_sqrt` function uses fixed-point arithmetic with documented precision differences between expected and actual values. These precision errors could accumulate in complex swap calculations, leading to incorrect pricing.",
+                    "category": "CWE-1339",
+                    "severity": "medium",
+                    "confidence": 0.68
+                },
+                {
+                    "title": "Unbounded Loop Iteration in Swap Handler",
+                    "description": "The swap handler contains a `while !remaining_amount.is_zero()` loop that iterates through ticks. While there are price limit checks, carefully crafted inputs could potentially cause excessive iterations, consuming computational resources and potentially hitting transaction limits.",
+                    "category": "CWE-400",
+                    "severity": "medium",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Potential Integer Underflow in Remaining Amount Calculation",
+                    "description": "In the swap handler, `remaining_amount` is decremented with `remaining_amount -= result.amount_out`. If the calculation logic has errors, this could underflow, wrapping to a very large value and causing incorrect swap behavior.",
+                    "category": "CWE-191",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "After thorough analysis of the provided Solana smart contract code, I have examined each file for potential security issues related to the specified CWE categories. Here are my findings:\n\n1. **CWE-908/CWE-909 (Use of Uninitialized Resource/Missing Initialization):**\n   - In `transfer_position_ownership.rs`, the `new_position` account is initialized using `load_init()`, and then all fields are manually assigned from `removed_position`. However, there's a critical bug: the `pool` field is incorrectly set to `*self.recipient.key` instead of `removed_position.pool`. This means the pool reference is not properly initialized with the correct value, leading to an incorrect initialization that could cause the position to reference the wrong pool.\n   - In `initialize_oracle.rs`, the oracle is initialized using `load_init()` and then `oracle.init()` is called. However, there's no verification that all required fields are properly initialized before use.\n\n2. **CWE-1419 (Incorrect Initialization of Resource):**\n   - In `transfer_position_ownership.rs`, line 60 shows: `pool: *self.recipient.key,` which is clearly incorrect. The pool field should be copied from `removed_position.pool`, not set to the recipient's key. This is an incorrect initialization that will cause the position to have an invalid pool reference.\n\n3. **CWE-770 (Allocation of Resources Without Limits or Throttling):**\n   - In `swap.rs`, the swap handler processes remaining_amount in a while loop without any upper bound on iterations. While there are checks for remaining_amount becoming zero, in edge cases with very small amounts or specific price configurations, this could potentially lead to excessive iterations consuming compute units.\n   - The `create_position` and related functions don't have explicit limits on the number of positions that can be created per user, though this is somewhat mitigated by the position_list structure.\n\n4. **CWE-680 (Integer Overflow to Buffer Overflow):**\n   - In `math.rs`, several functions perform complex arithmetic operations with U256 types. While Rust's checked arithmetic is used in many places, there are instances where `.unwrap()` is called on arithmetic operations without proper overflow handling, particularly in `get_delta_x` and `get_delta_y` functions. If these calculations overflow, they could return `None` which is then unwrapped, causing a panic rather than graceful error handling.\n   - In `swap.rs`, the calculation of `total_amount_in` and `total_amount_out` uses `+=` operations that could theoretically overflow if the swap processes an extremely large number of ticks, though this is unlikely in practice due to compute limits.\n\n5. **CWE-455 (Non-exit on Failed Initialization):**\n   - In `create_fee_tier.rs`, the fee tier is initialized but there's no validation that the fee and tick_spacing parameters are within acceptable ranges before initialization completes. Invalid parameters could lead to a fee tier that doesn't function correctly.\n   - In `initialize_oracle.rs`, if the oracle initialization fails partially, there's no rollback mechanism to ensure the pool's oracle_initialized flag is reverted.\n",
+            "findings": [
+                {
+                    "title": "Incorrect Pool Field Initialization in Position Transfer",
+                    "description": "In the transfer_position_ownership handler, when creating a new position, the 'pool' field is incorrectly set to 'self.recipient.key' instead of copying it from 'removed_position.pool'. This causes the new position to reference the recipient's public key as the pool address rather than the actual pool, breaking the position's association with its liquidity pool.",
+                    "category": "CWE-1419",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unbounded Loop in Swap Handler",
+                    "description": "The swap handler in swap.rs contains a while loop that continues until remaining_amount is zero. While there are safety checks, in certain edge cases with very small amounts or specific price configurations, this could lead to excessive iterations consuming all available compute units without proper throttling or iteration limits.",
+                    "category": "CWE-770",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Unsafe Unwrap on Arithmetic Operations in Math Functions",
+                    "description": "In math.rs, functions like get_delta_x and get_delta_y perform complex arithmetic operations and return Option types. However, in compute_swap_step, these functions are called with .unwrap_or(TokenAmount(u64::MAX)), which could mask overflow conditions. If the underlying calculations overflow and return None, this could lead to incorrect token amount calculations using the maximum u64 value as a fallback.",
+                    "category": "CWE-680",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Missing Validation on Fee Tier Parameters",
+                    "description": "In create_fee_tier.rs, the fee and tick_spacing parameters are not validated before initializing the fee tier. Invalid parameters (e.g., fee > 100%, tick_spacing = 0) could create a fee tier that causes arithmetic errors or unexpected behavior in swap calculations.",
+                    "category": "CWE-455",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Potential Uninitialized Oracle State",
+                    "description": "In initialize_oracle.rs, the oracle is initialized with oracle.init() but there's no verification that all required fields within the Oracle struct are properly set to valid initial values. If oracle.init() doesn't fully initialize all fields, subsequent operations could use uninitialized data.",
+                    "category": "CWE-908",
+                    "severity": "medium",
+                    "confidence": 0.65
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-135",
+            "CWE-410",
+            "CWE-487",
+            "CWE-118",
+            "CWE-369",
+            "CWE-670",
+            "CWE-501",
+            "CWE-911",
+            "CWE-768",
+            "CWE-705",
+            "CWE-1339",
+            "CWE-610",
+            "CWE-704",
+            "CWE-400",
+            "CWE-834",
+            "CWE-362",
+            "CWE-673",
+            "CWE-668",
+            "CWE-404",
+            "CWE-666",
+            "CWE-913",
+            "CWE-1329",
+            "CWE-580",
+            "CWE-190",
+            "CWE-662",
+            "CWE-128",
+            "CWE-496",
+            "CWE-669",
+            "CWE-431",
+            "CWE-372",
+            "CWE-922",
+            "CWE-799",
+            "CWE-430",
+            "CWE-193",
+            "CWE-841",
+            "CWE-1335",
+            "CWE-1229",
+            "CWE-1265",
+            "CWE-191",
+            "CWE-495",
+            "CWE-706",
+            "CWE-665",
+            "CWE-221"
+        ],
+        [
+            "CWE-908",
+            "CWE-1419",
+            "CWE-770",
+            "CWE-909",
+            "CWE-680",
+            "CWE-455"
+        ]
+    ]
+}

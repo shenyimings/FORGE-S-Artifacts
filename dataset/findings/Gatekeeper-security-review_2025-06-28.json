@@ -1,0 +1,169 @@
+{
+    "path": "reports/pashov/Gatekeeper-security-review_2025-06-28.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/saguarocrypto/gatekeeper"
+        ],
+        "commit_id": [
+            "c009d361238a121e7d4543c2550d75f085a84800"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-06-28",
+        "project_path": "contracts/Gatekeeper-security-review_2025-06-28.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Critical PDA validation flaw in append_data_sandwich_validators_bitmap",
+            "description": "The append_data_sandwich_validators_bitmap instruction fails to properly validate the sandwich_validators PDA account by not deriving it from the expected seeds within the instruction context. This allows an attacker to pass in a different PDA account that belongs to another authority, bypassing isolation mechanisms. The root cause is the lack of PDA derivation logic in the AppendDataSandwichValidatorsBitmap context, relying instead on the caller to provide the correct account. An attacker could exploit this by crafting a transaction with a maliciously chosen or mismatched PDA, leading to unauthorized appending of data to another authority's validator bitmap. This results in critical cross-authority state corruption, potentially re-writing the data from the 16th byte onward and invalidating the intended access control model.\n",
+            "severity": "critical",
+            "location": [
+                "append_data_sandwich_validators_bitmap"
+            ],
+            "files": [
+                "gatekeeper/programs/saguaro-gatekeeper/src/instructions/append_data_sandwich_validators_bitmap.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Improper PDA validation in handler enables arbitrary data clearing",
+            "description": "The clear_data_sandwich_validators_bitmap instruction does not validate the sandwich_validators PDA account by deriving it from the expected seeds, allowing a malicious signer to supply a PDA account belonging to a different authority. The cause is the absence of seed-based derivation within the ClearDataSandwichValidatorsBitmap struct, making the account validation dependent on external checks that are not enforced. An attacker could exploit this by calling the handler with a valid signature but a mismatched PDA, tricking the program into clearing data from another authority's account. This leads to unauthorized data deletion or corruption, breaking data isolation and enabling critical manipulation of validator slot configurations.\n",
+            "severity": "critical",
+            "location": [
+                "clear_data_sandwich_validators_bitmap"
+            ],
+            "files": [
+                "gatekeeper/programs/saguaro-gatekeeper/src/instructions/clear_data_sandwich_validators_bitmap.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Improper PDA validation in expand_sandwich_validators_bitmap handler",
+            "description": "The expand_sandwich_validators_bitmap instruction fails to correctly validate the sandwich_validators PDA account because the ExpandSandwichValidatorsBitmap struct does not derive the PDA using the correct authority and epoch seeds. This allows the instruction to be executed with a PDA belonging to another authority, leading to inconsistent or incorrect state modifications. The root cause is the lack of enforced PDA derivation within the account validation struct. While the impact is not immediately exploitable for direct fund theft, it introduces a logical inconsistency that could result in unexpected behavior, such as closing or expanding the wrong account. This undermines the reliability and security guarantees of the program's account management.\n",
+            "severity": "medium",
+            "location": [
+                "expand_sandwich_validators_bitmap"
+            ],
+            "files": [
+                "gatekeeper/programs/saguaro-gatekeeper/src/instructions/expand_sandwich_validators_bitmap.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Up to 200 slots can be modified instead of 100",
+            "description": "The protocol specification states that a maximum of 100 slots can be modified per transaction, but this limit is enforced separately for slots_to_gate and slots_to_ungate lists. The validation logic checks each list independently against MAX_SLOTS_PER_TRANSACTION, allowing up to 100 slots to be gated and another 100 to be ungated in a single call. The root cause is the absence of a combined length check. An attacker or user could exploit this by including 100 slots in both lists, resulting in 200 total modifications, which exceeds the intended limit. This could lead to excessive state changes in one transaction, potentially increasing processing costs or enabling unintended configuration changes beyond the expected scope.\n",
+            "severity": "low",
+            "location": [
+                "modify_sandwich_validators"
+            ],
+            "files": [
+                "gatekeeper/programs/saguaro-gatekeeper/src/instructions/modify_sandwich_validators.rs",
+                "gatekeeper/programs/saguaro-gatekeeper/src/lib.rs",
+                "gatekeeper/programs/saguaro-gatekeeper/src/README.md"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-240"
+                ]
+            },
+            "title": "Conflicting slots in modify_sandwich_validators",
+            "description": "The modify_sandwich_validators instruction allows the same slot to appear in both slots_to_gate and slots_to_ungate lists, resulting in ambiguous or conflicting operations. The root cause is the lack of input validation to detect overlapping slots between the two lists. When processed, the final state of such slots is undefined or implementation-dependent, leading to silent misconfiguration. An attacker or user could exploit this by crafting a transaction with conflicting entries, causing unexpected behavior in the validator bitmap. This reduces the reliability of the configuration interface and may lead to incorrect slot gating decisions, undermining the integrity of the control mechanism.\n",
+            "severity": "low",
+            "location": [
+                "modify_sandwich_validators"
+            ],
+            "files": [
+                "gatekeeper/programs/saguaro-gatekeeper/src/instructions/modify_sandwich_validators.rs",
+                "gatekeeper/programs/saguaro-gatekeeper/src/lib.rs",
+                "gatekeeper/programs/saguaro-gatekeeper/src/README.md"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Rent overfunded during incremental bitmap expansion",
+            "description": "The expand_sandwich_validators_bitmap instruction transfers enough lamports to make the account rent-exempt for the final TARGET_ACCOUNT_SIZE, even if the current expansion only increases the size incrementally. The root cause is the calculation of rent exemption based on the maximum future size rather than the actual new size after expansion. As a result, surplus lamports are unnecessarily locked in the account, leading to inefficient use of funds. An attacker cannot directly exploit this for profit, but the protocol and users bear higher costs due to overfunding. This represents a resource inefficiency and economic leakage, especially if multiple incremental expansions occur before reaching the target size.\n",
+            "severity": "low",
+            "location": [
+                "expand_sandwich_validators_bitmap"
+            ],
+            "files": [
+                "gatekeeper/programs/saguaro-gatekeeper/src/instructions/expand_sandwich_validators_bitmap.rs",
+                "gatekeeper/programs/saguaro-gatekeeper/src/lib.rs",
+                "gatekeeper/programs/saguaro-gatekeeper/src/README.md"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Append instruction overwrites instead of appending",
+            "description": "The append_data_sandwich_validators_bitmap function is documented as an append operation, but its implementation overwrites the beginning of the bitmap data starting at offset 0. The root cause is the use of copy_from_slice to write data at the start of the buffer rather than at the end or after existing data. This means that instead of extending the data, it replaces the initial portion, which contradicts the expected behavior. An integrator relying on true append semantics may inadvertently overwrite critical gating state, leading to loss of protection or incorrect validator restrictions. The impact is data corruption due to unexpected overwrites, especially when users assume additive behavior.\n",
+            "severity": "low",
+            "location": [
+                "append_data_sandwich_validators_bitmap"
+            ],
+            "files": [
+                "gatekeeper/programs/saguaro-gatekeeper/src/instructions/append_data_sandwich_validators_bitmap.rs",
+                "gatekeeper/programs/saguaro-gatekeeper/src/lib.rs",
+                "gatekeeper/programs/saguaro-gatekeeper/src/README.md"
+            ]
+        }
+    ]
+}

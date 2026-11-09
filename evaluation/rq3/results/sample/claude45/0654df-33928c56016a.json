@@ -1,0 +1,99 @@
+{
+    "project": "2025-01-pump-science.md.json",
+    "files": [
+        "dataset/contracts/2025-01-pump-science.md.json/programs/pump-science/src/instructions/curve/swap.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-693",
+        "CWE-1284",
+        "CWE-360",
+        "CWE-20",
+        "CWE-345"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-697",
+        "CWE-682",
+        "CWE-691",
+        "CWE-703"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Trade Event Emission Uses Redundant Clock Calls and Lacks Block Time Validation",
+            "description": "The swap handler emits `TradeEvent` and `CompleteEvent` using separate `Clock::get()` calls, leading to redundant syscalls and potential timestamp inconsistency within the same transaction. The timestamp is fetched multiple times instead of being cached, and no validation is performed to ensure the block time is reasonable or unmanipulated. A validator could manipulate clock values slightly between calls, or natural timing differences could result in inconsistent timestamps across events from the same transaction. Indexing systems may record inconsistent or inaccurate event timelines, and redundant syscalls increase computational overhead, affecting efficiency and data reliability.\n"
+        },
+        {
+            "title": "Lack of Maximum Input Amount Validation in Swap Function Could Lead to Unnecessary Transaction Failures",
+            "description": "The swap function in the Pump Science protocol validates the minimum input amount but does not enforce an upper limit on the input amount. This omission allows users to submit swap transactions with amounts that exceed available liquidity or their token balance. The `validate()` function only checks that `exact_in_amount > 0` but does not validate maximum bounds based on either the user's token balance (for token sales) or the bonding curve’s `real_sol_reserves` (for token purchases). An attacker or misinformed user could submit a swap transaction with an amount exceeding available reserves or their own balance. The transaction will proceed until it fails during execution (e.g., during token transfer or within `apply_buy()`), after which the gas has already been consumed. Users experience unnecessary transaction failures and waste gas fees due to late-stage reverts, leading to a poor user experience and increased cost of interaction with the protocol.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code, I have identified several security issues stemming from the candidate CWE root causes:\n\n1. **CWE-682 (Incorrect Calculation)**: In the `complete_buy` function, there's a potential integer overflow when calculating `exact_in_amount.checked_add(min_rent).unwrap()`. While `checked_add` is used, the `.unwrap()` will panic on overflow rather than returning an error, which could cause the transaction to fail unexpectedly. Additionally, the fee calculation `buy_amount_applied = exact_in_amount - fee_lamports` is performed without checked arithmetic, which could underflow if fee_lamports exceeds exact_in_amount.\n\n2. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: The code uses `.unwrap()` in the validation function when checking `exact_in_amount.checked_add(min_rent).unwrap()`, which will panic instead of gracefully handling the error. This is improper error handling for exceptional conditions.\n\n3. **CWE-682 (Incorrect Calculation)**: In `complete_sell`, the calculation `sell_amount_minus_fee = sell_result.sol_amount - fee_lamports` is performed without checked arithmetic. If fee_lamports is greater than sell_result.sol_amount, this will underflow, leading to an incorrect (very large) value.\n\n4. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The `init_if_needed` attribute on `user_token_account` could lead to race conditions or unexpected behavior. If the account is created during this transaction, the user pays for it, but there's no explicit validation that the account state is as expected before use.\n\n5. **CWE-691 (Insufficient Control Flow Management)**: The dev buy logic allows the creator to bypass fees on the start slot, but this check is performed in two places (validation and handler). The inconsistency in control flow could lead to unexpected behavior if the validation logic and handler logic diverge.\n\n6. **CWE-284 (Improper Access Control)**: While there are checks for the bonding curve creator in the dev buy logic, there's no explicit access control preventing anyone from calling the swap function. The contract relies on economic incentives rather than explicit access controls, which could be exploited.\n\n7. **CWE-697 (Incorrect Comparison)**: The comparison `clock.slot == bonding_curve.start_slot` for dev buy detection could be problematic. Solana slots advance quickly, and this exact equality check means the dev buy window is extremely narrow (single slot), which might not be the intended behavior.\n",
+            "findings": [
+                {
+                    "title": "Unchecked Arithmetic Leading to Potential Underflow in Buy Flow",
+                    "description": "In the `complete_buy` function, the calculation `buy_amount_applied = exact_in_amount - fee_lamports` is performed without checked arithmetic. If fee_lamports exceeds exact_in_amount due to calculation errors or manipulation, this will cause an integer underflow, resulting in an extremely large buy_amount_applied value that could drain the bonding curve.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Panic on Integer Overflow Instead of Graceful Error Handling",
+                    "description": "The validation function uses `exact_in_amount.checked_add(min_rent).unwrap()` which will panic on overflow instead of returning a proper error. This violates proper error handling practices and could cause unexpected transaction failures.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unchecked Arithmetic Leading to Potential Underflow in Sell Flow",
+                    "description": "In the `complete_sell` function, the calculation `sell_amount_minus_fee = sell_result.sol_amount - fee_lamports` is performed without checked arithmetic. If fee_lamports is greater than sell_result.sol_amount, this will underflow, resulting in an incorrect (very large) value being transferred to the user.",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Race Condition Risk with init_if_needed Token Account",
+                    "description": "The `user_token_account` uses `init_if_needed` which creates the account during the transaction if it doesn't exist. This could lead to unexpected behavior if the account state is not properly validated before use, and the user pays for account creation without explicit consent in the transaction parameters.",
+                    "category": "CWE-664",
+                    "severity": "low",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Narrow Dev Buy Window Due to Exact Slot Comparison",
+                    "description": "The dev buy detection uses `clock.slot == bonding_curve.start_slot` which creates an extremely narrow window (single slot, ~400ms on Solana) for the creator to execute a fee-free buy. This exact equality comparison may not provide the intended functionality and could be missed due to network latency or transaction processing delays.",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Inconsistent Dev Buy Logic Across Validation and Handler",
+                    "description": "The dev buy logic (checking if caller is creator on start slot) is implemented in both the validation function and the handler function. This duplication creates potential for inconsistency if one is updated without the other, leading to control flow issues.",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

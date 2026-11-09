@@ -1,0 +1,76 @@
+{
+    "project": "2024-11-orgaandmerk-securityreview.pdf.json",
+    "files": [
+        "dataset/contracts/2024-11-orgaandmerk-securityreview.pdf.json/src/merk/store.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-372",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-284",
+        "CWE-707",
+        "CWE-435",
+        "CWE-697"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Interrupted snapshots can lead to inconsistent state",
+            "description": "When Tendermint switches to a new snapshot during state sync, the Orga implementation fails to reset the existing sync state, leading to inconsistent on-disk state and panics. The root cause is the failure to clear the Restorer state upon receiving a new OfferSnapshot request. As a result, new chunks from honest peers are rejected due to verification failures against a partially constructed tree. A malicious node could serve old chunks under a new snapshot, making synchronization appear successful while resulting in a mismatch between block height and app hash. The impact is node crashes, indefinite hangs, and failure to synchronize, degrading network reliability.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract contains several security-relevant issues based on the provided CWE list. \n\nFirst, in the `offer_snapshot` function, there is a critical comparison vulnerability. The function compares `calc_app_hash(snapshot.hash.to_vec().as_slice())` with `req.app_hash`, but `calc_app_hash` applies SHA-512/256 to \"ibc\" || merkle_root. However, `snapshot.hash` is already expected to be a Merkle root (or app hash), and the comparison logic may be flawed because it double-hashes or misinterprets the app hash. This could allow a malicious snapshot to be accepted if the hash is crafted to exploit incorrect comparison logic, leading to a potential consensus split or state corruption.\n\nSecond, the `apply_snapshot_chunk` function lacks proper validation of the snapshot chunk data before processing. It directly passes the chunk to `restorer.process_chunk`, which could lead to resource exhaustion or malformed data processing if not properly validated. This is especially critical during state sync, where untrusted peers provide snapshot chunks.\n\nThird, the `commit` function creates snapshots only if the block is recent (within 10 seconds of current time). This time-based condition introduces non-determinism and could be manipulated by validators with skewed clocks, leading to inconsistent snapshot creation across nodes (CWE-435: Improper Interaction Between Multiple Correctly-Behaving Entities).\n\nFourth, the `write` function does not validate whether the Merk store is in a valid state before applying batch operations. If a restore operation is in progress, writes could interfere, leading to inconsistent state.\n\nFinally, there is no access control on state-modifying functions like `commit`, `apply_snapshot_chunk`, or `write`. These are called from ABCI interface which should be trusted, but missing explicit checks could lead to improper access if the interface is exposed incorrectly (CWE-284).\n",
+            "findings": [
+                {
+                    "title": "Incorrect Comparison in Snapshot Offer Validation",
+                    "description": "The `offer_snapshot` function incorrectly compares the application hash by re-hashing the snapshot hash through `calc_app_hash`, which prepends 'ibc' and hashes it again. However, `req.app_hash` is expected to already be the correct app hash. This double-hashing or mismatched hashing logic leads to an incorrect comparison that could allow malicious or invalid snapshots to be accepted, breaking consensus integrity.",
+                    "category": "CWE-697",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Missing Input Validation in Snapshot Chunk Application",
+                    "description": "The `apply_snapshot_chunk` function does not validate the size, format, or integrity of incoming snapshot chunks before passing them to the `Restorer`. This could allow resource exhaustion or deserialization errors when processing untrusted data during state sync, potentially leading to denial of service.",
+                    "category": "CWE-707",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Time-Dependent Snapshot Creation Leads to Non-Determinism",
+                    "description": "The `commit` function only creates snapshots if the block time is within 10 seconds of the current system time. This introduces non-deterministic behavior across nodes with different clock skews, potentially causing some nodes to create snapshots while others do not, violating consensus requirements for deterministic state transitions.",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Lack of Access Control on State-Modifying Functions",
+                    "description": "Functions like `commit`, `apply_snapshot_chunk`, and `write` do not perform any access control checks to ensure they are only called from authorized contexts (e.g., ABCI interface with proper validation). While these are intended to be internal, the lack of explicit checks increases the risk of unintended state modifications if the interface is misused.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

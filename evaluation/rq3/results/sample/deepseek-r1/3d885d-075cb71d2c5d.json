@@ -1,0 +1,104 @@
+{
+    "project": "Raum Network Audit Report - QuillAudits.pdf.json",
+    "files": [
+        "dataset/contracts/Raum Network Audit Report - QuillAudits.pdf.json/corecontracts/token/src/balance.rs",
+        "dataset/contracts/Raum Network Audit Report - QuillAudits.pdf.json/corecontracts/token/src/allowance.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3333333333333333,
+        "recall": 1.0,
+        "f1": 0.5
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-190",
+        "CWE-682",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Possibility of overflow and underflow when performing arithmetic operations",
+            "description": "1. **Description:** Several functions in the codebase use native arithmetic operations (+, -) without bounds checking, creating potential for integer overflow or underflow.\n2. **Cause:** The use of unchecked arithmetic in functions like `receive_balance`, `spend_balance`, `spend_allowance`, and `add_pair_to_all_pairs` can result in unexpected behavior when values exceed i128 limits or go below zero.\n3. **Exploitation:** An attacker could craft transactions that cause balances or counters to overflow or underflow, potentially leading to incorrect state updates or denial of service.\n4. **Impact:** This could result in corrupted state, incorrect balance tracking, or contract malfunction, though the risk is mitigated as the issue has been resolved.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract contains two critical CWE-682 vulnerabilities. First, the balance functions (`receive_balance` and `spend_balance`) allow negative amounts, reversing their core logic (e.g., negative `receive_balance` acts as spending) and risking overflow in `receive_balance`. Second, the allowance functions (`write_allowance` and `spend_allowance`) permit negative amounts, enabling malicious allowance manipulation (e.g., increasing allowances via negative spending). These violate token integrity by enabling unauthorized balance/allowance changes.\n",
+            "findings": [
+                {
+                    "title": "Lack of Amount Validation and Overflow Check in Balance Functions",
+                    "description": "`receive_balance` and `spend_balance` fail to validate `amount >= 0`. Negative amounts reverse core logic:\n- Negative `receive_balance` decreases balances (unauthorized spending).\n- Negative `spend_balance` increases balances (unauthorized minting).\nAdditionally, `receive_balance` lacks overflow checks (`balance + amount`), risking integer overflow.\n",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Lack of Amount Validation in Allowance Functions",
+                    "description": "`write_allowance` allows negative allowance amounts, and `spend_allowance` fails to validate `amount >= 0`. \nThis enables:\n- Setting negative allowances (violating token standards).\n- Increasing allowances by spending negative amounts (e.g., `spend_allowance(..., -100)` *adds* 100 to the allowance).\n",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.95
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract contains multiple integer overflow and underflow vulnerabilities in balance and allowance functions due to unchecked arithmetic operations and lack of input validation. Specifically:\n- `receive_balance` allows positive amounts causing overflow (CWE-190) and negative amounts causing underflow (CWE-191).\n- `spend_balance` permits negative amounts leading to overflow (CWE-190).\n- `spend_allowance` accepts negative amounts resulting in overflow (CWE-190).\nThese issues can corrupt balances/allowances, enable token theft, or cause denial of service.\n",
+            "findings": [
+                {
+                    "title": "Integer Overflow in `receive_balance` for Positive Amounts",
+                    "description": "The function `receive_balance` adds `amount` to the balance without overflow checks, risking wraparound if the sum exceeds `i128::MAX`.",
+                    "category": "CWE-190",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Integer Underflow in `receive_balance` for Negative Amounts",
+                    "description": "The function `receive_balance` allows negative `amount` values, potentially causing underflow (wraparound) when adding large negative values to a negative balance.",
+                    "category": "CWE-191",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Integer Overflow in `spend_balance` for Negative Amounts",
+                    "description": "The function `spend_balance` accepts negative `amount` values, converting subtraction into addition. This risks overflow if the result exceeds `i128::MAX`.",
+                    "category": "CWE-190",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Integer Overflow in `spend_allowance` for Negative Amounts",
+                    "description": "The function `spend_allowance` permits negative `amount` values, turning subtraction into addition. This can cause overflow if the new allowance exceeds `i128::MAX`.",
+                    "category": "CWE-190",
+                    "severity": "critical",
+                    "confidence": 0.95
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-1335",
+            "CWE-1339",
+            "CWE-190",
+            "CWE-191",
+            "CWE-128",
+            "CWE-135",
+            "CWE-369",
+            "CWE-193"
+        ]
+    ]
+}

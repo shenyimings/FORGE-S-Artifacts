@@ -1,0 +1,137 @@
+{
+    "project": "628b07305b8820cc04fba580_624a49f3a51dfbdbbf74ff09_Soteria UXD Audit Report Final.pdf.json",
+    "files": [
+        "dataset/contracts/628b07305b8820cc04fba580_624a49f3a51dfbdbbf74ff09_Soteria UXD Audit Report Final.pdf.json/programs/uxd/src/instructions/mango_dex/mint_with_mango_depository.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2222222222222222,
+        "recall": 1.0,
+        "f1": 0.3636363636363636
+    },
+    "cwe_ground_truth": [
+        "CWE-703",
+        "CWE-754"
+    ],
+    "cwe_detected": [
+        "CWE-393",
+        "CWE-755",
+        "CWE-682",
+        "CWE-691",
+        "CWE-435",
+        "CWE-703",
+        "CWE-754"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "[I-3] unhandled corner scenario in mint_with_mango_depository",
+            "description": "The mint_with_mango_depository function does not properly handle cases where the collateral amount is less than the perp market's base lot size. The cause is the absence of a pre-check before computing the base lot amount, leading to a division result that floors to zero. This results in a quantity of 0 being passed to mango_program::place_perp_order, which reverts with MangoErrorCode::InvalidParam. The impact is a denial of service for small deposits, preventing users from minting UXD with low collateral. This could affect user experience and onboarding but does not lead to fund loss.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The instruction is publicly callable and performs several security-critical CPIs into Mango (deposit + place_perp_order) followed by minting UXD redeemables. The main risks arise from (1) insufficient validation/constraints on user-supplied Mango accounts/markets, which can let an arbitrary caller steer the depository into unintended markets/parameters and potentially mint redeemables while leaving the protocol with an unsafe hedge, and (2) control-flow/validation gaps where a `validate()` routine exists but is not invoked, enabling edge-case inputs that may trigger unexpected CPI behavior or instruction failure. Additionally, the soft-cap enforcement appears to compare only the per-transaction delta rather than cumulative minted exposure, which is likely an incorrect calculation if the cap is intended as a total limit. Finally, rounding to lots combined with unconditional WSOL ATA closure can create exceptional-condition failures (self-DoS / griefing) when non-zero dust remains.\n",
+            "findings": [
+                {
+                    "title": "User-controlled Mango perp market/orderbook accounts can steer protocol hedging into unintended markets",
+                    "description": "The instruction accepts Mango accounts (`mango_group`, `mango_cache`, `mango_perp_market`, `mango_bids`, `mango_asks`, `mango_event_queue`, banks/vaults) as largely unconstrained `AccountInfo`. The program then derives `PerpInfo` from these inputs and places an IOC perp order using the depository PDA as the Mango owner.\n\nThere is no explicit constraint tying `mango_perp_market` (and its orderbooks/event queue) to the depository’s configured collateral/perp market. An attacker can supply a different perp market within the same Mango group (or otherwise valid-looking accounts) and force the depository to open a short in an unintended asset. The redeemable amount minted is derived from the resulting perp quote delta (minus fees), so the user can receive redeemables while the protocol inherits a potentially unsafe/incorrect hedge and liquidation risk.\n\nThis is an integration/access-control issue: the caller effectively controls which external market the protocol trades on, without the UXD program enforcing the intended market mapping.\n",
+                    "category": "CWE-435",
+                    "severity": "critical",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "`validate()` exists but is never called in `handler`, allowing unchecked inputs and edge-case CPI behavior",
+                    "description": "A `validate(&self, collateral_amount, slippage)` method is implemented, but `handler()` never calls it. Unless Anchor is invoking it elsewhere (not shown), inputs like `slippage == 0`, `slippage > SLIPPAGE_BASIS`, `collateral_amount == 0`, or insufficient user collateral are not prevented at the start of execution.\n\nThis can lead to unexpected control flow and exceptional conditions later (e.g., creating a 0-lot order, Mango CPI rejection, or other downstream errors), and undermines intended protection mechanisms around slippage and balance checks.\n",
+                    "category": "CWE-691",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Soft-cap check appears to enforce only per-transaction delta, not cumulative exposure (cap bypass)",
+                    "description": "`check_mango_depositories_redeemable_soft_cap_overflow()` enforces:\n  `redeemable_delta <= controller.mango_depositories_redeemable_soft_cap`\nThis compares only the current mint's delta to the soft cap. If the intended meaning of `mango_depositories_redeemable_soft_cap` is a cumulative cap across all Mango depositories/mints (as the name suggests), then this is an incorrect calculation that can be bypassed by splitting mints across multiple transactions, exceeding the intended limit while always keeping each individual `redeemable_delta` under the cap.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Rounding-to-lots plus unconditional WSOL ATA close can trigger unexpected failures (dust prevents close)",
+                    "description": "The program computes `planned_collateral_delta` by flooring to base lots:\n  `base_lot_amount = floor(collateral_amount / base_lot_size)`\n  `planned_collateral_delta = base_lot_amount * base_lot_size`\nIt transfers/deposits only `planned_collateral_delta`, not `collateral_amount`.\n\nIf the collateral mint is WSOL, the code then unconditionally attempts to close `user_collateral` (the WSOL ATA). If the user funded exactly `collateral_amount` (or otherwise has remaining WSOL), rounding can leave a non-zero remainder in the ATA, causing `token::close_account` to fail and revert the instruction.\n\nThis is an exceptional-condition/edge-case handling issue that can cause avoidable instruction failures and can be used for griefing a sponsoring `payer` (wasting compute/fees) in transactions where `payer` is distinct from `user`.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Missing explicit check that computed perp order quantity/planned collateral delta is non-zero",
+                    "description": "Because the order size is floored to lots, small `collateral_amount` values can produce `base_lot_amount == 0`, yielding `perp_order.quantity == 0` and `planned_collateral_delta == 0`. The code proceeds to:\n- transfer 0 tokens\n- Mango deposit 0\n- place a perp order with quantity 0\n\nDepending on Mango's internal validation, this may error unexpectedly (or behave inconsistently), creating unnecessary failure modes. A simple pre-check (e.g., `planned_collateral_delta > 0` and `perp_order.quantity > 0`) would prevent these exceptional paths.\n",
+                    "category": "CWE-703",
+                    "severity": "low",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The instruction performs several CPI calls (SPL Token + Mango) and derives critical amounts from user input. From the candidate CWE root causes, the main issues are (1) missing/unused argument validation leading to unusual/invalid inputs being processed, (2) rounding-to-lot behavior that can silently turn a positive `collateral_amount` into a 0-quantity order and return Ok (behavioral “wrong status”), and (3) unconditional WSOL ATA closing that can fail under common conditions (non-zero remaining WSOL), creating a denial-of-service style failure path. No evidence of “generic exception throwing” (CWE-397) was found in this snippet, and most malformed Mango accounts are expected to be rejected by Mango’s own checks during CPI, though local syntactic validation is incomplete.\n",
+            "findings": [
+                {
+                    "title": "Input validation function exists but is not enforced (invalid slippage / amount accepted)",
+                    "description": "The `MintWithMangoDepository` struct defines a `validate(&self, collateral_amount, slippage)` method that checks:\n- `slippage > 0 && slippage <= SLIPPAGE_BASIS`\n- `collateral_amount > 0`\n- `user_collateral.amount >= collateral_amount`\nHowever, `handler()` never calls `ctx.accounts.validate(...)`, nor is there an `#[access_control(...)]` attribute shown that would cause Anchor to invoke it automatically.\n\nAs a result, syntactically/semantically invalid inputs (e.g., `slippage == 0`, `collateral_amount == 0`, or `collateral_amount` exceeding the user's balance) may reach deeper logic and CPI calls. Depending on downstream behavior, this can lead to unexpected no-ops, confusing error surfaces, or inconsistent handling relative to the intended specification.\n",
+                    "category": "CWE-754",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Positive collateral_amount can be rounded down to a 0-lot order and still return Ok (silent no-op mint)",
+                    "description": "The base lot amount is computed as:\n  base_lot_amount = floor(collateral_amount / base_lot_size)\nand then used as `perp_order.quantity`.\n\nIf `collateral_amount` is smaller than `perp_info.base_lot_size` (or otherwise not enough for 1 lot), `base_lot_amount` becomes 0. This cascades into:\n- `planned_collateral_delta` = 0\n- SPL transfer of 0\n- Mango deposit of 0\n- Mango place_perp_order with quantity 0 (may succeed as a no-op, or fail depending on Mango)\n- `redeemable_delta` becomes 0 and `mint_to` is invoked with 0\n\nIn the success/no-op case, the instruction returns `Ok(())` even though the caller provided a non-zero `collateral_amount` and likely expected minting to occur. This is effectively a “wrong status” / misleading success outcome caused by missing checks for the unusual condition “order quantity == 0” after lot rounding (e.g., should reject with an explicit error like “amount too small”).\n",
+                    "category": "CWE-393",
+                    "severity": "low",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Missing check for unusual condition: 0-lot order after lot rounding",
+                    "description": "Closely related to the previous issue, the code does not explicitly check that `base_lot_amount >= 1` after computing:\n  let base_lot_amount = floor(collateral_amount / base_lot_size);\n\nTreating lot rounding as a valid path without an explicit guard is an “unusual/exceptional condition” that is not expected in normal operation but can happen frequently with small deposits. It should be handled explicitly to avoid confusing behavior and to prevent downstream CPIs from being invoked with degenerate parameters.\n",
+                    "category": "CWE-754",
+                    "severity": "low",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "WSOL unwrap path can fail by attempting to close a non-empty WSOL ATA (DoS/failure under common balances)",
+                    "description": "If `depository.collateral_mint` is native mint, the code unconditionally attempts to unwrap WSOL by closing the user's collateral ATA:\n  token::close_account(account = user_collateral, ...)\n\nClosing a token account requires its token amount to be zero. But this instruction transfers only `planned_collateral_delta`, not the entire WSOL balance. If the user has more WSOL in `user_collateral` than `planned_collateral_delta`, the remaining balance will be non-zero and `close_account` will fail, reverting the whole transaction.\n\nThis is improper handling of an exceptional/unusual condition (non-empty ATA) that can occur naturally and will cause user transactions to fail unexpectedly. A safer pattern is to only close when the post-transfer amount is zero, or to provide an explicit opt-in unwrap flag and/or unwrap from a dedicated temporary WSOL account created for this instruction.\n",
+                    "category": "CWE-755",
+                    "severity": "medium",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "Reviewed the instruction implementation and its helper methods specifically for the provided CWE root causes (CWE-394/253/252/354/273).\n\nAll CPI calls that return a Result (SPL Token `transfer`, `mint_to`, `close_account`; Mango CPI `deposit`, `place_perp_order`; Mango account load `MangoAccount::load_checked`) are consistently handled with `?`, so errors are propagated and not silently ignored (mitigating CWE-252/CWE-253).\n\nPost-conditions that depend on CPI effects (e.g., “order fully filled”) are validated by reloading Mango state and performing explicit checks. No “unexpected success” return values were observed being accepted without additional validation (no clear CWE-394 instance).\n\nNo integrity/checksum fields are present/validated in this code path (so no CWE-354 instances can be substantiated from this snippet).\n\nNo privilege-dropping operations exist in this Solana/Anchor instruction context (no CWE-273 instances).\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-393",
+            "CWE-228",
+            "CWE-755",
+            "CWE-754",
+            "CWE-397"
+        ],
+        [
+            "CWE-394",
+            "CWE-253",
+            "CWE-354",
+            "CWE-252",
+            "CWE-273"
+        ]
+    ]
+}

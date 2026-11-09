@@ -1,0 +1,74 @@
+{
+    "project": "blocksec_burrow_v2.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrow_v2.0_signed.pdf.json/contract/src/prices.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-693"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-710",
+        "CWE-435"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "The freshness of PriceData should be checked",
+            "description": "The contract does not validate the timestamp of PriceData received from the oracle when converting it to Prices. The PriceData struct contains a timestamp and recency_duration_sec field, but these are not used in the From<PriceData> for Prices implementation. This means stale or outdated price data could be accepted without verification. The root cause is missing freshness validation logic. An attacker could manipulate or delay oracle updates to use outdated prices, then perform actions like borrowing or liquidating at favorable rates. This could allow over-borrowing against depreciated collateral or unfair liquidation of positions, leading to significant financial losses for the protocol and users.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code trusts upstream `PriceData` too much and uses `expect()` in multiple places. In a smart-contract context, panics typically abort execution (transaction failure) and can be weaponized for denial-of-service if an attacker can influence the inputs. Additionally, the conversion logic intentionally drops entries with `None` prices, while a later accessor (`get_unwrap`) assumes the price must exist and panics otherwise—this mismatch is an integration/interaction hazard when multiple components behave “correctly” in isolation but fail when combined. Finally, relying on `expect()`/panics rather than explicit error handling is generally considered poor defensive coding practice for on-chain programs.\n",
+            "findings": [
+                {
+                    "title": "Panic on missing price via `get_unwrap` enables denial-of-service",
+                    "description": "`Prices::get_unwrap` calls:\n`self.prices.get(token_id).expect(\"Asset price is missing\")`.\nIf `token_id` is absent (e.g., because it was never provided or was filtered out during conversion), the program panics and aborts execution. If an attacker can influence which tokens are queried or can cause a token’s price to be missing, they can reliably force transaction failures (DoS) for any instruction path that calls `get_unwrap`.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Panic on invalid `asset_id` during conversion from `PriceData`",
+                    "description": "In `From<PriceData> for Prices`, the code does:\n`AccountId::try_from(asset_id).expect(\"Asset is not a valid token ID\");`.\nAny malformed/unexpected `asset_id` triggers a panic, aborting execution. If `PriceData` originates from an external feed, CPI, deserialization boundary, or user-provided input, an attacker can craft data that consistently crashes the conversion, causing a denial-of-service and preventing state transitions that depend on price loading.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Mismatch between filtering out `None` prices and later unconditional unwrap",
+                    "description": "The conversion filters out entries where `price` is `None`:\n`price.map(|price| (token_id, price))`, which drops assets without prices.\nLater, `get_unwrap` assumes every queried asset must exist and panics if it does not.\nEach component is internally “reasonable” (filter missing data; unwrap when required), but together they create a fragile integration point where legitimate `None` values (or intentionally omitted prices) lead to runtime aborts. This is an interaction flaw that can be exploited to induce failures by ensuring a required asset’s price is absent.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.63
+                },
+                {
+                    "title": "Use of `expect()` for control flow is non-defensive and increases exploitability",
+                    "description": "The code uses `expect()` in multiple places to handle invalid/missing data. On-chain programs should generally avoid panics and instead return explicit, typed errors so callers can handle failures and so malicious inputs cannot trivially force aborts. This is an adherence-to-standards issue that increases the severity/likelihood of the DoS vectors above.\n",
+                    "category": "CWE-710",
+                    "severity": "low",
+                    "confidence": 0.66
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

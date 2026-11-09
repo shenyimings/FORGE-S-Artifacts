@@ -1,0 +1,180 @@
+{
+    "path": "reports-without-source/KanpaiPandas-LzAppONFT-Security-Review.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/LzApp/LzApp-ONFT"
+        ],
+        "commit_id": [
+            "5118ac635033f3b23d31724661337e7feb7e6559"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-09-25",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Mint decimal manipulation through MintCloseAuthority leads to inflation of ld2sd_rate",
+            "description": "1. **Description:** The ld2sd_rate (local-to-shared decimal rate) can be manipulated by the initializer by exploiting the MintCloseAuthority extension in the Solana program. This allows the admin to change the mint's decimal value after creation, leading to critical discrepancies in token accounting.\n2. **Cause:** The vulnerability arises because the initializer controls the mint’s decimal value and can close and reinitialize the mint with a different decimal count, while the program continues to use the original ld2sd_rate.\n3. **Exploitation:** An attacker can close the original mint (with high decimals), reinitialize it with fewer decimals, and exploit the inflated ld2sd_rate to manipulate token amounts during transfers or cross-chain operations.\n4. **Impact:** This can result in financial exploits such as treating large transfers as dust or enabling arbitrage across chains due to rate discrepancies, leading to significant financial loss.\n",
+            "severity": "critical",
+            "location": [
+                "lib.rs::InitAdapterONft#apply",
+                "instructions/init_oft.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Denial of Service Risk Due to Frozen token_escrow in ONFT::Adapter",
+            "description": "1. **Description:** The init_ONft instruction does not validate whether the token_mint has a freeze_authority, allowing initialization of tokens that can be frozen.\n2. **Cause:** Lack of validation during initialization permits the use of SPL tokens with a freeze_authority, which can freeze the token_escrow account.\n3. **Exploitation:** An attacker or malicious issuer could freeze the token_escrow, preventing any further token transfers into it.\n4. **Impact:** This results in a Denial of Service (DoS), rendering the ONFT unusable for transfers, as all send operations would revert when attempting to deposit into the frozen escrow.\n",
+            "severity": "high",
+            "location": [
+                "instructions/init_adapter_oft.rs::InitAdapterONft#apply",
+                "instructions/send.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Unchecked Math Operations Leading to Potential Arithmetic Errors",
+            "description": "1. **Description:** Multiple instances in the code use unchecked arithmetic operations, which can lead to overflow or underflow.\n2. **Cause:** The use of raw arithmetic (e.g., `+`, `*`) without safe math checks in critical calculations, such as rate limiting logic.\n3. **Exploitation:** An attacker could manipulate time or amount inputs to trigger integer overflow or underflow, leading to incorrect state updates.\n4. **Impact:** This could result in unintended behavior, such as bypassing rate limits or corrupting internal accounting, potentially leading to resource exhaustion or financial loss.\n",
+            "severity": "medium",
+            "location": [
+                "state/onft.rs",
+                "instructions/rate_limit.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Unlimited Decimals of Local Token Mints Result in DoS and Potential Overflow",
+            "description": "1. **Description:** The protocol does not enforce a limit on the number of decimals for local token mints, which can lead to overflow in u64 arithmetic.\n2. **Cause:** The ld2sd_rate is calculated using `10u64.pow(decimals_diff)`, and the sd2ld function performs unchecked multiplication, risking overflow.\n3. **Exploitation:** An attacker could initialize a token with high decimals (e.g., 18) and trigger a large cross-chain transfer, causing the sd2ld conversion to overflow.\n4. **Impact:** This can cause transaction failures (DoS) or arithmetic overflows, disrupting cross-chain functionality and potentially locking funds.\n",
+            "severity": "medium",
+            "location": [
+                "instructions/init_oft.rs::init",
+                "state/onft.rs::sd2ld"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing Size Checks for compose_msg can Lead to Oversized Messages and Transaction Failures",
+            "description": "1. **Description:** The compose_msg parameter in encoding functions lacks size validation, risking oversized transactions.\n2. **Cause:** The encode function in msg_codec.rs and compose_msg_codec.rs does not enforce a maximum message size.\n3. **Exploitation:** An attacker could craft a message with excessive size, exceeding Solana’s 1232-byte transaction limit.\n4. **Impact:** This leads to transaction failures or Denial of Service, especially in cross-chain operations where message propagation is critical.\n",
+            "severity": "medium",
+            "location": [
+                "msg_codec.rs::encode",
+                "compose_msg_codec.rs::encode",
+                "instructions/lz_receive.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Require New Admin as Co-signer for Admin Setting in transfer_admin instruction",
+            "description": "1. **Description:** The transfer_admin instruction allows setting a new admin without requiring their signature, risking accidental or invalid transfers.\n2. **Cause:** No validation or co-signature requirement for the new admin during the transfer process.\n3. **Exploitation:** The current admin could mistakenly set an invalid or unreachable address as the new admin, resulting in permanent loss of control.\n4. **Impact:** Loss of administrative control over the ONFT configuration, preventing critical updates or emergency responses.\n",
+            "severity": "low",
+            "location": [
+                "instructions/transfer_admin.rs::TransferAdmin"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "Inconsistent compose_msg Function Implementation May Lead to Silent Failures",
+            "description": "1. **Description:** Two versions of the compose_msg function exist with differing return behaviors—one returns Option<Vec<u8>>, the other returns an empty Vec on short input.\n2. **Cause:** Inconsistent error handling between msg_codec.rs and compose_msg_codec.rs implementations.\n3. **Exploitation:** If the unsafe version is used, it may return an empty message instead of signaling an error, leading to silent failures in message processing.\n4. **Impact:** Potential for unexpected behavior or failed cross-chain messages if the wrong function is used, especially in future code changes.\n",
+            "severity": "low",
+            "location": [
+                "msg_codec.rs::compose_msg",
+                "compose_msg_codec.rs::compose_msg"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Lack of Pause Functionality for Cross-Chain Token Transfers Could Lead to Security Risks",
+            "description": "1. **Description:** The protocol lacks a mechanism to pause cross-chain token transfers, which is a standard security practice.\n2. **Cause:** No paused flag or pauser role is implemented in the ONftConfig structure.\n3. **Exploitation:** In the event of an exploit or malicious activity, there is no way to halt cross-chain operations to prevent further damage.\n4. **Impact:** Increased risk during emergencies, as the protocol cannot be quickly secured, potentially leading to widespread losses.\n",
+            "severity": "low",
+            "location": [
+                "state/onft.rs::ONftConfig",
+                "instructions/send.rs",
+                "instructions/lz_receive.rs"
+            ],
+            "files": []
+        }
+    ]
+}

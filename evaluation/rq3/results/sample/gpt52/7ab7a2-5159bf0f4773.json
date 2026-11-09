@@ -1,0 +1,160 @@
+{
+    "project": "12_04_2024_Manifest-FV-MR.pdf.json",
+    "files": [
+        "dataset/contracts/12_04_2024_Manifest-FV-MR.pdf.json/programs/manifest/src/program/processor/shared.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-807",
+        "CWE-664",
+        "CWE-118",
+        "CWE-778",
+        "CWE-703",
+        "CWE-400",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "expand_global() expands the account’s memory by the wrong size",
+            "description": "The expand_global() function incorrectly calls expand_global_fixed(), which expands the account by 80 bytes (market block size) instead of the correct 64 bytes (global account block size). This leads to inefficient memory usage, increased transaction costs, and reduced capacity for traders in the global account. The root cause is a hardcoded size mismatch. While the impact per expansion is small, it accumulates and wastes resources. The issue is exploitable by any user initiating a global expansion, leading to higher fees and earlier exhaustion of account space.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code implements account resizing (transfer lamports for rent + realloc) and generic parsing of a “fixed header + dynamic bytes” layout. From the provided snippet alone, the main security-relevant risks stem from (1) expanding account data without zero-initializing newly-added bytes, and (2) parsing/splitting raw account data without validating the buffer is large enough for the expected fixed-size header, which can trigger panics/aborts. These issues map primarily to CWE-664 (resource lifetime/control of memory contents across reallocation) and CWE-703 (exceptional conditions like undersized buffers not handled). A smaller defense-in-depth issue is relying on external validation for the system program / ownership invariants without local assertions; if upstream validation is ever bypassed or reused incorrectly, CPI/realloc paths can fail in unexpected ways.\n",
+            "findings": [
+                {
+                    "title": "Realloc without zero-initialization can expose stale/unexpected bytes after expansion",
+                    "description": "In `expand_dynamic`, the account is resized via `expandable_account.realloc(new_size, false)?;` with `zero_init = false`.\n\nOn Solana, when `zero_init` is false, the newly allocated region is not guaranteed to be zeroed. If subsequent logic (e.g., `market_expand()` / `global_expand()` or other readers of the dynamic region) assumes the new bytes are zero, it may:\n- Interpret garbage/stale bytes as valid state (e.g., lengths, flags, counters), enabling invariant breaks or unintended behavior.\n- Potentially leak prior contents if the runtime ever provides non-zeroed bytes (implementation-dependent), which is especially risky if the program stores sensitive material (keys, nonces) in account data.\n\nThis is a resource-lifetime/control issue: the program extends a memory-backed resource but does not maintain a safe initialization invariant over the newly created portion.\n",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Missing length/bounds validation when splitting account data can panic (DoS)",
+                    "description": "The helpers `get_dynamic_account`, `get_mut_dynamic_account`, and `get_dynamic_value` do:\n  - `data.split_at(size_of::<T>())` / `split_at_mut(size_of::<T>())`\nwithout first checking `data.len() >= size_of::<T>()`.\n\nIf an account is shorter than expected (e.g., malformed/incorrect account passed, partially initialized account, or an unexpected state migration edge-case), `split_at` will panic. In Solana BPF programs, panics abort the program execution, causing instruction failure (denial of service for that invocation).\n\nWhile upstream “account type validation” may usually prevent this, these functions are `pub` within the crate and can be reused in other contexts; the absence of local checks makes the code brittle and can turn rare exceptional conditions into hard failures.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.86
+                },
+                {
+                    "title": "Relies on external validation for system program/ownership invariants (defense-in-depth gap)",
+                    "description": "`expand_dynamic` assumes accounts were “already validated” and proceeds to:\n- CPI transfer (requires correct system program account in the invoke account list)\n- `realloc` (requires the target account be owned by the current program and writable)\n\nIf upstream validation is ever incomplete or a future refactor reuses `expand_dynamic` with weaker checks, the function can:\n- Fail unexpectedly (exceptional condition not anticipated locally), or\n- Attempt to operate on the wrong accounts (e.g., wrong system program account passed in the account list), creating fragile control flow and increasing the chance of integration errors.\n\nAdding explicit assertions (e.g., system program id match; target account owner == program id; target writable) would harden the function against misuse.\n",
+                    "category": "CWE-693",
+                    "severity": "low",
+                    "confidence": 0.6
+                }
+            ]
+        },
+        {
+            "reasoning": "The code provides helper routines to (1) decide whether an on-chain “dynamic account” needs to grow and (2) perform the growth via lamport top-up + realloc, and helpers to interpret account bytes as fixed+dynamic structures.\nFrom the listed CWE root causes, the main risks are:\n- The growth decision and growth size are derived from account state/metadata that can be influenced by transaction-provided accounts, and there is no hard cap on growth. This can enable lamport draining of a payer and/or DoS via unbounded resource consumption (CWE-807/CWE-400).\n- Multiple helpers assume the account data length is at least size_of::<T>() and use split_at/split_at_mut without checking, which will panic on short inputs, causing instruction failure (CWE-118).\n- Realloc is performed with `zero_init = false`, leaving newly-added bytes potentially uninitialized. If later logic interprets these bytes as structured data, it can cause state confusion and/or inadvertent disclosure of stale data (CWE-665).\n- Logging uses `trace!` and omits some security-relevant context (e.g., payer, previous size/lamports, instruction identity), and may be compiled out depending on build/config, reducing forensic value (CWE-778).\n",
+            "findings": [
+                {
+                    "title": "Unbounded account expansion can drain payer lamports / cause DoS",
+                    "description": "`expand_dynamic` increases account size by `MARKET_BLOCK_SIZE` each time and funds rent-exemption by transferring `lamports_diff` from `payer` to `expandable_account`. There is no maximum size cap, no upper bound on number of expansions per instruction/transaction, and no explicit policy check tying the payer’s consent to a bounded expansion.\n\nIn `expand_market_if_needed`, the expansion decision is based on reading `MarketFixed::has_free_block()` from account data. If an attacker can influence the account state such that `has_free_block()` remains false (or can repeatedly trigger calls), they can cause repeated expansions and rent top-ups, consuming payer lamports and compute/heap, leading to economic loss and/or denial of service.\n\nEven if upstream validation usually prevents this, the helper itself enforces no invariant such as:\n- maximum allowed `data_len`\n- expected account owner/program-derived address\n- expected authority over expansion costs\n",
+                    "category": "CWE-400",
+                    "severity": "high",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Security decision relies on untrusted account data without local invariant checks",
+                    "description": "`expand_market_if_needed` decides whether to expand using `fixed.has_free_block()` parsed from raw account bytes. This is a security-relevant decision because it triggers a lamport transfer from `payer` and a realloc of program state.\n\nThe code comments assume “Account types were already validated” and therefore do not re-verify ordering/ownership/authority in `expand_dynamic`. If any call path invokes these helpers without strict validation (or validation has gaps), a transaction can supply attacker-controlled accounts/data to influence the expansion decision and shift costs to an unsuspecting payer.\n",
+                    "category": "CWE-807",
+                    "severity": "high",
+                    "confidence": 0.68
+                },
+                {
+                    "title": "Panic/abort possible due to missing length checks before split_at/split_at_mut",
+                    "description": "The following functions do not check that `data.len() >= size_of::<T>()` before calling `split_at`/`split_at_mut`:\n- `get_dynamic_account`\n- `get_mut_dynamic_account`\n- `get_dynamic_value`\n\nIf invoked on an account (or byte slice) that is shorter than `size_of::<T>()`, these will panic, aborting the program execution for that instruction. This can be used as a denial-of-service vector against instructions that call these helpers with insufficiently validated accounts.\n",
+                    "category": "CWE-118",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Realloc performed without zero-initializing newly added bytes",
+                    "description": "`expandable_account.realloc(new_size, false)?;` grows the account without zero-initializing the additional bytes. If subsequent logic assumes newly-added dynamic regions are zeroed (or parses them as `Pod`/structured data), the program may read uninitialized/stale bytes, causing incorrect state interpretation or unintended data exposure.\n\nSafer patterns include `realloc(new_size, true)` or explicitly writing/initializing the new region before any parsing.\n",
+                    "category": "CWE-665",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Insufficient/unstable logging for security-critical expansion events",
+                    "description": "Expansion triggers a lamport transfer and realloc, but logging is via `trace!` and includes only `lamports_diff`, `new_size`, and the expandable account key. Depending on build configuration, `trace!` may be disabled/omitted, and important forensic details are missing (e.g., payer pubkey, pre/post lamports and length, which instruction triggered expansion).\n\nThis weakens incident response and auditing around a security-sensitive operation (funding + resizing state).\n",
+                    "category": "CWE-778",
+                    "severity": "low",
+                    "confidence": 0.55
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-757",
+            "CWE-221",
+            "CWE-807",
+            "CWE-393",
+            "CWE-656",
+            "CWE-778",
+            "CWE-911",
+            "CWE-495",
+            "CWE-118",
+            "CWE-1229",
+            "CWE-345",
+            "CWE-397",
+            "CWE-404",
+            "CWE-673",
+            "CWE-704",
+            "CWE-913",
+            "CWE-228",
+            "CWE-669",
+            "CWE-410",
+            "CWE-580",
+            "CWE-501",
+            "CWE-665",
+            "CWE-424",
+            "CWE-357",
+            "CWE-662",
+            "CWE-755",
+            "CWE-496",
+            "CWE-666",
+            "CWE-655",
+            "CWE-311",
+            "CWE-327",
+            "CWE-706",
+            "CWE-922",
+            "CWE-330",
+            "CWE-1329",
+            "CWE-668",
+            "CWE-754",
+            "CWE-182",
+            "CWE-400",
+            "CWE-487",
+            "CWE-610",
+            "CWE-184",
+            "CWE-358",
+            "CWE-326",
+            "CWE-654",
+            "CWE-372"
+        ]
+    ]
+}

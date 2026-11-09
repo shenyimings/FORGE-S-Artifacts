@@ -1,0 +1,157 @@
+{
+    "project": "tensor_foundation_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/tensor_foundation_audit_final.pdf.json/amm/program/src/instructions/sell_nft_token_pool.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.125,
+        "recall": 0.5,
+        "f1": 0.2
+    },
+    "cwe_ground_truth": [
+        "CWE-669",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-682",
+        "CWE-285",
+        "CWE-284",
+        "CWE-269",
+        "CWE-703",
+        "CWE-662"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Unfair Rent Distribution in order_vault",
+            "description": "The order_vault account's source_ta token account holds a rent-exempt reserve funded by the maker when creating an order. However, upon closing the order, the rent from this account is transferred to the taker regardless of who funded it. This occurs due to incorrect logic in the `return_rent` function, which calculates and transfers excess rent without considering the original funder. An attacker could exploit this by repeatedly taking expired or canceled orders to collect rent paid by makers. The impact is a loss of SOL for makers, though limited to rent amounts, resulting in unfair economic behavior and erosion of trust in the system.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract contains several security issues stemming from improper access control, incorrect calculations, and insufficient handling of exceptional conditions. First, the `owner` account is marked as mutable and used in critical operations without proper ownership or signature validation, allowing any caller to specify an arbitrary owner and potentially drain funds. Second, arithmetic operations use unchecked arithmetic via `unwrap_int!` and `unwrap_checked!`, risking integer underflows when subtracting fees or updating pool state, which could lead to miscalculations and loss of funds. Third, the function lacks proper validation of the `shared_escrow` account when it's present, relying on optional checks that may be bypassed if the CPI invocation fails silently or if constraints are not enforced strictly. Finally, the `try_autoclose_pool` function is called without validating whether the pool is actually empty or safe to close, which could allow premature closure and fund loss.\n",
+            "findings": [
+                {
+                    "title": "Improper Access Control on Owner Account",
+                    "description": "The `owner` account is an unchecked mutable account and is used as the destination for NFT transfers and fund withdrawals without enforcing signature or ownership checks. This allows any caller to set the `owner` to an arbitrary key, enabling unauthorized transfer of NFTs and theft of funds from the pool.",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Incorrect Calculation Due to Unchecked Arithmetic Operations",
+                    "description": "The code uses `unwrap_int!` and `unwrap_checked!` macros for arithmetic operations such as `checked_sub` without properly handling underflow conditions. For example, `pool.price_offset = unwrap_int!(pool.price_offset.checked_sub(1))` can underflow if `price_offset` is zero, leading to incorrect state and potential exploitation.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Insufficient Handling of Exceptional Conditions in Shared Escrow Validation",
+                    "description": "When a shared escrow is used, the code checks the account key but does not ensure the CPI to `WithdrawMarginAccountCpiTammCpi` succeeds or handles failure conditions. If the CPI fails, the function continues execution, potentially leading to inconsistent state or double spending.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Potential Premature Pool Closure Due to Missing State Validation",
+                    "description": "The `try_autoclose_pool` function is called at the end without verifying that the pool has no remaining assets or that all NFTs have been transferred. This could allow an attacker to force-close a pool with remaining value, resulting in loss of funds.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code contains several potential security issues that stem from the listed CWEs. After analyzing the code, three main vulnerabilities were identified:\n\n1. **Improper Authorization (CWE-285)**: The `owner` account is marked as mutable and is only checked via a comment stating `has_one = owner in pool`, but there is no actual enforcement in code that the `owner` account passed in matches the `owner` stored in the `pool` account. This allows an attacker to pass in any `owner` account and potentially receive the NFT or funds.\n\n2. **Improper Synchronization (CWE-662)**: The code performs multiple state updates and lamport transfers without ensuring atomicity or guarding against reentrancy. Although Solana's single-threaded execution mitigates traditional race conditions, improper ordering of operations (e.g., transferring funds before updating state) could lead to inconsistencies if combined with external program calls or CPIs that might alter state unexpectedly.\n\n3. **Improper Privilege Management (CWE-269)**: The `cosigner` account is optional and checked only if the pool has a cosigner, but the validation logic does not enforce that the `cosigner` must sign if present. Additionally, the `maker_broker` and `taker_broker` accounts are mutable and lack sufficient validation, allowing potential fee redirection to arbitrary accounts if not properly constrained.\n\nThese issues could allow unauthorized actors to receive NFTs or fees, disrupt accounting, or manipulate pool state.\n",
+            "findings": [
+                {
+                    "title": "Missing Owner Account Validation",
+                    "description": "The `owner` account in `SellNftTokenPool` is not validated against the `pool.owner` field. Although a comment claims `has_one = owner in pool`, no runtime check ensures that the provided `owner` account matches the one stored in the pool. This allows an attacker to specify any `owner` account and potentially receive the NFT in the transfer step.",
+                    "category": "CWE-285",
+                    "severity": "critical",
+                    "confidence": 0.99
+                },
+                {
+                    "title": "Risk of State and Balance Inconsistency Due to Lack of Atomic Updates",
+                    "description": "The instruction performs multiple operations including NFT transfers, fee deductions, and pool state updates. However, if any intermediate CPI fails, the state may be left in an inconsistent state. While Solana rolls back on failure, the order of operations (e.g., closing ATA accounts before all transfers) could lead to unbalanced account errors or potential exploitation if combined with malicious programs.",
+                    "category": "CWE-662",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Insufficient Validation of Cosigner and Broker Accounts",
+                    "description": "The `cosigner` is checked only if present, but the code does not enforce that it must sign the transaction when required. Additionally, the `maker_broker` and `taker_broker` accounts are mutable and only partially validated, allowing potential redirection of broker fees to untrusted accounts. This represents improper privilege and access control management.",
+                    "category": "CWE-269",
+                    "severity": "high",
+                    "confidence": 0.95
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-662",
+            "CWE-193",
+            "CWE-501",
+            "CWE-269",
+            "CWE-704",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-191",
+            "CWE-666",
+            "CWE-669",
+            "CWE-118",
+            "CWE-393",
+            "CWE-911",
+            "CWE-610",
+            "CWE-496",
+            "CWE-668",
+            "CWE-1270",
+            "CWE-372",
+            "CWE-190",
+            "CWE-923",
+            "CWE-673",
+            "CWE-1267",
+            "CWE-487",
+            "CWE-135",
+            "CWE-1229",
+            "CWE-706",
+            "CWE-369",
+            "CWE-228",
+            "CWE-397",
+            "CWE-404",
+            "CWE-913",
+            "CWE-221",
+            "CWE-665",
+            "CWE-495",
+            "CWE-922",
+            "CWE-128",
+            "CWE-1339",
+            "CWE-282",
+            "CWE-1329",
+            "CWE-400",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-410",
+            "CWE-754",
+            "CWE-1335",
+            "CWE-755",
+            "CWE-580"
+        ]
+    ]
+}

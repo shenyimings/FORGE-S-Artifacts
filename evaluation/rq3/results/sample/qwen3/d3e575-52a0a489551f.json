@@ -1,0 +1,84 @@
+{
+    "project": "04_10_2025_Texture2.0-MR-FV.pdf.json",
+    "files": [
+        "dataset/contracts/04_10_2025_Texture2.0-MR-FV.pdf.json/super-lendy/program/src/processor/reserve.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-697",
+        "CWE-345",
+        "CWE-20",
+        "CWE-1287",
+        "CWE-693"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-284",
+        "CWE-691"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "fees.curator_borrow_fee_rate_bps or fees.curator_performance_fee_rate_bps can't be set to 50% even though the comments say it should be",
+            "description": "1. **Description:** The code uses a strict greater-than check (`> 5000`) instead of greater-than-or-equal, preventing the fee from being set to exactly 50% (5000 basis points), despite comments indicating this should be allowed.\n\n2. **Cause:** A logic inconsistency between the code and its documentation due to the use of `> 5000` instead of `>= 5000`.\n\n3. **Exploitation:** Not exploitable in a malicious sense, but leads to confusion and incorrect configuration expectations.\n\n4. **Impact:** Misalignment between documentation and behavior can lead to incorrect fee settings and user confusion, reducing clarity and maintainability.\n"
+        },
+        {
+            "title": "reserve_mode or flash_loans_enabled can be set to arbitrary value",
+            "description": "1. **Description:** The `alter_reserve` function allows setting `mode` and `flash_loans_enabled` to any `u8` value without validation, even though only specific values (e.g., 0, 1) are meaningful.\n\n2. **Cause:** Lack of input validation on configuration parameters that are treated as enums or booleans in downstream logic.\n\n3. **Exploitation:** Setting invalid values could lead to undefined behavior or misinterpretation of the reserve state.\n\n4. **Impact:** Increases risk of configuration errors and potential logic bugs due to unvalidated inputs.\n"
+        },
+        {
+            "title": "Switchboard confidence interval is not utilized",
+            "description": "1. **Description:** The code checks for price staleness but does not use the confidence interval provided by the Switchboard oracle, which indicates the reliability of the price.\n\n2. **Cause:** Missing integration of the confidence interval in price validation logic.\n\n3. **Exploitation:** An attacker could influence or submit prices with high variance that pass staleness checks but are unreliable.\n\n4. **Impact:** Increases risk of using low-confidence prices in critical operations, potentially leading to incorrect financial decisions.\n"
+        },
+        {
+            "title": "The reward rule can be set to an arbitrary value",
+            "description": "1. **Description:** The `set_reward_rules` function does not validate the `reason` field of reward rules, which should only be 0 (borrowing) or 1 (liquidity).\n\n2. **Cause:** Missing input validation allows arbitrary values to be set for reward rule types.\n\n3. **Exploitation:** Setting invalid rule types could lead to undefined behavior or misattribution of rewards.\n\n4. **Impact:** Could result in incorrect reward distribution logic or future bugs if new code assumes valid values.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code contains several security issues related to access control, control flow management, and improper handling of exceptional conditions. \n\nFirst, in the `flash_borrow` and `flash_repay` functions, the validation of subsequent or preceding instructions relies on looping through the instruction list using unchecked arithmetic. In `flash_repay`, the loop decrements the instruction index with `i -= 1` without checking if `i` is already 0, which can cause an underflow (unsigned integer wraparound), leading to out-of-bounds memory access when calling `load_instruction_at_checked`. This is a critical control flow issue.\n\nSecond, the `claim_curator_performance_fees` and `claim_texture_performance_fees` functions allow fee claims only if the fee amount is non-zero, but they return `OperationCanNotBePerformed` instead of gracefully handling zero fees. While not exploitable directly, this constitutes improper handling of exceptional conditions, as zero fees are a valid state and should not be treated as an error.\n\nThird, the `propose_config` function allows resetting a proposal by setting `change_map == 0`, but it does not validate whether the caller is authorized to do so. This could allow unauthorized users to clear pending configuration changes, which is an access control issue.\n\nFinally, the `alter_reserve` function applies configuration changes without validating whether the new configuration maintains invariants such as price feed or IRM address compatibility, relying only on `can_be_applied_now`. However, no additional access control is enforced beyond curator verification, which may not be sufficient if the curator authority is misconfigured.\n",
+            "findings": [
+                {
+                    "title": "Unsigned Integer Underflow in flash_repay Instruction Validation",
+                    "description": "In the `flash_repay` function, when validating the presence of a prior `FlashBorrow` instruction, the loop decrements the index `i` without checking for zero, leading to a potential underflow when `i == 0`. This results in accessing instruction index `usize::MAX`, causing an out-of-bounds read via `load_instruction_at_checked`, which may lead to a panic or undefined behavior.",
+                    "category": "CWE-691",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Handling of Zero Fee Claims in Performance Fee Functions",
+                    "description": "The functions `claim_curator_performance_fees` and `claim_texture_performance_fees` reject fee claims when the calculated fee amount is zero by returning `OperationCanNotBePerformed`. This is incorrect behavior, as zero fees are a valid and expected condition. The system should allow the transaction to proceed without error in such cases to avoid unnecessary transaction failures.",
+                    "category": "CWE-703",
+                    "severity": "low",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Lack of Authorization Check When Resetting Config Proposals",
+                    "description": "The `propose_config` function allows resetting a configuration proposal by setting `change_map == 0` without verifying that the caller has the right to do so. While curator access is checked for general config changes, the reset operation could be exploited by unauthorized actors to clear pending proposals, potentially disrupting governance processes.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

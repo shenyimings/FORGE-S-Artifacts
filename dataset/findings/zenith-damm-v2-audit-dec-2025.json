@@ -1,0 +1,192 @@
+{
+    "path": "reports/zenith-damm-v2-audit-dec-2025.pdf",
+    "project_info": {
+        "url": "https://github.com/MeteoraAg/damm-v2",
+        "commit_id": "425cdd128ab139f97c4f2b855423b6290d5ac28b",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-11-28",
+        "project_path": "contracts/zenith-damm-v2-audit-dec-2025.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "Incorrect max fee validation for update_pool_fees",
+            "description": "The vulnerability arises because the `update_pool_fees` function validates the maximum fee using `get_max_fee_numerator(CURRENT_POOL_VERSION)` instead of basing it on the pool's actual version. This discrepancy allows a pool on version 0, which should have a maximum fee of 50%, to be incorrectly validated against version 1's limit of 99%, potentially allowing fees to exceed the intended cap. Although swaps clamp the fee according to the pool's version, the configuration-time validation is flawed. An attacker could exploit this by updating the pool fees to a value between 50% and 99% on a version 0 pool, violating the expected fee constraints. The impact includes incorrect fee governance and potential economic imbalance in the pool, though runtime swap safety limits mitigate direct fund loss.\n",
+            "severity": "medium",
+            "location": [
+                "fee_rate_limiter.rs#L419",
+                "fee_market_cap_scheduler.rs#L199",
+                "fee_time_scheduler.rs#L163"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/operator/ix_update_pool_fees.rs",
+                "programs/cp-amm/src/state/pool.rs",
+                "programs/cp-amm/src/base_fee/fee_market_cap_scheduler.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ],
+                "3": [
+                    "CWE-835"
+                ]
+            },
+            "title": "Infinite loop in validate_single_swap_instruction will cause swap TX to fail",
+            "description": "The `validate_single_swap_instruction` function contains a nested loop where both the outer and inner loops use the same index variable `i`. This causes the inner loop to fail to increment the index properly, resulting in an infinite loop when checking prior instructions in the transaction for the same pool. The root cause is improper loop variable usage, leading to logic errors in control flow. An attacker or user could trigger this by placing a non-DAMM-v2 instruction before a swap instruction in the same transaction, causing the validation to hang and the transaction to fail. The impact is denial of service for swap transactions under specific conditions, disrupting user operations and potentially increasing failed transaction rates.\n",
+            "severity": "medium",
+            "location": [
+                "ix_p_swap.rs#L315-L345"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/swap/ix_p_swap.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "MarketCapScheduler's fee decay will be slower than expected due to wrong unit for price_step_bps",
+            "description": "The `MarketCapScheduler` calculates fee decay based on changes in sqrt_price but interprets the `price_step_bps` parameter as if it were in regular price BPS, not sqrt_price BPS. Since sqrt_price changes are non-linear relative to price changes, this leads to incorrect period calculations—especially during large price movements. For example, a 100% price increase results in only a ~41.42% increase in sqrt_price, causing fewer decay periods to be counted than expected. The root cause is a unit mismatch in the configuration parameter. This leads to slower-than-intended fee decay, affecting the economic model by keeping fees higher for longer. While not directly exploitable for fund theft, it distorts intended market dynamics and fee revenue distribution.\n",
+            "severity": "medium",
+            "location": [
+                "fee_market_cap_scheduler.rs#L148-L153"
+            ],
+            "files": [
+                "programs/cp-amm/src/base_fee/fee_market_cap_scheduler.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1285"
+                ],
+                "4": [
+                    "CWE-129"
+                ]
+            },
+            "title": "Missing bound checks for accounts.split_at_unchecked() in p_entrypoint()",
+            "description": "The `p_entrypoint()` function uses `accounts.split_at_unchecked(SWAP_IX_ACCOUNTS)` without first verifying that the number of input accounts is sufficient. This violates Rust's safety requirements, as calling `split_at_unchecked` with an out-of-bounds index results in undefined behavior, even if the result is not used. The cause is the absence of a pre-check ensuring `accounts.len() >= SWAP_IX_ACCOUNTS`. An attacker could craft a transaction with fewer accounts than expected, triggering undefined behavior, potentially leading to memory corruption, program panic, or unpredictable execution. The impact includes potential denial of service or system instability, though no direct fund loss is implied.\n",
+            "severity": "medium",
+            "location": [
+                "entrypoint.rs#L34"
+            ],
+            "files": [
+                "programs/cp-amm/src/entrypoint.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "validate() for Market Cap Scheduler should enforce number_of_period > 0",
+            "description": "The `validate()` function in the Market Cap Scheduler checks several parameters such as `reduction_factor`, `price_step_bps`, and `scheduler_expiration_duration` for being greater than zero, but omits validation for `number_of_period > 0`. This allows initialization of a scheduler with `number_of_period = 0`, effectively creating a 'zero' scheduler that never reduces the base fee. The root cause is incomplete input validation. While not directly exploitable, this could lead to misconfigured pools where fee decay logic is unintentionally disabled. The impact is operational—deviating from intended economic behavior—and could mislead users about fee dynamics, reducing trust in the system's predictability.\n",
+            "severity": "low",
+            "location": [
+                "fee_market_cap_scheduler.rs#L171-L190"
+            ],
+            "files": [
+                "programs/cp-amm/src/base_fee/fee_market_cap_scheduler.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing account data size and alignment checks in p_load_mut_checked()",
+            "description": "The custom `p_load_mut_checked()` function performs owner and discriminator checks but skips critical data size and memory alignment validations that are normally enforced by `bytemuck` during deserialization. This omission can lead to undefined behavior if the account data does not match the expected size or alignment of the target type. The root cause is incomplete replication of safe deserialization practices found in frameworks like Anchor. Future changes in data layout or maliciously crafted accounts could result in panics, data corruption, or memory safety issues. The impact is low due to the unlikelihood of immediate exploitation, but the risk of undefined behavior remains a concern for long-term stability.\n",
+            "severity": "low",
+            "location": [
+                "p_helper.rs#L61-L87"
+            ],
+            "files": [
+                "programs/cp-amm/src/utils/p_helper.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "Incorrect error messages used for update_pool_fees",
+            "description": "The `UpdatePoolFeesParameters.validate()` function throws `InvalidDynamicFeeParameters` when both `cliff_fee_numerator` and `dynamic_fee` are `None`, even though the issue may pertain to general update parameters. Conversely, `validate_and_update_pool_fees()` throws `InvalidUpdatePoolFeesParameters` in contexts specifically related to dynamic fee validation, creating inconsistency. The root cause is imprecise error handling logic. While this does not introduce functional vulnerabilities, it reduces debugging clarity and can mislead developers or frontends interpreting on-chain errors. The impact is limited to observability and developer experience, making it harder to diagnose issues accurately.\n",
+            "severity": "informational",
+            "location": [
+                "ix_update_pool_fees.rs#L59-L62",
+                "pool.rs#L1359-L1362"
+            ],
+            "files": [
+                "programs/cp-amm/src/instructions/operator/ix_update_pool_fees.rs",
+                "programs/cp-amm/src/state/pool.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "close_operator_account() should emit event",
+            "description": "The `close_operator_account()` function does not emit an event upon successful execution, unlike other similar close functions such as `close_config` or `close_token_badge`. This inconsistency makes it harder for off-chain systems to track operator account closures in real time. The root cause is a missing event emission call. While the function is permissioned and thus less likely to be abused, the lack of an event reduces transparency and auditability. The impact is purely informational, affecting monitoring and logging capabilities without compromising security.\n",
+            "severity": "informational",
+            "location": [
+                "lib.rs#L96"
+            ],
+            "files": [
+                "programs/cp-amm/src/lib.rs"
+            ]
+        }
+    ]
+}

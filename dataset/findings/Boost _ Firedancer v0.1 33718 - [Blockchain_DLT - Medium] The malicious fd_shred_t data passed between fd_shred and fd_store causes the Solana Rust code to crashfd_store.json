@@ -1,0 +1,48 @@
+{
+    "path": "reports/immunefi/Boost _ Firedancer v0.1 33718 - [Blockchain_DLT - Medium] The malicious fd_shred_t data passed between fd_shred and fd_store causes the Solana Rust code to crashfd_store.md",
+    "project_info": {
+        "url": [
+            "https://github.com/firedancer-io/firedancer"
+        ],
+        "commit_id": [
+            "e60d9a6206efaceac65a5a2c3a9e387a79d1d096"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": null,
+        "project_path": "contracts/Boost _ Firedancer v0.1 33718 - [Blockchain_DLT - Medium] The malicious fd_shred_t data passed between fd_shred and fd_store causes the Solana Rust code to crashfd_store.md-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1285"
+                ],
+                "4": [
+                    "CWE-129"
+                ]
+            },
+            "title": "Untrusted Fragment Data in fd_store Leads to Rust Panic (Crash)",
+            "description": "1. **Description:** The `during_frag` function in `fd_store.c` copies untrusted fragment data directly from `fd_shred` into shared memory without adequate validation. This data is later interpreted as a `fd_shred34_t` structure and passed to the Solana Rust blockstore via `fd_ext_blockstore_insert_shreds`, which can lead to a panic (crash) due to invalid values.\n\n2. **Cause:** The root cause is the lack of validation on critical fields within the `fd_shred34_t` structure—particularly the `pkts[34]` array fields such as `fec_set_idx`, `size`, and `parent_off`—which are attacker-controlled if `fd_shred` is compromised. Although some bounds checks exist (e.g., on `shred_cnt`, `shred_sz`, `stride`), they do not cover all fields used in the downstream Rust code.\n\n3. **Exploitation:** An attacker who gains code execution in the `fd_shred` tile can manipulate the `fd_shred34_t` structure (e.g., setting `fec_set_idx` to `UINT_MAX`) and send it to `fd_store`. When the Rust function `fd_ext_blockstore_insert_shreds` attempts to parse the shreds, it performs unchecked slicing operations that trigger a panic due to out-of-bounds access or invalid enum values (e.g., `InvalidErasureShardIndex`).\n\n4. **Impact:** This leads to a denial-of-service (crash) in the validator process. Given that the tiles are sandboxed, a successful exploit could represent a process-to-process memory corruption issue, potentially escalating to remote code execution (RCE) between sandboxed components, undermining the security model of Firedancer.\n",
+            "severity": "medium",
+            "location": [
+                "fd_store.c::during_frag#68",
+                "fd_store.c::after_frag#108",
+                "blockstore.rs#298"
+            ],
+            "files": [
+                "firedancer/src/app/fdctl/run/tiles/fd_store.c",
+                "firedancer/src/disco/tiles.h",
+                "firedancer/src/app/fdctl/external_functions.c"
+            ]
+        }
+    ]
+}

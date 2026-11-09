@@ -1,0 +1,82 @@
+{
+    "project": "12_04_2024_Manifest-FV-MR.pdf.json",
+    "files": [
+        "dataset/contracts/12_04_2024_Manifest-FV-MR.pdf.json/programs/manifest/src/program/processor/shared.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3333333333333333,
+        "recall": 1.0,
+        "f1": 0.5
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-190",
+        "CWE-682"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "expand_global() expands the account’s memory by the wrong size",
+            "description": "The expand_global() function incorrectly calls expand_global_fixed(), which expands the account by 80 bytes (market block size) instead of the correct 64 bytes (global account block size). This leads to inefficient memory usage, increased transaction costs, and reduced capacity for traders in the global account. The root cause is a hardcoded size mismatch. While the impact per expansion is small, it accumulates and wastes resources. The issue is exploitable by any user initiating a global expansion, leading to higher fees and earlier exhaustion of account space.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract contains two potential vulnerabilities. First, an integer overflow may occur when calculating the new size of an account during expansion if the current size is near the maximum value of `usize`. This could result in an incorrect size and cause the account to be resized to a very small size. Second, the code uses `split_at` and `split_at_mut` without checking if the split index is within bounds, which may cause a panic if the account data is shorter than the fixed header size.\n",
+            "findings": [
+                {
+                    "title": "Integer Overflow in Account Expansion Size Calculation",
+                    "description": "The calculation of the new account size during expansion (`new_size = current_size + MARKET_BLOCK_SIZE`) uses unchecked addition, which can overflow if the current size is close to the maximum value of `usize`. This could result in an incorrect new size, potentially causing the account to be resized to a very small size (0 or a few bytes) and leading to loss of data and functionality.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Unchecked Splitting of Account Data Leading to Panic",
+                    "description": "Several functions (`get_dynamic_account`, `get_mut_dynamic_account`, `get_dynamic_value`, and functions that use them) split the account data at the fixed header size without validating that the account data is long enough. If the account data is shorter than the fixed header size, the `split_at` or `split_at_mut` function will panic, causing the entire transaction to fail. This could be exploited by an attacker providing a short account to cause a denial of service.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "The code primarily focuses on expanding Solana account sizes dynamically. An integer overflow risk exists in the `expand_dynamic` function when calculating `new_size = current_size + MARKET_BLOCK_SIZE`, which could wrap around if the current size is near the maximum `usize` value. While constrained by Solana's 10 MiB account limit, this could cause severe corruption if triggered. Other operations (e.g., lamports calculation with `saturating_sub`) and data splitting avoid common vulnerabilities like underflow or off-by-one errors. No other CWEs from the list were detected.\n",
+            "findings": [
+                {
+                    "title": "Integer Overflow in Account Size Calculation",
+                    "description": "The function `expand_dynamic` computes a new account size as `current_data_len + MARKET_BLOCK_SIZE` without overflow checks. On a 64-bit system, if `current_data_len` exceeds `usize::MAX - MARKET_BLOCK_SIZE`, the addition wraps around, resulting in a small `new_size`. This causes `realloc` to shrink the account unexpectedly, leading to data truncation, loss, or runtime errors. While constrained by Solana's 10 MiB account limit, this risk remains for exceptionally large or maliciously crafted inputs.\n",
+                    "category": "CWE-190",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-1335",
+            "CWE-1339",
+            "CWE-190",
+            "CWE-191",
+            "CWE-128",
+            "CWE-135",
+            "CWE-369",
+            "CWE-193"
+        ]
+    ]
+}

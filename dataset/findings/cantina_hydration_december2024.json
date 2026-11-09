@@ -1,0 +1,179 @@
+{
+    "path": "reports/cantina_hydration_december2024.pdf",
+    "project_info": {
+        "url": "https://github.com/galacticcouncil/hydration-node",
+        "commit_id": "9588c486635208938c247d90c91d1d1f8de5ac5b",
+        "address": [
+            "0xf550bcd9b766843d72fc4c809a839633fd09b643"
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-04-07",
+        "project_path": "contracts/cantina_hydration_december2024.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Liquidation is not executable when debt asset is collateral asset",
+            "description": "1. **Description:** In the liquidation function, the system assumes that the debt asset and collateral asset must be different. However, in AAVE V3, a borrower can use the same asset as both collateral and debt. When such a scenario occurs, the liquidation fails.\n2. **Cause:** The root cause is the `ensure!(asset_in != asset_out, Error::<T>::NotAllowed);` check in the `do_sell` function, which prevents swapping an asset for itself, even when logically valid in the protocol.\n3. **Exploitation:** An attacker could deposit an asset as collateral and borrow the same asset, creating a position that cannot be liquidated due to this restriction, potentially leading to undercollateralized debt.\n4. **Impact:** This could result in inability to liquidate certain positions, increasing systemic risk and potential loss of funds for the protocol.\n",
+            "severity": "medium",
+            "files": [
+                "pallets/liquidation/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#L233-L240",
+                "lib.rs#L457-L467"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Incorrect slippage protection allows an external party to make profits on liquidations",
+            "description": "1. **Description:** During a liquidation, the collateral is swapped into the debt asset via `T::Router::sell`, but the slippage protection is ineffective because the `min_amount_out` parameter is hardcoded to 1.\n2. **Cause:** The lack of dynamic slippage protection allows the swap to proceed even with significant price impact, due to the minimal minimum output enforced.\n3. **Exploitation:** An external party could manipulate the AMM pool prices just before a liquidation to extract value from the swap, profiting from the lack of slippage control.\n4. **Impact:** This could lead to loss of value for the liquidator or the protocol, although the risk is mitigated by the fact that direct liquidation would be more profitable for attackers.\n",
+            "severity": "low",
+            "files": [
+                "pallets/liquidation/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#L233-L240"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ]
+            },
+            "title": "Hardcoded gas limit may break liquidations",
+            "description": "1. **Description:** The `liquidate` extrinsic uses a hardcoded gas limit of 1,000,000 for EVM calls to the money market contract, which may be insufficient for complex liquidations involving many assets.\n2. **Cause:** The gas limit is defined as a constant (`LiquidationGasLimit: u64 = 1_000_000`) without the ability to adjust it based on the actual requirements of the liquidation.\n3. **Exploitation:** An attacker could create a position with a large number of collateral or debt assets, causing the liquidation transaction to exceed the gas limit and fail.\n4. **Impact:** Failed liquidations due to gas limits could leave undercollateralized positions unaddressed, increasing risk to the protocol.\n",
+            "severity": "low",
+            "files": [
+                "runtime/hydradx/src/assets.rs"
+            ],
+            "location": [
+                "lib.rs#L221",
+                "assets.rs#L1589"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Liquidation can be avoided by manipulating the swap pool",
+            "description": "1. **Description:** The liquidation process assumes accurate on-chain prices, but an attacker could manipulate the AMM swap pool prices to make liquidations unprofitable or fail.\n2. **Cause:** The system does not account for potential discrepancies between oracle prices and actual pool prices, relying solely on the latter during swaps.\n3. **Exploitation:** By front-running or manipulating pool prices, an attacker could prevent their position from being liquidated, even when undercollateralized.\n4. **Impact:** This could allow borrowers to avoid liquidation, leading to potential insolvency risks for the protocol.\n",
+            "severity": "low",
+            "files": [
+                "pallets/liquidation/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#L248-L251"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Multi-hop swaps are not supported",
+            "description": "1. **Description:** The liquidation function only allows direct single-hop swaps from collateral asset to debt asset, rejecting any multi-hop routes even if they provide better pricing.\n2. **Cause:** The route validation strictly enforces that the provided route must exactly match the direct path from collateral to debt asset, limiting flexibility.\n3. **Exploitation:** Attackers or inefficient liquidators may receive worse execution prices, reducing liquidation efficiency and profitability.\n4. **Impact:** Reduced capital efficiency and potential failure to fully recover debt due to poor swap execution, though the protocol remains functional.\n",
+            "severity": "low",
+            "files": [
+                "pallets/liquidation/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#L185-L194"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "Overflow error is used instead of underflow error",
+            "description": "1. **Description:** When calculating `debt_asset_earned` and `collateral_earned`, if a subtraction underflows, the function returns `ArithmeticError::Overflow` instead of `Underflow`.\n2. **Cause:** Incorrect use of error type in arithmetic operations, likely due to misuse of a generic overflow/underflow handling mechanism.\n3. **Exploitation:** While not directly exploitable, this mislabeling could confuse developers during debugging or error handling, potentially leading to incorrect assumptions.\n4. **Impact:** Misleading error messages could delay incident response or lead to incorrect fixes, though the functional impact is minimal.\n",
+            "severity": "informational",
+            "files": [
+                "pallets/liquidation/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#L230-L232",
+                "lib.rs#L244-L246"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Route variable is cloned to call Router::sell",
+            "description": "1. **Description:** The `route` variable is cloned unnecessarily when calling `T::Router::sell`, even though it is not used afterward.\n2. **Cause:** The code uses `route.clone()` instead of transferring ownership, resulting in redundant memory operations.\n3. **Exploitation:** This cannot be exploited by external parties but increases gas costs slightly due to unnecessary computation.\n4. **Impact:** Minor gas inefficiency, with no security risk but suboptimal performance.\n",
+            "severity": "informational",
+            "files": [
+                "pallets/liquidation/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#L233-L239"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-439"
+                ]
+            },
+            "title": "Money market contract address is hardcoded to testnet address",
+            "description": "1. **Description:** The liquidation pallet uses a hardcoded address (`0xf550bcd9...`) corresponding to the testnet deployment of the money market contract.\n2. **Cause:** The production mainnet address (`0x1b02E051...`) was not configured, risking incorrect behavior on mainnet.\n3. **Exploitation:** If deployed without fix, liquidations would target a non-existent or incorrect contract on mainnet, causing failures.\n4. **Impact:** Complete failure of liquidation functionality on mainnet, leading to inability to manage undercollateralized positions.\n",
+            "severity": "informational",
+            "files": [
+                "runtime/hydradx/src/assets.rs"
+            ],
+            "location": [
+                "assets.rs#L1587-L1588"
+            ]
+        }
+    ]
+}

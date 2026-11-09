@@ -1,0 +1,161 @@
+{
+    "project": "sec3_helium_program_library_report.pdf.json",
+    "files": [
+        "dataset/contracts/sec3_helium_program_library_report.pdf.json/programs/helium-entity-manager/src/instructions/onboard_mobile_hotspot_v0.rs",
+        "dataset/contracts/sec3_helium_program_library_report.pdf.json/programs/helium-entity-manager/src/instructions/onboard_iot_hotspot_v0.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3,
+        "recall": 0.5,
+        "f1": 0.37499999999999994
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-284",
+        "CWE-282",
+        "CWE-20",
+        "CWE-708",
+        "CWE-1287"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-285",
+        "CWE-435",
+        "CWE-287",
+        "CWE-923",
+        "CWE-284",
+        "CWE-282",
+        "CWE-703",
+        "CWE-283",
+        "CWE-708"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect owner/delegate keys in compressed NFT validation",
+            "description": "1. **Description:** The `onboard_iot_hotspot_v0` and `onboard_mobile_hotspot_v0` instructions pass `ctx.accounts.hotspot_owner.owner.key()` as both `owner` and `delegate`, but should pass `ctx.accounts.hotspot_owner.key()`.\n2. **Cause:** Incorrect field access in the account struct leads to wrong key being used for ownership verification.\n3. **Exploitation:** Could allow onboarding of hotspots with incorrect ownership proofs, potentially enabling spoofing or unauthorized access.\n4. **Impact:** Undermines the integrity of compressed NFT validation and could allow invalid hotspots to be onboarded.\n"
+        },
+        {
+            "title": "Onboarding location payment and accounting",
+            "description": "1. **Description:** The `rewardable_entity_config` is not properly validated, allowing location setting without paying fees when the wrong config type is provided.\n2. **Cause:** The condition checks for `IotConfig` in both `onboard_iot_hotspot_v0` and `onboard_mobile_hotspot_v0`, even when a `MobileConfig` is expected.\n3. **Exploitation:** An attacker could bypass location staking fees by providing a mismatched config type.\n4. **Impact:** Enables free location updates, undermining the economic model and potentially enabling spam or abuse.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The two onboarding handlers are structurally identical and share several security-relevant issues.\n\n(1) Ownership/authority verification for the compressed NFT appears to be implemented incorrectly: both handlers pass `ctx.accounts.hotspot_owner.owner.key()` as the expected cNFT `owner` and `delegate` to `verify_compressed_nft`. In Solana, `account_info.owner` is the *program id that owns the account* (for a normal wallet signer this is the System Program), not the signer’s pubkey. This breaks the intended access control check (“caller owns the NFT”) and can either (a) DoS legitimate onboarding (most assets won’t be owned by the System Program) or (b) allow unauthorized onboarding of any asset whose leaf owner/delegate equals the System Program id (or whatever the signer’s account owner program is).\n\n(2) The CPI context for `burn_without_tracking_v0` is constructed with `self.token_program.to_account_info()` as the CPI program account, but the invoked CPI is for the `data_credits` program. This is an interaction bug between correctly-behaving entities (Anchor CPI + external program) that will typically cause the burn call to fail at runtime (DoS), and also indicates a protection mechanism misuse (the call is not being dispatched to the intended program).\n\n(3) The PDA used for `mobile_info`/`iot_info` is derived from `hash(key_to_asset.entity_key)` rather than from the `asset_id` itself. While `key_to_asset.asset` is constrained to match the merkle-tree-derived asset id, `key_to_asset.entity_key` is not proven here to be uniquely bound to that asset. If an attacker can supply or create alternative `KeyToAssetV0` accounts (under the same `dao`) that map the same `asset` but with different `entity_key` bytes, they can initialize multiple info PDAs for the same underlying asset, breaking the “single onboard record per asset” lifetime/uniqueness assumption.\n\n(4) Multiple `unwrap()` calls on checked arithmetic (`checked_add(...).unwrap()`) convert exceptional conditions (overflow) into panics, which can be triggered if configuration values are set unexpectedly high. This is primarily a denial-of-service vector and should be handled with explicit errors.\n",
+            "findings": [
+                {
+                    "title": "Incorrect cNFT owner/delegate passed to verification (uses account owner program id)",
+                    "description": "In both `onboard_mobile_hotspot_v0::handler` and `onboard_iot_hotspot_v0::handler`, the code calls `verify_compressed_nft` with:\n  - owner: `ctx.accounts.hotspot_owner.owner.key()`\n  - delegate: `ctx.accounts.hotspot_owner.owner.key()`\n\n`hotspot_owner` is a `Signer`, but `.owner` refers to the program that owns the signer account (typically the System Program), not the signer’s pubkey. This breaks access control for onboarding:\n  - Legitimate owners may be unable to onboard (verification expects leaf owner == System Program).\n  - Unauthorized onboarding may be possible for any asset whose compressed-leaf owner/delegate equals the System Program id (or whatever program id owns the provided signer account), since the signer does not need to actually control that leaf owner.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "CPI constructed with the wrong program account for DataCredits burn",
+                    "description": "`burn_ctx()` constructs the CPI context with:\n  `CpiContext::new(self.token_program.to_account_info(), cpi_accounts)`\n\nbut the CPI being invoked is `data_credits::cpi::burn_without_tracking_v0`, which must target the `data_credits_program` account, not the SPL Token program. This improper integration typically causes the burn to fail at runtime (instruction data sent to the wrong program), resulting in denial of service for onboarding.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Onboard info PDA not uniquely derived from asset_id (potential duplicate onboard records)",
+                    "description": "The `mobile_info`/`iot_info` PDAs are seeded with `hash(&key_to_asset.entity_key[..])` rather than including `asset_id` directly. The only enforced link to the asset is:\n  `get_asset_id(merkle_tree, index) == key_to_asset.asset`\n\nbut there is no constraint in these instructions that `key_to_asset.entity_key` is uniquely and immutably bound to that same `asset`. If adversaries can provide or create alternative `KeyToAssetV0` accounts (with the correct `asset` but different `entity_key`) under the same `dao`, they can initialize multiple distinct `*_info` PDAs for the same asset, violating resource lifetime/uniqueness expectations (e.g., bypassing “already onboarded” semantics).\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Unchecked overflow handling via unwrap() can panic (DoS on extreme config values)",
+                    "description": "Both handlers use:\n  - `dc_fee = full_location_staking_fee.checked_add(dc_fee).unwrap();`\n  - `num_location_asserts = ...checked_add(1).unwrap();`\n\nIf `full_location_staking_fee + onboarding_dc_fee` overflows `u64`, the program will panic instead of returning a controlled error, causing a transaction failure (DoS). While config values may be governance-controlled, treating overflows as exceptional conditions with explicit errors is safer than panicking.\n",
+                    "category": "CWE-703",
+                    "severity": "low",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The code has multiple access-control/authorization weaknesses stemming from (1) using the wrong “owner identity” when verifying compressed-NFT ownership, and (2) constructing the DataCredits burn CPI with the wrong target program account.\nIn both onboarding handlers, `verify_compressed_nft` is called with `owner`/`delegate` set to `ctx.accounts.hotspot_owner.owner.key()` (the *program owner of the signer account*, i.e., typically the System Program), not the signer’s pubkey. This breaks authentication of the claimed hotspot owner and can enable unauthorized onboarding if an attacker can arrange for the cNFT leaf owner/delegate to match the constant program-id value, or if `verify_compressed_nft` does not strictly bind ownership to the provided identity.\nSeparately, the burn CPI context is created with `CpiContext::new(self.token_program.to_account_info(), ...)` instead of `data_credits_program`, meaning the privileged “burn” communication is directed to the wrong endpoint. This is at least a DoS/correctness issue and represents improper restriction/selection of the privileged CPI endpoint.\n",
+            "findings": [
+                {
+                    "title": "Compressed-NFT ownership verification uses signer account's program owner instead of signer pubkey",
+                    "description": "In both `onboard_mobile_hotspot_v0::handler` and `onboard_iot_hotspot_v0::handler`, the call:\n`owner: ctx.accounts.hotspot_owner.owner.key(), delegate: ctx.accounts.hotspot_owner.owner.key()`\nuses `AccountInfo.owner` (the program-id that owns the signer account, commonly `11111111111111111111111111111111`) rather than the hotspot owner's public key (`ctx.accounts.hotspot_owner.key()`).\n\nImpact:\n- The instruction does not actually authenticate that the transaction's `hotspot_owner` signer is the owner (or delegate) of the compressed NFT being proven.\n- If `verify_compressed_nft` relies on these fields to enforce ownership/delegation, this is an authorization bypass: onboarding could succeed without the true asset owner’s signature whenever the leaf owner/delegate matches that constant program-id, or if the verification logic treats these inputs as advisory.\n- Even if it causes failures for legitimate users (because owners usually are not the System Program), it still represents broken authentication/authorization logic.\n\nAffected code (both files):\n- `owner: ctx.accounts.hotspot_owner.owner.key()`\n- `delegate: ctx.accounts.hotspot_owner.owner.key()`\n\nFix:\n- Pass `ctx.accounts.hotspot_owner.key()` (and/or the correct delegate) to `verify_compressed_nft`, and ensure the verifier enforces equality to the leaf’s owner/delegate.\n",
+                    "category": "CWE-287",
+                    "severity": "critical",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Missing/incorrect authorization binding between hotspot_owner signer and onboarded asset",
+                    "description": "Because the compressed-NFT verification is parameterized with a constant program-id (via `.owner.key()`) rather than the signer’s pubkey, the instruction’s required `hotspot_owner: Signer` is not meaningfully bound to the asset being onboarded.\n\nThis is an improper authorization check: the program intends to require the hotspot owner to authorize onboarding of the specific cNFT (via proof + owner/delegate), but the check as written does not validate the signer’s identity against the asset’s recorded owner/delegate.\n\nIf onboarding confers rights (e.g., reward eligibility, state creation tied to the asset), an attacker may be able to onboard assets they do not control (depending on how the cNFT owner/delegate and `verify_compressed_nft` behave).\n",
+                    "category": "CWE-285",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Burn CPI targets the wrong program account (token_program instead of data_credits_program)",
+                    "description": "In both `burn_ctx()` implementations, the CPI context is constructed as:\n`CpiContext::new(self.token_program.to_account_info(), cpi_accounts)`\nbut the CPI being executed is `data_credits::cpi::burn_without_tracking_v0`, which should target `data_credits_program`.\n\nImpact:\n- Privileged “burn” communication is not restricted to / not directed at the intended endpoint (the DataCredits program).\n- In practice this is likely to cause the CPI to fail (DoS of onboarding) because the SPL Token program will not understand DataCredits instruction data.\n- It also creates a fragile security boundary: CPI endpoint selection is wrong for a protected operation (burning fees).\n\nFix:\n- Use `CpiContext::new(self.data_credits_program.to_account_info(), cpi_accounts)` (or the correct program account expected by the CPI wrapper).\n",
+                    "category": "CWE-923",
+                    "severity": "medium",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Onboarding state can be created for an asset without recording/verifying the true controlling principal",
+                    "description": "The onboarding accounts (`mobile_info` / `iot_info`) do not store the verified owner/delegate, and due to the incorrect owner/delegate passed into `verify_compressed_nft`, the program may end up creating onboarding state for an asset without tying it to the actual controlling principal.\n\nThis is an ownership-management flaw: the program creates/assigns a resource (onboarding state for `asset_id`) but does not properly verify or persist the correct owner identity that should control that resource.\n\nNote: severity depends on how later instructions use `*_info` and whether they rely on ownership being implicitly enforced here.\n",
+                    "category": "CWE-282",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "Both `onboard_mobile_hotspot_v0::handler` and `onboard_iot_hotspot_v0::handler` attempt to prove that `hotspot_owner` owns (or is delegate of) the compressed NFT by calling `verify_compressed_nft`. However, they pass `ctx.accounts.hotspot_owner.owner.key()` for both `owner` and `delegate`.\n\nIn Anchor/Solana, `AccountInfo::owner` is the *program id that owns the account data* (e.g., System Program for normal wallet accounts), not the wallet public key of the signer. As a result, the ownership/delegation verification is performed against the wrong principal (often the System Program id), meaning the contract does not actually verify that the signer controls the asset. This can cause either:\n- denial of service (legitimate owners cannot onboard because the verification compares against the wrong key), and/or\n- unintended authorization (if an asset’s recorded owner/delegate equals the passed program id, onboarding could succeed for arbitrary callers).\n\nThis is directly related to unverified ownership (missing/incorrect owner check) and incorrect ownership assignment (using an “owner” value outside the intended control sphere for authorization decisions).\n",
+            "findings": [
+                {
+                    "title": "cNFT ownership check uses AccountInfo.owner (program id) instead of signer pubkey",
+                    "description": "In both onboarding handlers, the contract calls `verify_compressed_nft` with:\n- `owner: ctx.accounts.hotspot_owner.owner.key()`\n- `delegate: ctx.accounts.hotspot_owner.owner.key()`\n\n`hotspot_owner` is a `Signer`, but `hotspot_owner.owner` is the owning *program* of the signer account (typically the System Program), not the signer’s public key. Therefore, the verification does not prove that `hotspot_owner` is the cNFT owner/delegate.\n\nImpact:\n- Legitimate onboarding may fail because the proof is checked against the wrong expected owner (DoS).\n- In cases where a compressed NFT’s owner/delegate equals that program id, onboarding could succeed without the caller actually controlling the asset, allowing unauthorized onboarding/state creation for that asset.\n",
+                    "category": "CWE-283",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Authorization principal effectively becomes a program id (e.g., System Program) during ownership verification",
+                    "description": "By passing `AccountInfo.owner` (a program id) as the `owner/delegate` inputs to `verify_compressed_nft`, the instruction effectively “assigns” ownership authority to an entity outside the intended control sphere (the account-owning program, commonly the System Program), rather than the actual wallet/signer.\n\nThis can lead to incorrect authorization decisions: onboarding can be gated on a program id matching the asset’s stored owner/delegate, not on the intended user-controlled key.\n",
+                    "category": "CWE-708",
+                    "severity": "medium",
+                    "confidence": 0.78
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-282",
+            "CWE-1270",
+            "CWE-285",
+            "CWE-286",
+            "CWE-1280",
+            "CWE-1267",
+            "CWE-749",
+            "CWE-287",
+            "CWE-269",
+            "CWE-923",
+            "CWE-346",
+            "CWE-1283"
+        ],
+        [
+            "CWE-708",
+            "CWE-283"
+        ]
+    ]
+}

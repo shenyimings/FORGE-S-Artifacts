@@ -1,0 +1,68 @@
+{
+    "project": "2025-01-pump-science.md.json",
+    "files": [
+        "dataset/contracts/2025-01-pump-science.md.json/programs/pump-science/src/instructions/curve/swap.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-693",
+        "CWE-1284",
+        "CWE-360",
+        "CWE-20",
+        "CWE-345"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-682"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Trade Event Emission Uses Redundant Clock Calls and Lacks Block Time Validation",
+            "description": "The swap handler emits `TradeEvent` and `CompleteEvent` using separate `Clock::get()` calls, leading to redundant syscalls and potential timestamp inconsistency within the same transaction. The timestamp is fetched multiple times instead of being cached, and no validation is performed to ensure the block time is reasonable or unmanipulated. A validator could manipulate clock values slightly between calls, or natural timing differences could result in inconsistent timestamps across events from the same transaction. Indexing systems may record inconsistent or inaccurate event timelines, and redundant syscalls increase computational overhead, affecting efficiency and data reliability.\n"
+        },
+        {
+            "title": "Lack of Maximum Input Amount Validation in Swap Function Could Lead to Unnecessary Transaction Failures",
+            "description": "The swap function in the Pump Science protocol validates the minimum input amount but does not enforce an upper limit on the input amount. This omission allows users to submit swap transactions with amounts that exceed available liquidity or their token balance. The `validate()` function only checks that `exact_in_amount > 0` but does not validate maximum bounds based on either the user's token balance (for token sales) or the bonding curve’s `real_sol_reserves` (for token purchases). An attacker or misinformed user could submit a swap transaction with an amount exceeding available reserves or their own balance. The transaction will proceed until it fails during execution (e.g., during token transfer or within `apply_buy()`), after which the gas has already been consumed. Users experience unnecessary transaction failures and waste gas fees due to late-stage reverts, leading to a poor user experience and increased cost of interaction with the protocol.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract contains two main vulnerabilities. First, the subtraction operations for fee calculation in both buy and sell paths are not checked for underflow, which could cause the transaction to panic and revert if the fee exceeds the input amount. Second, an unchecked addition in the rent exemption check uses `unwrap()` which can panic on overflow, leading to a denial of service. Additionally, the fee calculation function in the bonding curve might return an excessive fee, causing the underflow. Without the implementation of `calculate_fee`, we must assume it is possible.\n",
+            "findings": [
+                {
+                    "title": "Unchecked Fee Subtraction Leading to Potential Underflow",
+                    "description": "In the buy path of the swap handler, the fee is subtracted from the input amount without checking for underflow: `buy_amount_applied = exact_in_amount - fee_lamports;`. Similarly, in the sell path, the fee is subtracted from the SOL amount: `sell_amount_minus_fee = sell_result.sol_amount - fee_lamports;`. If the fee is greater than the input amount (which might happen if the `calculate_fee` function returns an excessive fee), the subtraction will underflow and cause the program to panic, reverting the transaction. This can be exploited to cause denial of service or disrupt the bonding curve operations.\n",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unchecked Arithmetic in Rent Exemption Check",
+                    "description": "In the buy path, the rent exemption check uses `exact_in_amount.checked_add(min_rent).unwrap()`. The `unwrap` will panic if the addition overflows, which can be caused by an attacker setting `exact_in_amount` to a very large value (close to u64::MAX). This would cause the transaction to fail. Although the user is the one who sets the amount and the transaction fails only for them, it is still a denial of service vulnerability against the user's own transaction and might be used to disrupt the user experience or in combination with other attacks.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.99
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

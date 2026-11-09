@@ -1,0 +1,248 @@
+{
+    "path": "reports-without-source/Pump-security-review_2025-03-18.md",
+    "project_info": {
+        "url": [
+            "https://github.com/pump-fun/fixed-price-token-sale"
+        ],
+        "commit_id": [
+            "52715ef1e5639b8192d17764ef0cc746b782c879"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-03-18",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Initializing SOL price makes trading unfair",
+            "description": "The vulnerability arises from the hardcoded initialization of the SOL price at 200 USD/SOL in the `initialize_global_state` instruction, which does not reflect real-time market conditions. The root cause is the use of a fixed, outdated price value that diverges significantly from the actual market price (e.g., 128.7 USD/SOL at the time of the report). An attacker can exploit this by being among the first to purchase tokens using SOL when the market price is lower, effectively buying at a discount and gaining unfair profits. The impact includes unfair advantage to early users and potential economic imbalance in the token sale, leading to a medium material loss for the protocol or users due to distorted pricing.\n",
+            "severity": "medium",
+            "location": [
+                "initialize_global_state_ix#"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ]
+            },
+            "title": "The `blacklist_user_ix` instruction skips `is_blacklisted` update",
+            "description": "The `blacklist_user_ix` instruction allows the super_admin to blacklist a user and refund their purchase, but it fails to update the `is_blacklisted` flag in the user's state. The root cause is the omission of a state update in the instruction logic. An attacker (or malicious user) can be blacklisted and refunded but still retain the ability to purchase tokens again since the flag is not set. This undermines the intended access control mechanism. The impact is that blacklisted users can continue participating in the sale, potentially leading to repeated abuse or circumvention of administrative actions, resulting in medium harm to the system's integrity.\n",
+            "severity": "medium",
+            "location": [
+                "blacklist_user_ix#"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Buying post-distribution locks funds",
+            "description": "Users are allowed to purchase tokens even after the distribution phase has occurred, but the `distribute` function can only be called once per user. The root cause is the lack of a preventive check in the `buy` function to block purchases after distribution. An attacker or regular user can make additional purchases unknowingly after distribution, leading to their funds being permanently locked since no further distribution is allowed. The impact is a permanent loss of user funds, which constitutes a medium material loss, especially if users are unaware of this restriction, harming user trust and experience.\n",
+            "severity": "medium",
+            "location": [
+                "distribute#",
+                "buy#"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Unauthorized Global and Oracle State Initialization",
+            "description": "The `InitializeGlobalState` instruction allows any user to initialize the `global_state` and `oracle` accounts without proper access control. The root cause is the absence of constraints on the `super_admin` being a trusted entity and the `admin` not being required to sign, enabling arbitrary account creation. An attacker can exploit this by creating a fake `global_state` to trick users into sending funds to a malicious vault, leading to token theft. Additionally, the attacker can pre-initialize an oracle PDA using a legitimate admin's public key, causing a denial-of-service by preventing the real admin from initializing their oracle. The impact includes both loss of user funds and operational disruption for legitimate admins, resulting in medium to high overall risk.\n",
+            "severity": "medium",
+            "location": [
+                "InitializeGlobalState#",
+                "buy#",
+                "withdraw#"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Add min received token amount to buy instruction",
+            "description": "When users buy tokens using SOL, the number of tokens they receive is calculated based on the oracle price at execution time. The root cause is the lack of a slippage protection mechanism in the `buy_ix` function. If the oracle price changes between transaction submission and execution, users may receive fewer tokens than expected without any minimum guarantee. An attacker or market fluctuation can exploit this by manipulating or influencing the oracle update timing. The impact is a poor user experience and potential minor financial loss, especially in volatile conditions, leading to low to medium harm depending on price deviation.\n",
+            "severity": "low",
+            "location": [
+                "buy_ix#"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "User may cause DoS on CEX update when sales near expected amount",
+            "description": "When the token sale is nearing completion, a malicious user can make a small purchase just before a CEX updates the on-chain state, causing the total sold tokens to exceed the allowed limit and reverting the CEX transaction. The root cause is the lack of coordination between on-chain and off-chain (CEX) sale tracking and the strict `>=` check in the `is_active` function. The attacker can repeatedly switch wallets to continue the attack even if blacklisted. The impact is a denial-of-service for CEX updates, preventing final reconciliation and potentially disrupting the sale settlement process, leading to operational delays and low to medium harm.\n",
+            "severity": "low",
+            "location": [
+                "is_active#"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ]
+            },
+            "title": "Insufficient token handling in `buy_ix`",
+            "description": "The `buy_ix` function reverts if the requested token amount exceeds the available supply, instead of allowing a partial fill. The root cause is the absence of logic to handle partial purchases when supply is limited. This prevents valid transactions that could partially fulfill user requests, reducing capital efficiency and user experience. An attacker could exploit this by making large requests that block smaller ones, but the primary impact is functional inefficiency rather than direct financial loss. The impact is limited to missed economic opportunities and user frustration, resulting in low material harm.\n",
+            "severity": "low",
+            "location": [
+                "buy_ix#"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Rounding down of fees for `blacklist_fee`",
+            "description": "The `blacklist_fee` is calculated using integer division without rounding up, which can result in a fee of zero for small transactions. The root cause is the use of truncating division (`checked_div`) instead of ceiling division. An attacker can exploit this by making many small transactions to avoid paying any blacklist fee, leading to loss of protocol revenue. The impact is a gradual erosion of potential fees, especially in high-volume, low-value scenarios, causing minor financial loss to the protocol, classified as low impact.\n",
+            "severity": "low",
+            "location": [
+                "blacklist_user_ix#"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Unnecessary `is_active` check may block event emission on delays",
+            "description": "Delayed transactions still require the `is_active` check, which can cause them to fail if the sale has ended, even though no state change is needed. The root cause is the overbroad application of the `is_active` guard to all transaction types, including those that only emit events. If a delayed transaction is processed after the sale ends, it will not emit its event, leading to missing logs and inconsistencies in audit trails. The impact is reduced observability and potential confusion in monitoring, which is a low-severity issue affecting system transparency rather than security.\n",
+            "severity": "low",
+            "location": [
+                "is_active#"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "Missed `initializeCexEvent` emission",
+            "description": "The `initialize_sale_state_ix` function is intended to emit an `InitializeCexEvent`, but the event emission is missing in the implementation. The root cause is an omission in the code where the event is not actually emitted despite being part of the design. This leads to incomplete event logging, making it harder for off-chain systems to track the initialization of CEX state. The impact is a lack of transparency and potential synchronization issues between on-chain and off-chain systems, which is a low-severity informational issue.\n",
+            "severity": "low",
+            "location": [
+                "initialize_sale_state_ix#"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing validation for `max_staleness_allowed`",
+            "description": "The `max_staleness_allowed` parameter is set to `u64::MAX` during initialization but is never used in price validation. The root cause is the absence of a staleness check in the `get_token_price` function. This allows the system to use outdated or potentially manipulated oracle prices, leading to incorrect token valuations. An attacker could exploit stale prices to buy tokens at unfair rates. The impact includes inaccurate pricing and potential economic imbalance, harming fairness and trust, classified as low to medium severity depending on oracle update frequency.\n",
+            "severity": "low",
+            "location": [
+                "initialize_global_state_ix#",
+                "get_token_value_usd#",
+                "get_token_price#"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Hardcoded stablecoin price",
+            "description": "The contract assumes stablecoin prices (USDC, USDT) are always 1 USD by hardcoding their values in the `get_token_price` function. The root cause is the lack of oracle-based pricing for stablecoins. During a depegging event (e.g., USDC drops to $0.95), users can still contribute devalued stablecoins and receive tokens priced at $1, effectively overpaying in real value. An attacker can exploit this by depositing depegged stablecoins to gain excess value. The impact is economic unfairness and potential loss of value for the protocol or other users, leading to low to medium harm depending on the scale of depegging.\n",
+            "severity": "low",
+            "location": [
+                "get_token_price#",
+                "states.rs#"
+            ],
+            "files": []
+        }
+    ]
+}

@@ -1,0 +1,146 @@
+{
+    "path": "reports/blocksec_ref_lp_as_collateral_v1.0-signed.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/ref-finance/ref-contracts/tree/3b6321d644ce96f163194f1fac6ae44003c90340",
+            "https://github.com/burrowHQ/burrowland/tree/21c3655e6b9fa26c83bda255be374f5118aae208"
+        ],
+        "commit_id": [
+            "3b6321d644ce96f163194f1fac6ae44003c90340",
+            "21c3655e6b9fa26c83bda255be374f5118aae208"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-01-25",
+        "project_path": "contracts/blocksec_ref_lp_as_collateral_v1.0-signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Lack of Consistency Validation between Arguments position and asset_amount",
+            "description": "1. **Description:** The PositionIncreaseCollateral and PositionDecreaseCollateral actions accept two arguments: `position` and `asset_amount`. When the `position` refers to an LP token, the `asset_amount.token_id` must correspond to that LP token. However, no validation is performed to ensure this consistency.\n2. **Cause:** The absence of a check between the `position` and the `asset_amount.token_id` allows mismatched inputs to be processed.\n3. **Exploitation:** An attacker could pass a cheaper LP token in `asset_amount` while referencing a more valuable LP token position, effectively using low-value tokens as high-value collateral or withdrawing more valuable tokens than deposited.\n4. **Impact:** This leads to inconsistent internal accounting, potential loss of funds for the protocol, and unfair advantages for malicious users.\n",
+            "severity": "high",
+            "files": [
+                "burrowland/contracts/contract/src/actions.rs"
+            ],
+            "location": [
+                "actions.rs#83-90"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Permanently Locked User",
+            "description": "1. **Description:** The `callback_process_shadow_force_close_result()` function is responsible for unlocking an account after a forced closure, but it may panic during execution due to an unchecked arithmetic operation.\n2. **Cause:** Although `internal_shadow_force_close()` verifies that `asset.reversed > amount`, this state is not guaranteed during the callback, leading to potential arithmetic underflow.\n3. **Exploitation:** If the callback panics, the account remains locked indefinitely, even though the liquidation process may have partially executed.\n4. **Impact:** The affected user is permanently locked out of their account, unable to access deposited, borrowed, or collateralized assets, resulting in a denial-of-service condition.\n",
+            "severity": "high",
+            "files": [
+                "ref-contracts/ref-exchange/src/shadow_actions.rs"
+            ],
+            "location": [
+                "shadow_actions.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Lack of Consistent Precision in on_remove_shadow()",
+            "description": "1. **Description:** The `on_cast_shadow()` function scales the input `amount` by `10**extra_decimals`, but `on_remove_shadow()` uses the raw `amount` without applying the same scaling factor.\n2. **Cause:** Inconsistent handling of decimal precision between two related functions leads to incorrect value calculations.\n3. **Exploitation:** An attacker could exploit the discrepancy during shadow position removal to receive incorrect amounts or manipulate internal balances.\n4. **Impact:** Results in incorrect accounting and potential loss of funds due to miscalculated shares or balances in the system.\n",
+            "severity": "high",
+            "files": [
+                "ref-contracts/ref-exchange/src/shadow_actions.rs"
+            ],
+            "location": [
+                "shadow_actions.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-252"
+                ]
+            },
+            "title": "Potential Drain of Funds due to Early Return of Shares",
+            "description": "1. **Description:** The `FromFarming` and `FromBurrowland` implementations in `ShadowActions` immediately increase the `free_shares` of LP tokens, allowing liquidity to be removed in the same block.\n2. **Cause:** The design allows liquidity removal before confirming the success of `on_remove_shadow()` in dependent contracts.\n3. **Exploitation:** If `on_remove_shadow()` fails in Boost Farming or Burrowland after shares are released, the LP tokens remain staked while liquidity is withdrawn, enabling double use of the same assets.\n4. **Impact:** This can lead to a complete drain of funds from the Boost Farming and Burrowland contracts due to inconsistent state across systems.\n",
+            "severity": "high",
+            "files": [
+                "ref-contracts/ref-exchange/src/shadow_actions.rs"
+            ],
+            "location": [
+                "ref-contract/ref-exchange/src/shadow_actions.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Persistent Use of Outdated Seed State",
+            "description": "1. **Description:** The `get_seed()` and `get_seed_unwrap()` functions prioritize reading from the deprecated `Farmer.seeds` field instead of the updated `Farmer.vseeds`, while `set_seeds()` only writes to `vseeds`.\n2. **Cause:** The read and write operations are misaligned across two different storage fields, leading to stale data being used.\n3. **Exploitation:** An attacker could manipulate the system by exploiting the discrepancy between old and new seed states, especially during state transitions.\n4. **Impact:** The continued use of outdated seed data results in incorrect updates to both `seeds` and `vseeds`, leading to inaccurate reward calculations and potential fund loss.\n",
+            "severity": "high",
+            "files": [
+                "ref-contracts/mock-boost-farming/src/farmer.rs"
+            ],
+            "location": [
+                "boost-farm/contracts/boost-farming/src/farmer.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Improper LP Token Collateral Price Calculation",
+            "description": "1. **Description:** The `get_collateral_sum_with_volatility_ratio()` function calculates LP token collateral value based on the underlying token prices, but does not validate or secure the redemption amount of those tokens.\n2. **Cause:** The quantity of underlying tokens that an LP token can redeem is manipulatable, making the derived price unreliable.\n3. **Exploitation:** An attacker can manipulate the LP token's underlying reserves to artificially inflate or deflate its perceived value, affecting collateral and borrowing power.\n4. **Impact:** This allows attackers to borrow excessive funds or trigger unjustified liquidations, undermining the financial integrity of the protocol.\n",
+            "severity": "high",
+            "files": [
+                "burrowland/contracts/contract/src/position.rs"
+            ],
+            "location": [
+                "burrowland/contracts/contract/src/position.rs"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,98 @@
+{
+    "path": "reports/adevar/2026-01-12_Ignition_Stake_Pool_Solana_audit_report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/Tempest-Finance/spl-stake-pool"
+        ],
+        "commit_id": [
+            "82dbce2ba5f9e31134f88a7c01a5f18c56b9886f"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-01-12",
+        "project_path": "contracts/2026-01-12_Ignition_Stake_Pool_Solana_audit_report.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "The program is forked from an outdated version of the stake pool program",
+            "description": "The Ignition Stake Pool program was forked from an outdated version of the SPL stake-pool program (commit 864ba3c), which predates v2.0.4 and lacks seventeen critical security patches. The cause is the failure to rebase on the latest secure version of the upstream repository. This exposes the protocol to known vulnerabilities such as stake account hijacking during cluster restarts, unauthorized stake manipulation, reserve depletion attacks, and validator accounting inconsistencies. An attacker could exploit these inherited flaws to manipulate stake accounts or drain protocol reserves. The impact includes potential loss of user or protocol funds and compromise of core staking functionality.\n",
+            "severity": "high",
+            "location": [
+                "https://github.com/Tempest-Finance/spl-stake-pool"
+            ],
+            "files": [
+                "spl-stake-pool/program/src/lib.rs",
+                "spl-stake-pool/program/src/processor.rs",
+                "spl-stake-pool/program/Cargo.toml"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Unconditional Rent Transfer on Stake Account Creation",
+            "description": "When creating a new stake account, the program unconditionally transfers the full rent-exempt reserve amount from the payer to the new account without first checking if the account already holds lamports. The cause is the absence of a pre-check for existing lamports in the target stake account. This could be exploited by an attacker who pre-funds a stake account to force the protocol to overpay rent, leading to unnecessary fund expenditure by the payer. While the direct financial impact is limited to wasted transaction fees and lamports, repeated exploitation could result in significant cumulative losses for users or the protocol.\n",
+            "severity": "low",
+            "location": [
+                "processor.rs::L3401-L3405"
+            ],
+            "files": [
+                "spl-stake-pool/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Users burn more pool tokens than stake lamports received when paying for the stake account rent themselves",
+            "description": "In the process_withdraw_stake function, when users fund the stake account themselves using session keys, they burn pool tokens equivalent to the full withdraw_lamports amount but only receive split_lamports (withdraw_lamports - stake_rent) worth of stake. The root cause is incorrect token burning logic that does not differentiate between user-funded and paymaster-funded stake accounts. An attacker could exploit this by encouraging users to self-fund stake accounts, effectively overcharging them in pool tokens. The impact is economic inefficiency and unfair value extraction from users, leading to loss of trust and potential user fund loss in edge cases.\n",
+            "severity": "low",
+            "location": [
+                "processor.rs::L3454-L3463"
+            ],
+            "files": [
+                "spl-stake-pool/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "minAmountOut tokens cannot be specified in deposit/withdraw wSOL functions",
+            "description": "The DepositWsolWithSession and WithdrawWsolWithSession instructions hardcode the slippage parameter to None, preventing users from setting a minimum output amount (minAmountOut). The cause is the lack of user-configurable slippage protection in session-based wSOL operations. This exposes users to slippage risk during volatile market conditions, where the actual output may be significantly lower than expected. An attacker could exploit price volatility or front-run transactions to force unfavorable exchange rates. The impact is potential financial loss for users due to unfavorable token swaps, undermining user confidence in the protocol's fairness and reliability.\n",
+            "severity": "low",
+            "location": [
+                "processor.rs::L4033-L4039"
+            ],
+            "files": [
+                "spl-stake-pool/program/src/instruction.rs",
+                "spl-stake-pool/program/src/processor.rs"
+            ]
+        }
+    ]
+}

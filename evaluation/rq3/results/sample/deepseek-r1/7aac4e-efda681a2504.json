@@ -1,0 +1,184 @@
+{
+    "project": "07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json",
+    "files": [
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd11_stake_sol.rs",
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/restaking/mod.rs",
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd7_unstake_lst.rs",
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd1_initialize.rs",
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd14_delegate_vst.rs",
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/commands/cmd13_restake_vst.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.25,
+        "recall": 0.5714285714285714,
+        "f1": 0.34782608695652173
+    },
+    "cwe_ground_truth": [
+        "CWE-755",
+        "CWE-390",
+        "CWE-547",
+        "CWE-1078",
+        "CWE-703",
+        "CWE-710",
+        "CWE-1076"
+    ],
+    "cwe_detected": [
+        "CWE-392",
+        "CWE-393",
+        "CWE-755",
+        "CWE-682",
+        "CWE-228",
+        "CWE-691",
+        "CWE-390",
+        "CWE-284",
+        "CWE-274",
+        "CWE-703",
+        "CWE-754",
+        "CWE-280"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Undocumented magic values for minimum operation thresholds",
+            "description": "Hardcoded threshold values (e.g., 1_000_000, 1_000_000_000) are used in various commands without documentation. The root cause is lack of named constants and comments. These values represent minimum operation sizes (e.g., 1 SOL), but their undocumented nature makes it difficult to assess correctness across tokens with different decimals. The impact is reduced code clarity and maintainability, increasing the risk of misconfiguration when integrating new tokens.\n"
+        },
+        {
+            "title": "Unimplemented vault types create silent failures",
+            "description": "Vault types like SolvBTCVault are present in match statements but have placeholder implementations that skip execution. The root cause is incomplete feature implementation. Operations involving these vaults appear to succeed but perform no action, leading to silent failures. The impact is user confusion and potential loss of functionality expectations, as funds may not be processed as intended without any error indication.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The analysis identified multiple security concerns:\n1. Missing operator signer checks in delegation operations could allow unauthorized actions (CWE-284)\n2. Insufficient fee validation may lead to incorrect accounting during batch unstaking (CWE-682)\n3. Batch processing without proper limits could cause transaction failures (CWE-691)\n4. Unvalidated return values from critical operations risk state inconsistencies (CWE-703)\n",
+            "findings": [
+                {
+                    "title": "Missing Operator Signer Verification in Delegation Operations",
+                    "description": "Critical delegation functions in DelegateVSTCommand (cmd14_delegate_vst.rs) and \nRestakeVSTCommand (cmd13_restake_vst.rs) lack signer verification for operator accounts. \nThis allows any account to be passed as operator, potentially enabling unauthorized \ndelegation operations and fund movements.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Insufficient Fee Validation During Batch Unstaking",
+                    "description": "In UnstakeLSTCommand (cmd7_unstake_lst.rs), the fee difference validation only accounts for \na single operation's rounding error (diff <= 1) but batches can process multiple operations. \nThis could allow cumulative rounding errors exceeding validation limits (1 + batch_size) \ncausing valid transactions to fail.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unbounded Batch Processing Risks Transaction Failures",
+                    "description": "The RestakeVSTCommand (cmd13_restake_vst.rs) processes batches without size limiting, \npotentially exceeding Solana's transaction account limit (max 32 accounts). This could \ncause transaction failures when processing large batches of restaking operations.\n",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Unvalidated Return Values from Critical Operations",
+                    "description": "Multiple commands (cmd1_initialize.rs, cmd11_stake_sol.rs) fail to properly validate return \nvalues from operations like 'update_asset_values' and deposit functions. This could lead to \ninconsistent state changes if operations fail silently.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The analysis revealed multiple security issues across different CWEs:\n1. CWE-754: Insufficient validation of arithmetic operations and return values in staking/unstaking functions could lead to incorrect state transitions or financial miscalculations.\n2. CWE-755: Silent skipping of error conditions for virtual/SolvBTC vaults instead of proper error propagation violates fail-safe principles.\n3. CWE-393: Returning success indicators when no operations were performed misrepresents the actual contract state.\n4. CWE-228: Missing validation of account data structures before deserialization risks processing malformed inputs.\n\nThese vulnerabilities could lead to incorrect financial calculations, misleading operational states, and potential exploits through malformed inputs.\n",
+            "findings": [
+                {
+                    "title": "Insufficient Validation of Minted Token Amounts",
+                    "description": "The marinade_stake_pool_deposit_sol function lacks proper validation when minted token amounts exceed expected values, potentially leading to incorrect state transitions.",
+                    "category": "CWE-754",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Handling of Virtual Vault Conditions",
+                    "description": "Virtual vault and SolvBTC vault cases are silently skipped without proper error propagation, violating fail-safe principles and potentially hiding operational failures.",
+                    "category": "CWE-755",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Misleading Success Status for Skipped Operations",
+                    "description": "The contract returns success indicators when restaking operations are skipped for virtual/SolvBTC vaults, misrepresenting the actual state changes.",
+                    "category": "CWE-393",
+                    "severity": "low",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Insufficient Input Structure Validation",
+                    "description": "The vault validation function processes account data without validating structural integrity, risking deserialization of malformed inputs.",
+                    "category": "CWE-228",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The analysis revealed multiple security issues across different modules:\n1. Insufficient privilege checks in stake/unstake operations could allow unauthorized actions\n2. Improper handling of insufficient funds/tokens could lead to partial operations\n3. Error conditions are detected but not properly handled or reported\n4. Sensitive errors could potentially expose internal program state\n",
+            "findings": [
+                {
+                    "title": "Insufficient Privilege Checks in Stake/Unstake Operations",
+                    "description": "The stake/unstake operations (cmd11_stake_sol.rs, cmd7_unstake_lst.rs) fail to properly verify \nthat the caller has sufficient privileges for validator stake account operations. This could allow \nunauthorized modifications to stake accounts.\n",
+                    "category": "CWE-274",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Handling of Insufficient Funds in Allocation Strategy",
+                    "description": "The allocation strategy logic (cmd11_stake_sol.rs, cmd7_unstake_lst.rs) detects when allocated \namounts exceed available funds but fails to properly handle these conditions. This could lead to \npartial operations and inconsistent fund state.\n",
+                    "category": "CWE-280",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unhandled Error Conditions in Token Allocation",
+                    "description": "The token allocation logic (cmd11_stake_sol.rs) detects allocation failures through strategy.put() \nbut doesn't handle these errors properly. This could lead to silent failures and inconsistent state.\n",
+                    "category": "CWE-390",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Missing Error Reporting in Vault Validation",
+                    "description": "The vault validation logic (mod.rs) detects invalid vault owners but doesn't properly report \nthese error conditions in all code paths. This reduces visibility into security-critical failures.\n",
+                    "category": "CWE-392",
+                    "severity": "low",
+                    "confidence": 0.9
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-228",
+            "CWE-754",
+            "CWE-755",
+            "CWE-397",
+            "CWE-393"
+        ],
+        [
+            "CWE-544",
+            "CWE-392",
+            "CWE-460",
+            "CWE-756",
+            "CWE-209",
+            "CWE-390",
+            "CWE-248",
+            "CWE-280",
+            "CWE-636",
+            "CWE-274",
+            "CWE-396"
+        ]
+    ]
+}

@@ -1,0 +1,165 @@
+{
+    "project": "Sponsored CCTP Deposits from Solana Audit.md.json",
+    "files": [
+        "dataset/contracts/Sponsored CCTP Deposits from Solana Audit.md.json/programs/sponsored-cctp-src-periphery/src/instructions/deposit.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.16666666666666666,
+        "recall": 0.09090909090909091,
+        "f1": 0.11764705882352942
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-664",
+        "CWE-223",
+        "CWE-691",
+        "CWE-1284",
+        "CWE-666",
+        "CWE-841",
+        "CWE-221",
+        "CWE-405",
+        "CWE-400",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-404",
+        "CWE-435",
+        "CWE-285",
+        "CWE-284",
+        "CWE-610"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Program-Sponsored Rents Allow Cheap Griefing That Starves rent_fund and Triggers Repeated Temporary DoS",
+            "description": "This vulnerability arises from the cost asymmetry in the deposit_for_burn function, where the program sponsors rent for both the UsedNonce PDA and the CCTP v2 MessageSent account. The attacker can submit deposits with minimal token amounts while maximizing the hook data size, which increases the rent cost for the MessageSent account. The root cause is the lack of on-chain enforcement of minimum deposit amounts and message size limits, combined with the off-chain quote generator not sufficiently restricting these parameters. An attacker can exploit this by repeatedly submitting such deposits, draining the rent_fund and preventing new sponsored deposits. The impact is a recurring, temporary denial of service (DoS), as the rent_fund must be replenished and the five-day reclaim window delays recovery, allowing the attacker to re-trigger the DoS at low cost.\n"
+        },
+        {
+            "title": "Destination Hook Fails Can Permanently Lock Funds",
+            "description": "The deposit_for_burn function invokes CCTP v2's deposit_for_burn_with_hook, which irreversibly burns tokens on the source chain before confirming successful execution on the destination. If the destination hook fails due to time-sensitive conditions or changing state, the transfer cannot be reversed or rescued under CCTP v2, as it lacks a replacement or unburn mechanism. The root cause is the irreversible nature of the burn operation combined with the dependency on external, potentially failing logic on the destination chain. An attacker or unfortunate user could trigger a burn where the destination conditions are not met, leading to permanent fund lockup. The impact is the permanent loss of user funds when destination-side hooks revert, even if the failure is due to transient or predictable conditions.\n"
+        },
+        {
+            "title": "Missing Rent-Fund Balance Precheck Causes Late Revert and Poor UX in deposit_for_burn",
+            "description": "The deposit_for_burn instruction does not perform an early check on the rent_fund balance before attempting to refund the user for the UsedNonce account creation. The root cause is the absence of a pre-validation step to ensure sufficient lamports are available in the rent_fund. An attacker or regular user could submit transactions when the rent_fund is low, causing the transaction to revert during the refund step after computation has already been consumed. The impact is a poor user experience and wasted transaction fees due to late reverts, as well as inefficient use of compute units, especially under high load or when the fund is near depletion.\n"
+        },
+        {
+            "title": "Repeated PDA Bump Search Wastes Compute Units",
+            "description": "The program derives the rent_fund and state PDAs without storing their bump seeds, forcing Anchor to perform a runtime search for valid bump values on every invocation. The root cause is the omission of persisted bump values in account constraints. This increases compute unit consumption, especially in high-frequency paths like deposit_for_burn. An attacker could exploit this by triggering these paths repeatedly, increasing network load and potentially causing transactions to fail due to compute limits. The impact is inflated and variable compute costs, leading to performance instability and higher transaction failure rates under load.\n"
+        },
+        {
+            "title": "Oversized CCTP Messages Can Permanently Lock Rent in MessageSent Event Accounts",
+            "description": "The deposit_for_burn function allows CCTP messages that are large enough to make the reclaim_event_account transaction exceed Solana's packet size limit due to the inclusion of the attestation with multiple signatures. The root cause is the lack of an upper bound on message size during deposit, which allows creation of MessageSent accounts that cannot be reclaimed. An attacker can exploit this by submitting deposits with messages near the size limit, causing deposit_for_burn to succeed but making reclaim_event_account always fail. The impact is permanent loss of rent funds and a griefing vector that can drain the rent_fund, disrupting service and requiring manual replenishment.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code contains several security-relevant issues rooted in improper access control, incorrect handling of exceptional conditions, and improper control over resource lifetime. \n\nFirst, the `reclaim_used_nonce_account` function allows any caller to close the `used_nonce` account as long as the quote deadline has passed. While it checks that the deadline has passed, it does not verify that the caller has any relationship to the original depositor or is authorized to reclaim the account. This could allow an attacker to front-run the original user and reclaim the rent, leading to a denial-of-service or resource theft (CWE-284: Improper Access Control).\n\nSecond, the `reclaim_event_account` function similarly allows any caller to trigger the reclaiming of the `message_sent_event_data` account via CPI to the MessageTransmitterV2 program. Although the funds are sent to the `rent_fund` account (which is a PDA), the function does not validate whether the caller is authorized to initiate this reclaim. This could interfere with expected system behavior if external actors prematurely reclaim event accounts, especially if timing-sensitive logic depends on the existence of these accounts (CWE-435: Improper Interaction Between Multiple Correctly-Behaving Entities).\n\nThird, the `refund_used_nonce_creation` function performs a transfer of lamports from the `rent_fund` account to the `signer` without ensuring that the `rent_fund` has sufficient balance. While the amount is calculated based on rent exemption, there is no check that the `rent_fund` actually holds at least that amount before the transfer. If the fund is depleted, this could cause the transaction to fail unexpectedly, but more importantly, it assumes the fund is always sufficiently capitalized without any mechanism to ensure that. This represents a flaw in resource lifecycle management (CWE-664: Improper Control of a Resource Through its Lifetime).\n\nAdditionally, while the code uses CPI calls with signer seeds correctly in most places, the lack of access control on reclaim functions opens up potential abuse vectors even if individual components behave correctly in isolation.\n",
+            "findings": [
+                {
+                    "title": "Lack of Access Control in reclaim_used_nonce_account",
+                    "description": "The `reclaim_used_nonce_account` function allows any user to close the `used_nonce` account and reclaim its rent once the deadline has passed, without verifying that the caller is the original depositor or otherwise authorized. This could enable front-running and unauthorized resource reclamation.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unrestricted Reclaim of Event Account",
+                    "description": "The `reclaim_event_account` function does not restrict who can invoke the reclaim operation on the `message_sent_event_data` account. Although the funds go to the rent_fund, unauthorized reclaims could disrupt system invariants or interfere with expected message lifecycle behavior.",
+                    "category": "CWE-435",
+                    "severity": "low",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Improper Resource Control in refund_used_nonce_creation",
+                    "description": "The `refund_used_nonce_creation` function transfers rent-exempt lamports from the `rent_fund` account without verifying that the account has sufficient balance. This assumes the fund is always capitalized, which may not hold under heavy usage or attacks, leading to potential transaction failures or resource exhaustion.",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract contains several security issues related to improper validation and control over resource lifecycle and access. First, in the `deposit_for_burn` function, the `used_nonce` account is initialized with a PDA derived from the quote nonce, but there is no check to ensure that this account does not already exist, potentially allowing replay attacks if the initialization fails to enforce uniqueness strictly. However, Anchor's `init` constraint does enforce this, so this is not a vulnerability.\n\nSecond, and more importantly, the `reclaim_used_nonce_account` function allows any caller to close the `used_nonce` account as long as the quote deadline has passed. This is implemented via the `close = rent_fund` directive, and while the time-based condition is checked, there is no ownership or authority check on who can invoke this function. This means any user can front-run or reclaim the `used_nonce` account, potentially disrupting accounting or enabling resource exhaustion attacks.\n\nThird, the `reclaim_event_account` function similarly allows arbitrary callers to trigger a CPI to `message_transmitter_v2::cpi::reclaim_event_account`, which may reclaim rent from an event data account. Since the `message_sent_event_data` is provided by the caller and only validated via CPI, there is a risk of providing an unintended or malicious account, although the actual safety depends on the downstream program's validation. However, the calling program does not validate that the `message_sent_event_data` corresponds to a previously emitted event or was created by this program, leading to potential abuse.\n\nThese issues primarily stem from improper access control and resource management, particularly around the closure of accounts that should be restricted to specific actors or contexts.\n",
+            "findings": [
+                {
+                    "title": "Improper Access Control in reclaim_used_nonce_account",
+                    "description": "The `reclaim_used_nonce_account` function allows any external user to close the `used_nonce` account once the deadline has passed, without verifying that the caller has the right to do so. This could allow an attacker to disrupt legitimate operations or monopolize the closing process for profit, leading to resource access conflicts or denial of service for legitimate users.",
+                    "category": "CWE-285",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Resource Shutdown Due to Unrestricted Account Closure",
+                    "description": "The `reclaim_used_nonce_account` function uses the `close` constraint to transfer the account's lamports to `rent_fund`, but it does not validate the caller's authority. This constitutes improper resource shutdown as the operation is performed without ensuring the caller is authorized, violating the expected control sphere of the resource.",
+                    "category": "CWE-404",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Externally Controlled Reference to Resource in Another Sphere",
+                    "description": "In `reclaim_event_account`, the `message_sent_event_data` account is provided by the caller and passed directly into a CPI without validation that it was created by this program or corresponds to a legitimate event. This allows an attacker to supply an arbitrary account, potentially influencing the behavior of the downstream program, which constitutes an externally controlled reference to a resource in another sphere.",
+                    "category": "CWE-610",
+                    "severity": "high",
+                    "confidence": 0.93
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-662",
+            "CWE-501",
+            "CWE-269",
+            "CWE-704",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-666",
+            "CWE-669",
+            "CWE-118",
+            "CWE-911",
+            "CWE-610",
+            "CWE-496",
+            "CWE-1038",
+            "CWE-188",
+            "CWE-668",
+            "CWE-1270",
+            "CWE-372",
+            "CWE-436",
+            "CWE-923",
+            "CWE-673",
+            "CWE-1267",
+            "CWE-487",
+            "CWE-1229",
+            "CWE-439",
+            "CWE-706",
+            "CWE-913",
+            "CWE-404",
+            "CWE-221",
+            "CWE-665",
+            "CWE-495",
+            "CWE-282",
+            "CWE-1329",
+            "CWE-400",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-410",
+            "CWE-922",
+            "CWE-580"
+        ]
+    ]
+}

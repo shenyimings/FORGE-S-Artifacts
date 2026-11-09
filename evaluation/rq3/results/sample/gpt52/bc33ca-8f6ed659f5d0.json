@@ -1,0 +1,178 @@
+{
+    "project": "Squads-Multisig-v4.pdf.json",
+    "files": [
+        "dataset/contracts/Squads-Multisig-v4.pdf.json/programs/multisig/src/instructions/vault_transaction_create.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.21428571428571427,
+        "recall": 1.0,
+        "f1": 0.35294117647058826
+    },
+    "cwe_ground_truth": [
+        "CWE-228",
+        "CWE-707"
+    ],
+    "cwe_detected": [
+        "CWE-229",
+        "CWE-167",
+        "CWE-707",
+        "CWE-237",
+        "CWE-682",
+        "CWE-228",
+        "CWE-240",
+        "CWE-233",
+        "CWE-168",
+        "CWE-703",
+        "CWE-20",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "TransactionMessage Not Validated",
+            "description": "1. **Description:** Users can create Vault or Batch transactions containing invalid or nonsensical transaction messages, which are not validated before being stored on-chain.\n2. **Cause:** The program does not parse or validate the inner `TransactionMessage` structure when creating a VaultTx or BatchTx.\n3. **Exploitation:** Attackers or users could submit malformed or syntactically incorrect transaction data, bloating storage or creating confusion during execution attempts.\n4. **Impact:** While not directly exploitable for fund loss, this wastes resources and could interfere with off-chain tooling or user experience.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The instruction largely enforces membership and an “Initiate” permission before allowing transaction creation. However, it contains several on-chain `unwrap()` calls and other unchecked assumptions on attacker-controlled or state-controlled values. These can trigger panics (program aborts) rather than returning a controlled error, creating denial-of-service conditions in edge cases (e.g., when `multisig.transaction_index` overflows). Additionally, the code deserializes and stores an untrusted “transaction message” without performing local structural validation (e.g., indices bounds), relying on downstream code (`try_into()` and later execution) to be safe; if those downstream components assume well-formedness, malformed messages could cause out-of-bounds/panic or unintended behavior when integrated. Finally, user-controlled `ephemeral_signers` can drive expensive PDA derivations; while the caller pays, it can still be used to exhaust compute and fail the instruction in a predictable way.\n",
+            "findings": [
+                {
+                    "title": "On-chain panics via unchecked `unwrap()` on transaction index and bumps",
+                    "description": "The code uses multiple `unwrap()` calls in security-relevant paths:\n- PDA seed derivation in the `#[account(init,...)]` constraint uses:\n  `multisig.transaction_index.checked_add(1).unwrap()`\n- Handler logic repeats:\n  `let transaction_index = multisig.transaction_index.checked_add(1).unwrap();`\n- Bump fetch uses:\n  `transaction.bump = *ctx.bumps.get(\"transaction\").unwrap();`\nIf `multisig.transaction_index` reaches its maximum value, `checked_add(1)` returns `None` and `unwrap()` panics, aborting the program instead of returning a controlled error. Similarly, any unexpected absence of the bump entry will panic. Panics create denial-of-service conditions and prevent graceful recovery/rotation, and they bypass custom error handling.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient validation of untrusted TransactionMessage structure prior to persistence",
+                    "description": "The instruction accepts `args.transaction_message: Vec<u8>` (untrusted), deserializes it into `TransactionMessage`, and stores it (`transaction.message = transaction_message.try_into()?`) without any local validation in this module that:\n- `num_signers`, `num_writable_signers`, and `num_writable_non_signers` are consistent with `account_keys.len()`\n- each `CompiledInstruction.program_id_index` is < `account_keys.len()`\n- each `CompiledInstruction.account_indexes[i]` is < `account_keys.len()`\n- address table lookup indexes are within bounds / non-duplicative as expected by downstream logic\nIf downstream components (e.g., `try_into()` implementation or the later “execute transaction” instruction) assume these invariants and do not fully defend against malformed inputs, the integration can lead to out-of-bounds access, panics, or unintended account selection at execution time. This is a structured-message well-formedness issue; the comment “must be treated as untrusted” highlights the need for explicit validation boundaries.\n",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Compute-exhaustion vector via user-controlled `ephemeral_signers` PDA derivations",
+                    "description": "`args.ephemeral_signers` (u8, user-controlled) directly determines how many times the program calls `Pubkey::find_program_address` in a loop to compute bumps:\n`let ephemeral_signer_bumps: Vec<u8> = (0..args.ephemeral_signers)...find_program_address(...)`\nA caller can set this to 255, forcing 255 PDA derivations in one instruction. While the caller pays transaction fees, this can reliably push the instruction toward compute limits and cause consistent failures (a form of DoS against the create operation for that transaction attempt). Adding an upper bound consistent with protocol expectations would mitigate this.\n",
+                    "category": "CWE-693",
+                    "severity": "low",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Potential account size miscalculation risk when allocating based on raw message bytes",
+                    "description": "The account is allocated with:\n`space = VaultTransaction::size(args.ephemeral_signers, &args.transaction_message)?`\nbut the stored value is the deserialized/converted structure:\n`transaction.message = transaction_message.try_into()?;`\nIf `VaultTransaction::size(...)` is computed from the raw byte length rather than the eventual serialized size of the stored structured form (which can differ due to length prefixes, representation changes, or normalization in `try_into()`), the account may be under-allocated. Under-allocation can cause serialization failures at the end of the instruction (aborts/failures), creating a persistent inability to create certain transactions (especially with crafted messages).\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.45
+                }
+            ]
+        },
+        {
+            "reasoning": "The instruction builds and stores a user-supplied serialized “transaction message” that will likely be interpreted later to drive real CPI/instruction execution. In this create flow, the code deserializes `args.transaction_message` but performs no semantic validation of the deserialized structure (signer/writable counts, index bounds, uniqueness, etc.). This can lead to inconsistent internal state being persisted and later misinterpreted, as well as panics/DoS when downstream code assumes the structure is well-formed.\n\nAdditionally, the code uses `checked_add(...).unwrap()` for the multisig transaction index in both PDA derivation and state update. If the index ever reaches its maximum, the instruction will panic, causing a permanent denial of service for transaction creation.\n\nFinally, account `space` is computed from the raw bytes of `args.transaction_message`, but the account actually stores `transaction.message = transaction_message.try_into()?` (a structured form). If the `VaultTransaction::size()` calculation does not exactly match the serialized size of the stored representation, the program can allocate insufficient space and later fail at runtime (a structural inconsistency issue).\n",
+            "findings": [
+                {
+                    "title": "Unvalidated TransactionMessage structural invariants (signer/writable counts, uniqueness)",
+                    "description": "`TransactionMessage` contains multiple fields that must be mutually consistent (e.g., `num_signers`, `num_writable_signers`, `num_writable_non_signers` vs `account_keys.len()`, and the implied ordering/meaning of signer vs writable accounts). The create instruction deserializes the message and stores it (`transaction.message = transaction_message.try_into()?`) without validating these invariants.\n\nIf later parts of the program interpret these fields as authoritative when constructing/validating execution, an attacker can persist a message with inconsistent metadata (e.g., claiming more signers/writables than exist) that may:\n- break downstream assumptions and cause failures/DoS, or\n- in the worst case, influence how accounts are classified (signer/writable) during execution if downstream code uses these counters without recomputing them from actual account metas.\n",
+                    "category": "CWE-240",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "No bounds checking on instruction indices in stored message (program_id_index/account_indexes)",
+                    "description": "The stored `CompiledInstruction` fields (`program_id_index` and `account_indexes`) are not validated to ensure they are within `account_keys` bounds, and no validation is performed for address table lookup indexes either.\n\nThis allows creation of syntactically invalid messages that can later cause out-of-bounds access, panics, or hard failures when the program (or an executor instruction) attempts to resolve indices into `account_keys` / loaded addresses. Even if downstream code returns an error instead of panicking, this enables persistent invalid state and potential denial-of-service for any flow that tries to execute or inspect the transaction.\n",
+                    "category": "CWE-228",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Transaction index overflow causes panic due to unwrap (permanent DoS at max index)",
+                    "description": "The PDA seed derivation and state update both do:\n- `multisig.transaction_index.checked_add(1).unwrap()`\n\nIf `transaction_index` reaches its maximum value for its integer type, `checked_add` returns `None` and the subsequent `unwrap()` will panic. This creates a permanent denial-of-service for creating further transactions once the counter saturates.\n\nThis is an input/state validation issue: the program should gracefully error on overflow (e.g., `require!(..., ...)`) instead of panicking.\n",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Potential mismatch between allocated account space and stored message representation",
+                    "description": "The transaction account `space` is computed via:\n`VaultTransaction::size(args.ephemeral_signers, &args.transaction_message)?`\nwhich is based on the raw serialized bytes provided by the caller.\n\nHowever, the program stores `transaction.message = transaction_message.try_into()?` (a structured/typed representation). If the `size()` function does not exactly match the serialized size of the stored representation (including any length prefixes, SmallVec encoding, etc.), the account may be allocated too small, causing runtime failures when writing/serializing the account, or resulting in persistent inconsistent state assumptions.\n\nThis is a structural consistency risk between two representations of the same logical element (raw bytes vs parsed/stored form).\n",
+                    "category": "CWE-240",
+                    "severity": "medium",
+                    "confidence": 0.55
+                }
+            ]
+        },
+        {
+            "reasoning": "The instruction `vault_transaction_create` accepts multiple untrusted, user-controlled fields (`vault_index`, `ephemeral_signers`, and especially the opaque `transaction_message` bytes) and persists a parsed `TransactionMessage` into on-chain state. Several places either do not validate structural consistency of this complex message (counts vs vectors, indices into vectors), do not validate parameters against expected ranges/existence, or use `unwrap()` on fallible operations (checked_add, bump lookup) which can convert malformed/extreme inputs or boundary states into panics (DoS). Additionally, the code deserializes from a byte slice without explicitly enforcing full consumption, which can allow extra trailing bytes to be silently ignored, creating ambiguity between what was submitted vs what is stored/validated.\n",
+            "findings": [
+                {
+                    "title": "Unchecked overflow in transaction index derivation can panic (DoS at boundary)",
+                    "description": "The transaction PDA seeds and the `transaction_index` update use:\n- `multisig.transaction_index.checked_add(1).unwrap()` (in account seeds)\n- `let transaction_index = multisig.transaction_index.checked_add(1).unwrap();`\nIf `multisig.transaction_index` reaches its maximum value, `checked_add` returns `None` and `.unwrap()` will panic, causing the instruction to abort. This creates a deterministic denial-of-service condition at the boundary (and also makes behavior dependent on a panic rather than a handled error).\n",
+                    "category": "CWE-229",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "TransactionMessage deserialization may accept/ignore trailing bytes (message ambiguity)",
+                    "description": "The code parses the message with:\n`TransactionMessage::deserialize(&mut args.transaction_message.as_slice())?;`\nUsing `deserialize` on a slice reader may not guarantee that the entire provided byte array is consumed (depending on the underlying Borsh/Anchor implementation). If trailing bytes are ignored, an attacker can provide a `transaction_message` that contains a valid prefix (the parsed message) plus additional appended data that is not reflected in the stored `transaction.message`.\nThis can create ambiguity/malleability between the raw bytes submitted (and potentially signed/off-chain indexed) and the on-chain interpreted message, which is an instance of accepting an additional unexpected element.\n",
+                    "category": "CWE-167",
+                    "severity": "low",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Missing consistency checks between count fields and vectors in TransactionMessage",
+                    "description": "`TransactionMessage` includes internal count fields:\n  - `num_signers`\n  - `num_writable_signers`\n  - `num_writable_non_signers`\nbut `vault_transaction_create` does not validate these values against `account_keys.len()` (or against each other). A malformed message can set counts that exceed the number of keys or violate expected invariants (e.g., writable signers > signers).\nAny later logic that relies on these counters to determine signer/writable sets may mis-handle the message, potentially leading to incorrect authorization decisions or runtime failures.\n",
+                    "category": "CWE-168",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "No bounds/structure validation for instruction and lookup indices (OOB / incorrect account selection)",
+                    "description": "The message contains multiple index-based references:\n  - `CompiledInstruction.program_id_index` (index into `account_keys`)\n  - `CompiledInstruction.account_indexes` (indices into `account_keys`)\n  - `MessageAddressTableLookup.writable_indexes` / `readonly_indexes` (indices into loaded addresses)\n`vault_transaction_create` does not validate that these indices are within bounds of the referenced arrays, nor that the overall structure is coherent.\nIf subsequent execution code iterates these indices to build instruction account metas, the lack of validation can lead to out-of-bounds lookups (panic/abort) or unintended account/program selection (logic confusion), depending on how later code handles invalid indices.\n",
+                    "category": "CWE-237",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "vault_index parameter is not validated against multisig/vault configuration",
+                    "description": "`args.vault_index` is used to derive `vault_bump` and stored on the transaction, but there is no check that:\n  - the vault at `vault_index` actually exists/configured for this multisig, or\n  - the index is within an allowed range.\nThis can allow creation of transactions referencing non-existent/unintended vaults, leading to later execution failures or state inconsistency (depending on how vault accounts are validated at execution time).\n",
+                    "category": "CWE-233",
+                    "severity": "medium",
+                    "confidence": 0.65
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-463",
+            "CWE-240",
+            "CWE-138",
+            "CWE-172",
+            "CWE-116",
+            "CWE-74",
+            "CWE-170",
+            "CWE-228",
+            "CWE-20",
+            "CWE-1426"
+        ],
+        [
+            "CWE-166",
+            "CWE-233",
+            "CWE-229",
+            "CWE-167",
+            "CWE-168",
+            "CWE-241",
+            "CWE-237"
+        ]
+    ]
+}

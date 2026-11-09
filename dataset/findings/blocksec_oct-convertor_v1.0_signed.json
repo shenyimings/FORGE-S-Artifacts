@@ -1,0 +1,176 @@
+{
+    "path": "reports/blocksec_oct-convertor_v1.0_signed.pdf",
+    "project_info": {
+        "url": "https://github.com/octopus-network/nep141-token-convertor",
+        "commit_id": "7c8a44b49bf62ee57656f67a0ebcea55cb8015c5",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-05-16",
+        "project_path": "contracts/blocksec_oct-convertor_v1.0_signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Insecure Project Configuration",
+            "description": "The Rust programming language does not enable runtime integer overflow/underflow checks by default, which can lead to unexpected behaviors in the contract. This lack of runtime checks means that arithmetic operations may wrap around silently, leading to incorrect state transitions or balance calculations. An attacker could exploit arithmetic overflows or underflows to manipulate balances or bypass constraints. The impact includes potential loss of funds or incorrect contract behavior due to undetected integer overflows.\n",
+            "severity": "low",
+            "files": [
+                "nep141-token-convertor-contract/Cargo.toml"
+            ],
+            "location": [
+                "Cargo.toml"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ],
+                "4": [
+                    "CWE-638"
+                ]
+            },
+            "title": "Contract cannot be Paused Completely",
+            "description": "The contract includes a pause mechanism, but the assertion `assert_contract_is_not_paused` is missing in key functions such as `storage_deposit`, `storage_withdraw`, and `storage_unregister`. This omission allows users to continue registering or unregistering accounts even when the contract is paused. The root cause is incomplete access control enforcement across all state-modifying functions. An attacker could exploit this by performing account modifications during a pause intended to halt all operations. The impact is a weakened emergency stop mechanism, reducing the effectiveness of the admin's control during critical situations.\n",
+            "severity": "low",
+            "files": [
+                "nep141-token-convertor-contract/src/storage_impl.rs"
+            ],
+            "location": [
+                "TokenConvertor.storage_deposit",
+                "TokenConvertor.storage_withdraw",
+                "TokenConvertor.storage_unregister"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Improper Numeric Type",
+            "description": "The `pool_id` field in the contract is of type `u32`, which has a maximum value of 4,294,967,295. Since `pool_id` is incremented by 1 for each new pool creation, it is susceptible to integer overflow if a large number of pools are created. The root cause is the use of an insufficiently sized numeric type for a counter that may grow indefinitely. An attacker could potentially force an overflow by creating a vast number of pools, leading to pool ID collisions or undefined behavior. The impact includes potential disruption of pool management and incorrect pool assignments.\n",
+            "severity": "low",
+            "files": [
+                "nep141-token-convertor-contract/src/conversion_pool.rs"
+            ],
+            "location": [
+                "ConversionPool.internal_assign_pool_id#229-232"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect Calculation of Output Token Amount (I)",
+            "description": "The function `calculate_output_token_amount` multiplies and then divides by the same token rate (`self.in_token_rate`), which results in the output amount being equal to the input amount regardless of the actual exchange rate. This is a logical error in the conversion formula. The root cause is incorrect implementation of the price conversion logic. An attacker could exploit this by performing conversions that ignore the intended rate, leading to unfair trades. The impact is incorrect token output amounts, potentially leading to loss of funds for the contract or users.\n",
+            "severity": "high",
+            "files": [
+                "nep141-token-convertor-contract/src/conversion_pool.rs"
+            ],
+            "location": [
+                "ConversionPool.calculate_output_token_amount#115-118"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect Calculation of Output Token Amount (II)",
+            "description": "The function `calculate_reverse_output_token_amount` incorrectly uses `self.out_token_rate` as the multiplier and `self.in_token_rate` as the divisor, reversing the intended price mechanism. This leads to incorrect output calculations that do not reflect the actual exchange rate. The root cause is a swapped use of input and output token rates in the formula. An attacker could exploit this to receive more tokens than expected during reverse conversions. The impact includes financial loss due to miscalculated token outputs.\n",
+            "severity": "high",
+            "files": [
+                "nep141-token-convertor-contract/src/conversion_pool.rs"
+            ],
+            "location": [
+                "ConversionPool.calculate_reverse_output_token_amount#120-124"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "Improper Storage Management",
+            "description": "The function `assert_storage_balance_bound_min` compares the storage balance of a specified `account_id` with `env::predecessor_account_id()`, which may not be the same. This can lead to incorrect storage fee validation, especially in cross-contract calls where the predecessor account is not the actual user. The root cause is improper parameter usage in storage validation logic. An attacker could exploit this by triggering storage checks with mismatched accounts, potentially causing legitimate transactions to fail. The impact is user transactions failing due to incorrect storage balance comparisons.\n",
+            "severity": "low",
+            "files": [
+                "nep141-token-convertor-contract/src/storage_impl.rs"
+            ],
+            "location": [
+                "TokenConvertor.assert_storage_balance_bound_min#85-95"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing Configuration Check",
+            "description": "The `new` function for `ConversionPool` does not validate that `in_token_rate` and `out_token_rate` are non-zero, which can lead to division by zero errors or zero output calculations. The root cause is missing input validation for critical configuration parameters. An attacker could create a pool with zero rates, rendering it unusable or causing runtime errors. The impact includes potential contract reverts or malfunctioning pools due to invalid rate configurations.\n",
+            "severity": "low",
+            "files": [
+                "nep141-token-convertor-contract/src/conversion_pool.rs"
+            ],
+            "location": [
+                "ConversionPool.new#47-68"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Accounts cannot be Registered in ft_transfer_resolved",
+            "description": "The `ft_transfer_resolved` function attempts to revert a failed token transfer by depositing tokens back to the sender, but it does not ensure the sender account exists. If the account does not exist, the deposit may fail or the tokens could be lost. The root cause is the lack of account registration before deposit in the rollback path. An attacker could exploit this by sending tokens to non-existent accounts, leading to locked funds. The impact is that tokens may become permanently locked in the contract if the sender account is not properly registered.\n",
+            "severity": "medium",
+            "files": [
+                "nep141-token-convertor-contract/src/account.rs"
+            ],
+            "location": [
+                "TokenConvertor.ft_transfer_resolved#107-133"
+            ]
+        }
+    ]
+}

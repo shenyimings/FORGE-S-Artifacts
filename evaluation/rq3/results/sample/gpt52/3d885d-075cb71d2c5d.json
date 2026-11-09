@@ -1,0 +1,121 @@
+{
+    "project": "Raum Network Audit Report - QuillAudits.pdf.json",
+    "files": [
+        "dataset/contracts/Raum Network Audit Report - QuillAudits.pdf.json/corecontracts/token/src/balance.rs",
+        "dataset/contracts/Raum Network Audit Report - QuillAudits.pdf.json/corecontracts/token/src/allowance.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.16666666666666666,
+        "recall": 1.0,
+        "f1": 0.2857142857142857
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-697",
+        "CWE-190",
+        "CWE-682",
+        "CWE-284",
+        "CWE-193",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Possibility of overflow and underflow when performing arithmetic operations",
+            "description": "1. **Description:** Several functions in the codebase use native arithmetic operations (+, -) without bounds checking, creating potential for integer overflow or underflow.\n2. **Cause:** The use of unchecked arithmetic in functions like `receive_balance`, `spend_balance`, `spend_allowance`, and `add_pair_to_all_pairs` can result in unexpected behavior when values exceed i128 limits or go below zero.\n3. **Exploitation:** An attacker could craft transactions that cause balances or counters to overflow or underflow, potentially leading to incorrect state updates or denial of service.\n4. **Impact:** This could result in corrupted state, incorrect balance tracking, or contract malfunction, though the risk is mitigated as the issue has been resolved.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code contains multiple issues rooted in incorrect calculation and missing validation around signed arithmetic. Both balances and allowances use `i128` and accept `amount` values without enforcing non-negativity or using checked arithmetic, enabling wrap-around/overflow and “negative spend” style minting. Additionally, the helper functions mutate storage without any authorization checks, relying entirely on external callers to enforce access control, which is a common source of improper access control when integrated into a larger contract.\n",
+            "findings": [
+                {
+                    "title": "Unchecked signed arithmetic allows balance overflow/underflow and supply manipulation",
+                    "description": "`receive_balance` and `spend_balance` update balances via `balance + amount` and `balance - amount` on `i128` without `checked_add/checked_sub`.\n\nIn release builds, Rust signed overflow typically wraps (two’s complement), which can turn a large positive addition into a negative value or vice versa. If these balances are used as an accounting source of truth, an attacker may trigger wrap-around to obtain an unintended balance.\n\nAffected code:\n- `receive_balance`: `write_balance(e, addr, balance + amount);`\n- `spend_balance`: `write_balance(e, addr, balance - amount);`\n",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Negative amount inputs enable minting via spend/allowance functions",
+                    "description": "The functions accept `amount: i128` and do not enforce `amount >= 0`. This creates multiple exploit paths:\n\nBalance path:\n- In `spend_balance`, the guard `if balance < amount` is bypassable when `amount` is negative (e.g., `balance < -10` is usually false).\n- Then `balance - amount` increases the balance (subtracting a negative), effectively minting/crediting funds.\n\nAllowance path:\n- In `spend_allowance`, the guard `if allowance.amount < amount` is also bypassable for negative `amount`.\n- Then `allowance.amount - amount` increases the allowance, allowing a spender to increase their own allowance rather than decrease it.\n\nThis is a security-critical accounting flaw if any external entrypoint can pass arbitrary `amount` values into these helpers.\n",
+                    "category": "CWE-682",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Storage mutation helpers lack intrinsic authorization checks (caller-dependent access control)",
+                    "description": "`receive_balance`, `spend_balance`, and `write_allowance/spend_allowance` directly mutate contract storage for arbitrary `Address` values, but they do not perform any authorization checks (e.g., requiring `addr`/`from` to authorize, or requiring a privileged role).\n\nIf these functions are reachable from contract entrypoints without strict auth in the caller, any user could:\n- Credit/debit balances of arbitrary addresses.\n- Set or manipulate allowances between arbitrary parties.\n\nWhile these may be intended as internal helpers, they are `pub` and enforce no protection mechanism themselves, making the overall system fragile and prone to integration mistakes.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Expiration boundary may be off by one ledger (potentially unintended allowance validity)",
+                    "description": "Allowance expiry logic treats an allowance as expired only when:\n- `allowance.expiration_ledger < e.ledger().sequence()`\n\nAnd `write_allowance` only rejects past expirations when:\n- `amount > 0 && expiration_ledger < e.ledger().sequence()`\n\nThis permits `expiration_ledger == current_ledger` for a positive allowance, making it valid in the current ledger. If the intended rule is “must expire strictly after the current ledger” or “invalid at expiration_ledger”, the comparison should likely be `<=` instead of `<`. This can extend allowance validity by one ledger relative to expectations.\n",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.55
+                }
+            ]
+        },
+        {
+            "reasoning": "The code performs token balance and allowance accounting using signed i128 arithmetic without validating that `amount` values are non-negative and without using checked/saturating arithmetic. In Rust release/Wasm builds, overflowing i128 arithmetic can wrap, which can corrupt balances/allowances (CWE-190/CWE-128) and permit underflow/wraparound when subtracting (CWE-191). Additionally, `spend_*` routines rely on comparisons that are bypassable with negative `amount` values, turning “spend” operations into credits. The allowance expiration check also appears to allow use at exactly `expiration_ledger` (expired only when `< current`), which may be an off-by-one in ledger-based expiry semantics (CWE-193).\n",
+            "findings": [
+                {
+                    "title": "Unchecked i128 addition in receive_balance can overflow/wrap",
+                    "description": "In `receive_balance`, the contract computes `balance + amount` and writes it directly:\n`write_balance(e, addr, balance + amount);`\nIf `balance` is near `i128::MAX` and `amount` is positive (or `amount` is near `i128::MIN` and negative), this addition can overflow. In typical optimized Rust/Wasm builds, overflow wraps in two’s complement, potentially turning a large positive balance into a negative/low balance (or vice versa), corrupting token accounting.\n",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Negative amount bypass + subtraction wraparound in spend_balance",
+                    "description": "`spend_balance` assumes `amount` is a positive spend, but it never enforces `amount >= 0`.\nThe check `if balance < amount { ... }` is bypassable with a negative `amount` (since `balance < negative_amount` is usually false), after which it performs:\n`write_balance(e, addr, balance - amount);`\nSubtracting a negative amount increases the balance, effectively allowing a caller to “spend” a negative value to credit themselves. Additionally, `balance - amount` can overflow/wrap for extreme values, corrupting balances.\n",
+                    "category": "CWE-191",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Allowance underflow/overflow and negative spend bypass in spend_allowance/write_allowance",
+                    "description": "Allowance math uses unchecked i128 arithmetic and does not restrict negative amounts:\n- `write_allowance` stores any signed `amount` without enforcing `amount >= 0`.\n- `spend_allowance` checks `if allowance.amount < amount` which is bypassable with negative `amount`, then updates with:\n  `allowance.amount - amount`\n  Subtracting a negative amount increases the allowance, allowing a spender to increase their allowance by “spending” a negative value. The subtraction can also overflow/wrap for extreme values, corrupting allowance state.\n",
+                    "category": "CWE-191",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Potential off-by-one in allowance expiration ledger check",
+                    "description": "In `read_allowance`, an allowance is considered expired only when:\n`allowance.expiration_ledger < e.ledger().sequence()`\nThis means the allowance remains usable when `expiration_ledger == current_ledger_sequence`.\nIf the intended semantics are “expires at expiration_ledger” (i.e., unusable starting that ledger), this is an off-by-one that grants an extra ledger of validity.\n",
+                    "category": "CWE-193",
+                    "severity": "medium",
+                    "confidence": 0.65
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-135",
+            "CWE-191",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-1339"
+        ]
+    ]
+}

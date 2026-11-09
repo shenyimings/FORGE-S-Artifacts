@@ -1,0 +1,95 @@
+{
+    "path": "reports/Lido-2.pdf",
+    "project_info": {
+        "url": "https://github.com/lidofinance/solido/tree/migrate_v2",
+        "commit_id": "db63de82bee26735b48f10150fac8a1a31177a00",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-10-13",
+        "project_path": "contracts/Lido-2.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Privilege Escalation through Account Type Confusion",
+            "description": "1. **Description:** The vulnerability stems from improper account deserialization using `try_from_slice_unchecked`, which does not validate the account type before processing. This allows malicious actors to craft accounts that mimic legitimate Lido program accounts.\n2. **Cause:** The AccountType field was not placed at the beginning of the account data, enabling attackers to forge account data such that maintainer or validator lists could be interpreted as normal Lido state accounts.\n3. **Exploitation:** An attacker could construct malicious account data with carefully arranged bytes so that the program misinterprets a maintainer or validator list as a valid Lido instance account, potentially leading to privilege escalation.\n4. **Impact:** This could allow unauthorized access to privileged operations or state manipulation, undermining the integrity of the contract logic.\n",
+            "severity": "medium",
+            "location": [],
+            "files": [
+                "program/src/state.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Permanent Stake Denial via Stake Account Reuse",
+            "description": "1. **Description:** Stake accounts are managed using a sequential range of seeds recorded by `seeds.begin` and `seeds.end`. When a new validator is staked for the first time in an epoch, a temporary stake account is created using the current `seeds.end` value, which is then incremented afterward.\n2. **Cause:** The same seed (`seeds.end`) is used for a new stake account before it is incremented, and if a second stake account is merged into the first, the original account persists even after being marked for deletion. The `seeds.end` account remains undeleted because it retains sufficient rent-exempt balance.\n3. **Exploitation:** An attacker could exploit this by creating two stake accounts, merging the second into the first, and preventing the increment of `seeds.end`, thereby reusing the same seed for future accounts or blocking further stake account creation.\n4. **Impact:** This could lead to permanent denial of stake operations by corrupting the expected sequential seed logic, potentially disrupting validator staking and system functionality.\n",
+            "severity": "low",
+            "location": [],
+            "files": [
+                "program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Checks During Initialization can be Improved",
+            "description": "1. **Description:** The initialization process lacks several critical security checks, including validation of the mint's freeze authority and owner, as well as proper verification of the reserve account's rent-exempt status.\n2. **Cause:** The `check_mint()` function only validates the mint authority but ignores the freeze authority and owner fields. Additionally, the reserve account is accepted without confirming it is rent-exempt, relying instead on implicit assumptions.\n3. **Exploitation:** An attacker could initialize the program with a maliciously crafted mint that has a non-zero supply or a dangerous freeze authority, potentially allowing unauthorized minting or freezing of tokens.\n4. **Impact:** While the impact is limited due to other safeguards (e.g., treasury account existence indirectly validating ownership), it introduces unnecessary risk and reduces robustness against edge-case exploits.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "program/src/logic.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Developer/Treasury Token Account Owners Can Stop Rewards Collection",
+            "description": "1. **Description:** The owner of the developer or treasury token accounts can unilaterally change the reward distribution settings via the `ChangeRewardDistribution` instruction.\n2. **Cause:** There is no access control restricting who can invoke this function\u2014only ownership of the associated token accounts is required, which may not align with intended governance.\n3. **Exploitation:** A malicious or compromised owner of these accounts could redirect or halt reward distributions, disrupting the economic model.\n4. **Impact:** While no rewards are permanently lost (as they can be restored), this represents a temporary disruption in reward flow, affecting user trust and system reliability.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "program/src/processor.rs"
+            ]
+        }
+    ]
+}

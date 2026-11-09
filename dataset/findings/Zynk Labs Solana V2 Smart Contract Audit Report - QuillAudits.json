@@ -1,0 +1,139 @@
+{
+    "path": "reports-without-source/Zynk Labs Solana V2 Smart Contract Audit Report - QuillAudits.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/Zynklabs/zynk-protocol-smart-contracts_solana"
+        ],
+        "commit_id": [
+            "5b8f6f17369b26aeeffa971a0597320f493ec47d"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-07-10",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Replenish allows worthless tokens",
+            "description": "The `replenish` instruction does not validate the mint of the token accounts involved in the transfer, allowing a malicious partner deposit wallet to use a token account with a worthless mint. \nThe root cause is the lack of validation that both the source (`pdw_token_account`) and destination (`zow_token_account`) token accounts have the correct protocol mint.\nAn attacker could exploit this by creating a token account with a worthless mint, setting its owner to `zynk_op_wallet`, and using it in the `replenish` call to artificially inflate `order_tracker.amount_in`.\nThis leads to protocol accounting corruption, potential loss of funds if the protocol releases assets based on fake replenishments, and bypass of business logic dependent on valid token transfers.\n",
+            "severity": "medium",
+            "location": [
+                "lib.rs::replenish"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Guardian Initialization can be frontran",
+            "description": "The `initialize` function does not set the guardian field, leaving it as `Pubkey::default()`, and the `set_guardian` function allows any caller to set the guardian if it is unset.\nThe root cause is the lack of access control on the `set_guardian` function during initialization, combined with delayed assignment of a critical security role.\nAn attacker could exploit this by frontrunning the intended admin to call `set_guardian` first, thereby gaining control over privileged operations such as pausing and bypassing timelocks.\nThe impact includes unauthorized access to critical functions, loss of protocol control by the legitimate admin, and potential disruption or malicious manipulation of protocol operations.\n",
+            "severity": "medium",
+            "location": [
+                "lib.rs::initialize",
+                "lib.rs::set_guardian"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Unpause Execution Does Not Verify Timelock Action Type",
+            "description": "The `execute_unpause` function does not verify that the timelock request being executed corresponds to the `Unpause` action, only checking execution status and timing/ack conditions.\nThe root cause is the absence of a validation check on `req.action` to ensure it matches `TimelockAction::Unpause`.\nAn attacker could exploit this by executing any valid timelock request (e.g., a wallet update) to unpause the protocol, even if that was not its intended purpose.\nThis could lead to unauthorized or unintended unpausing of the protocol, potentially bypassing governance or security controls and enabling further attacks during an unexpected active state.\n",
+            "severity": "medium",
+            "location": [
+                "lib.rs::execute_unpause"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Rent refund sent to manager instead of zynk operator wallet",
+            "description": "The `CloseOrder` instruction uses the Anchor `close` constraint to send the rent refund to the `manager`, but the `order_tracker` account was funded and created by the `zynk_op_wallet`.\nThe root cause is a mismatch between the account funder (`zynk_op_wallet`) and the designated recipient of the rent refund (`manager`), which violates the principle of returning funds to the original payer.\nWhile not directly exploitable, this behavior results in an unintended transfer of lamports from the protocol operator to the manager.\nThe impact is a minor economic inefficiency and deviation from expected fund flow, though the team has stated this is intentional.\n",
+            "severity": "low",
+            "location": [
+                "lib.rs::close_order"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant account closure in CloseOrder",
+            "description": "The `CloseOrder` instruction both uses the Anchor `close` constraint and manually calls `close_account` to close the `order_tracker` account.\nThe root cause is redundant logic: relying on both declarative (Anchor) and imperative (manual) account closure mechanisms.\nThis duplication is unnecessary and could lead to confusion, potential runtime issues, or unexpected behavior if the account state changes between operations.\nThe impact is limited to code clarity and maintainability, with no direct security risk, but it represents poor coding practice and increases the chance of future bugs.\n",
+            "severity": "low",
+            "location": [
+                "lib.rs::close_order"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Non deterministic Order account creation",
+            "description": "The `order_tracker` account is created without deterministic seeds, meaning its address cannot be predicted or derived off-chain.\nThe root cause is the use of a generated keypair instead of a Program Derived Address (PDA) with known seeds like the order nonce.\nThis makes it impossible to reliably look up order accounts off-chain or verify their existence without on-chain scanning.\nThe impact is reduced transparency and interoperability, as external systems cannot precompute order addresses, limiting composability and auditability, though there is no direct security vulnerability.\n",
+            "severity": "informational",
+            "location": [
+                "lib.rs::pull_and_create_order",
+                "lib.rs::create_order"
+            ],
+            "files": []
+        }
+    ]
+}

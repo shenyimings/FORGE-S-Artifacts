@@ -1,0 +1,474 @@
+{
+    "path": "reports/ackee-blockchain-sollightning-report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/adambor/SolLightning-program",
+            "https://github.com/adambor/BTCRelay-Sol/tree/81f2ab91ec74713c17d7293f0c070504d825a34a"
+        ],
+        "commit_id": [
+            "144010785eeb6616e70255d9146395fd63187abd",
+            "81f2ab91ec74713c17d7293f0c070504d825a34a"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-12-20",
+        "project_path": "contracts/ackee-blockchain-sollightning-report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Initializer can lose refundable fee",
+            "description": "The `offerer_refund` instruction in the SolLightning program does not validate the initializer's account address when refunding funds after a failed transfer from Bitcoin to Solana. This allows the intermediary node to redirect the refundable fee\u2014intended for the initializer (who is the receiver in this case)\u2014to their own account. The vulnerability arises due to the lack of an address check against the stored claimer in the escrow state. An attacker (intermediary node) can exploit this by initiating a refund after the lock time expires and specifying their own account as the recipient of the refundable fee, thereby stealing funds from the initializer. The impact is a direct loss of funds for the initializer, which qualifies as a high-impact, high-likelihood exploit. This issue was later fixed in Revision 2.0 by splitting the instruction and enforcing address validation.\n",
+            "severity": "critical",
+            "files": [
+                "programs/test-anchor/src/instructions.rs",
+                "programs/test-anchor/src/lib.rs"
+            ],
+            "location": [
+                "SolLightning-program/programs/test-anchor/src/lib.rs",
+                "SolLightning-program/programs/test-anchor/src/instructions.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-347"
+                ]
+            },
+            "title": "Transaction hash uniqueness not guaranteed",
+            "description": "The system does not enforce uniqueness of transaction hashes during the initialization of a proof-time locked contract (PTLC) for transfers from Solana to Bitcoin. This allows an attacker (the initializer) to reuse a previously signed refund message from a canceled transaction in a new, identical PTLC setup. The vulnerability stems from the absence of a mechanism to bind the refund message to a unique transaction or swap identifier. The attacker can initialize a transfer, obtain a pre-signed refund from the intermediary, cancel the transaction, then reinitialize a new transfer with the same parameters and replay the old refund message to steal funds. This constitutes a replay attack, enabling theft of locked assets by the initializer without performing a valid Bitcoin payment. The impact is a direct loss of funds for the intermediary node, with high likelihood of exploitation due to the lack of any preventive checks. This was resolved in Revision 2.0 by introducing a unique sequence number in the refund message.\n",
+            "severity": "critical",
+            "files": [
+                "programs/test-anchor/src/instructions.rs",
+                "programs/test-anchor/src/lib.rs"
+            ],
+            "location": [
+                "SolLightning-program/programs/test-anchor/src/lib.rs",
+                "SolLightning-program/programs/test-anchor/src/instructions.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Possibility to lock funds",
+            "description": "The vulnerability allows a receiver on Solana to initialize a PTLC contract in a way that prevents the intermediary node from refunding locked funds. The root cause is the lack of verification during initialization that the claimer's UserAccount PDA exists. An attacker (the receiver) can set `pay_out=false` in the `offerer_initialize` instruction and avoid creating the required PDA. When the intermediary attempts to invoke the `refund` instruction, it must pass the non-existent PDA via `remaining_accounts`, which cannot be created by the intermediary. This leads to a failed transaction and permanently locked funds. The impact is high, as an attacker can cause loss of funds for the intermediary with minimal cost (a single transaction).\n",
+            "severity": "critical",
+            "files": [
+                "programs/test-anchor/src/instructions.rs"
+            ],
+            "location": [
+                "SolLightning-program.offerer_refund#403-407",
+                "anchor/src/lib.rs",
+                "anchor/src/instructions.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Artificial reputation increase",
+            "description": "An intermediary node can artificially inflate its reputation by acting as both the intermediary and either the sender or receiver in a transaction. The vulnerability stems from the logic in the `claimer_claim` instruction, which updates reputation upon successful claim without verifying that the claim involved a genuine third party. If the intermediary knows the secret (in HTLC) or reuses a finalized Bitcoin transaction (in PTLC), it can directly claim funds and increment its success count and volume. Since Solana transaction fees are low, this can be done at minimal cost. The impact is low in terms of direct financial loss but high in terms of system integrity, as reputation data becomes unreliable.\n",
+            "severity": "medium",
+            "files": [
+                "programs/test-anchor/src/instructions.rs"
+            ],
+            "location": [
+                "SolLightning-program.claimer_claim",
+                "anchor/src/lib.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Number of confirmations not limited",
+            "description": "The PTLC contract allows initialization with a number of required Bitcoin block confirmations that exceeds the BTCrelay program's pruning factor (currently 250). Since BTCrelay only stores a limited history, a claimer cannot prove confirmations beyond this limit and thus cannot claim funds. The cause is the absence of a validation check during PTLC initialization. An attacker could exploit this by setting an excessively high confirmation threshold, rendering the escrow unclaimable. The impact is high for the affected user, resulting in permanent loss of funds, though the likelihood is low due to the specific conditions required.\n",
+            "severity": "medium",
+            "files": [
+                "programs/test-anchor/src/instructions.rs"
+            ],
+            "location": [
+                "anchor/src/lib.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Unchecked token account",
+            "description": "The `offerer_initialize_pay_in` and `offerer_initialize` instructions do not validate that the `claimer_token_account` is a valid Token account with the correct mint when `pay_out` is true. This can lead to situations where an incorrect account is passed, making it impossible for the claimer to withdraw tokens. The root cause is missing account checks in the instruction logic. An attacker could exploit this by tricking a user into using a wrong account, or it could occur accidentally. The impact is high as it results in locked funds, though the likelihood is low due to the need for user error or social engineering.\n",
+            "severity": "medium",
+            "files": [
+                "programs/test-anchor/src/instructions.rs"
+            ],
+            "location": [
+                "offerer_initialize_pay_in",
+                "offerer_initialize",
+                "anchor/src/instructions.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Multiple lock-times",
+            "description": "The protocol uses expiry times in HTLC and PTLC contracts, but there is no on-chain enforcement that these times are set correctly relative to Bitcoin confirmation delays or Lightning Network lock-times. If the expiry is too short, the initializer can refund before the counterparty claims, leading to fund loss. The vulnerability arises from relying solely on off-chain negotiation without on-chain safeguards. For example, in a Solana-to-Bitcoin transfer, if the PTLC expiry is shorter than the time needed to confirm the BTC transaction, the intermediary loses funds. The impact is high for individual transfers, but the likelihood is low as it depends on misconfiguration.\n",
+            "severity": "medium",
+            "files": [
+                "programs/test-anchor/src/instructions.rs"
+            ],
+            "location": [
+                "anchor/src/lib.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Reputation can overflow",
+            "description": "The intermediary node's reputation fields (success volume, success count, etc.) are updated using unchecked arithmetic, which can lead to integer overflow. If this occurs, the program will panic, preventing any further claims or refunds, effectively locking funds. The cause is the use of `+=` without overflow checks in functions like `claimer_claim` and `offerer_refund`. An attacker could potentially trigger this after an extremely large number of transactions (2^64), though the likelihood is negligible in practice. The impact is high due to potential fund lockup, but the exploit is impractical.\n",
+            "severity": "medium",
+            "files": [
+                "programs/test-anchor/src/instructions.rs"
+            ],
+            "location": [
+                "SolLightning-program.claimer_claim#545-549",
+                "SolLightning-program.offerer_refund#422-424",
+                "anchor/src/lib.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Passing Rent SysVar",
+            "description": "The program unnecessarily passes the Rent SysVar in instructions, increasing transaction size and cost. This is not a security vulnerability per se but a code inefficiency. The Rent SysVar can be accessed via `Rent::get()` without being passed as an account. The root cause is suboptimal instruction design. This increases transaction fees slightly and reduces efficiency. The impact is low, as it does not affect security or correctness, only cost and performance.\n",
+            "severity": "low",
+            "files": [
+                "programs/test-anchor/src/instructions.rs"
+            ],
+            "location": [
+                "anchor/src/instructions.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unused instruction parameters",
+            "description": "Several instruction parameters in both SolLightning and BTCRelay-Sol are declared in the `#[instruction]` macro but are never used in validation logic. These include `kind`, `confirmations`, `auth_expiry`, `escrow_nonce`, `pay_out`, `txo_hash`, and others. This increases transaction size and cost unnecessarily. The cause is poor code hygiene and lack of cleanup. The impact is low, limited to increased fees and reduced efficiency, with no security implications.\n",
+            "severity": "low",
+            "files": [
+                "programs/test-anchor/src/instructions.rs",
+                "BTCRelay-Sol/programs/btc-relay/src/instructions.rs"
+            ],
+            "location": [
+                "anchor/src/instructions.rs",
+                "btc/relay/src/instruction.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Bump calculation",
+            "description": "When passing a PDA to an instruction, the bump value is not stored or verified, forcing the program to recalculate the canonical bump on every invocation. This wastes compute budget. Additionally, calling `find_program_address` inside the instruction is redundant. The cause is inefficient PDA handling. The impact is low, resulting in higher compute usage and potential transaction failure under heavy load, but no security risk.\n",
+            "severity": "low",
+            "files": [
+                "programs/test-anchor/src/instructions.rs"
+            ],
+            "location": [
+                "SolLightning-program#121-126",
+                "anchor/src/instructions.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Account does not need to be mutable",
+            "description": "The `main_state` account in `BlockHeight` and `VerifyTransaction` context structures is marked as mutable (`mut`) despite no writes occurring. This is unnecessary and increases the risk of accidental modifications. The cause is incorrect account mutability annotation. The impact is low, limited to code clarity and potential future bugs, with no direct security consequences.\n",
+            "severity": "low",
+            "files": [
+                "programs/test-anchor/src/txutils.rs"
+            ],
+            "location": [
+                "btc/relay/src/instructions.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Manual code modifications for testnet",
+            "description": "Part of the BTCRelay code must be manually commented out for testnet use, specifically difficulty target checks. This is error-prone and unprofessional. The cause is lack of compile-time feature flags. The impact is a warning-level issue, as it affects maintainability and deployment safety, but does not introduce runtime vulnerabilities.\n",
+            "severity": "informational",
+            "files": [
+                "programs/test-anchor/src/txutils.rs",
+                "BTCRelay-Sol/programs/btc-relay/src/utils.rs"
+            ],
+            "location": [
+                "BTCRelay-Sol.verify_header#271-289",
+                "btc/relay/src/utils.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ]
+            },
+            "title": "Clippy warnings",
+            "description": "The codebase contains numerous Clippy warnings (67 in SolLightning, 118 in BTCRelay), indicating suboptimal or non-idiomatic Rust code. While not directly exploitable, this reduces code quality, readability, and maintainability. The cause is lack of linting discipline. The impact is a warning, as it reflects poor development practices that could indirectly lead to bugs.\n",
+            "severity": "informational",
+            "files": [
+                "programs/test-anchor/src/lib.rs",
+                "programs/test-anchor/src/instructions.rs",
+                "programs/test-anchor/src/state.rs",
+                "programs/test-anchor/src/utils.rs",
+                "programs/test-anchor/src/txutils.rs",
+                "programs/test-anchor/src/errors.rs"
+            ],
+            "location": [
+                "**/*"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1116"
+                ]
+            },
+            "title": "Irrelevant CHECK comments",
+            "description": "The codebase uses a generic and often irrelevant comment `/// CHECK: This is not dangerous because we don\u2019t read or write from this account` for unchecked accounts. This undermines the purpose of such comments, which should justify safety. The cause is copy-paste documentation. The impact is a warning, as it reduces code auditability and may hide real risks.\n",
+            "severity": "informational",
+            "files": [
+                "programs/test-anchor/src/lib.rs",
+                "programs/test-anchor/src/instructions.rs",
+                "programs/test-anchor/src/state.rs",
+                "programs/test-anchor/src/utils.rs",
+                "programs/test-anchor/src/txutils.rs",
+                "programs/test-anchor/src/errors.rs"
+            ],
+            "location": [
+                "**/*"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Use of Rust type system",
+            "description": "The codebase underutilizes Rust\u2019s type system. For example, it uses `u8` constants for `KIND_*` instead of enums, and functions like `verify_tx_ix` return `Result<u8>` where the `u8` encodes error codes, defeating the purpose of `Result`. This leads to unidiomatic and less safe code. The cause is poor type design. The impact is a warning, affecting maintainability and error handling clarity.\n",
+            "severity": "informational",
+            "files": [
+                "programs/test-anchor/src/lib.rs",
+                "programs/test-anchor/src/instructions.rs"
+            ],
+            "location": [
+                "**/*"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "Use appropriate error handling",
+            "description": "The program uses `unwrap()` and panics in cases where proper error handling should be used, such as when expecting remaining accounts. For example, `submit_fork_headers` uses an irrelevant error code `NoHeaders` for a missing header check. This can lead to confusing error messages and poor user experience. The cause is incomplete error handling logic. The impact is a warning, as it affects robustness and debugging.\n",
+            "severity": "informational",
+            "files": [
+                "programs/test-anchor/src/txutils.rs",
+                "programs/test-anchor/src/instructions.rs",
+                "BTCRelay-Sol/programs/btc-relay/src/lib.rs"
+            ],
+            "location": [
+                "BTCRelay-Sol.submit_fork_headers#246-250",
+                "**/*"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "Code style",
+            "description": "The code contains commented-out functions (e.g., `claimer_refund_payer`) and uses an incorrect program name (`anchor-test` instead of `SolLightning`). This reflects poor code hygiene. The cause is lack of cleanup before audit. The impact is informational, affecting readability and professionalism.\n",
+            "severity": "informational",
+            "files": [
+                "programs/test-anchor/src/lib.rs",
+                "programs/test-anchor/src/instructions.rs",
+                "programs/test-anchor/src/state.rs",
+                "programs/test-anchor/src/utils.rs",
+                "programs/test-anchor/src/txutils.rs",
+                "programs/test-anchor/src/errors.rs"
+            ],
+            "location": [
+                "SolLightning-program/anchor/src/*.rs"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Unused stored bump",
+            "description": "The `EscrowState` structure has a `bump` field added as part of fixing L3, but this field is never used. This is a code smell and wastes storage space. The cause is incomplete implementation of the fix. The impact is low, limited to inefficiency.\n",
+            "severity": "low",
+            "files": [
+                "programs/test-anchor/src/state.rs"
+            ],
+            "location": [
+                "SolLightning-program/swap/program/src/instructions.rs"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Difficulty calculation",
+            "description": "The BTCRelay program approximates cumulative work using a formula that makes it impractical to test with low difficulty, as the minimum difficulty requires ~2^32 hashes. This is based on a fixed `max_difficulty_target`. While not exploitable, it hinders testing. The cause is suboptimal work calculation. The impact is informational, suggesting a more practical formula like Bitcoin Core's should be used.\n",
+            "severity": "informational",
+            "files": [
+                "programs/test-anchor/src/txutils.rs",
+                "BTCRelay-Sol/programs/btc-relay/src/utils.rs"
+            ],
+            "location": [
+                "BTCRelay-Sol/programs/btc/relay/src/utils.rs"
+            ]
+        }
+    ]
+}

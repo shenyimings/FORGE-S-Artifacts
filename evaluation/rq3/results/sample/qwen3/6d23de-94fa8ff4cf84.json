@@ -1,0 +1,207 @@
+{
+    "project": "sec3_invariant_report.pdf.json",
+    "files": [
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/change_fee_receiver.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/transfer_position_ownership.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/swap.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/math.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/initialize_oracle.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/lib.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/create_fee_tier.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/util.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/structs/position.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.42857142857142855,
+        "recall": 0.17647058823529413,
+        "f1": 0.25
+    },
+    "cwe_ground_truth": [
+        "CWE-669",
+        "CWE-665",
+        "CWE-707",
+        "CWE-664",
+        "CWE-697",
+        "CWE-190",
+        "CWE-682",
+        "CWE-909",
+        "CWE-456",
+        "CWE-435",
+        "CWE-1284",
+        "CWE-691",
+        "CWE-1164",
+        "CWE-710",
+        "CWE-1041",
+        "CWE-20",
+        "CWE-834"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-682",
+        "CWE-285",
+        "CWE-287",
+        "CWE-284",
+        "CWE-662"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect pool key after pool ownership transfer",
+            "description": "This issue arises from a copy-paste error in the transfer_position_ownership instruction where the new position's pool field is incorrectly set to the recipient's key instead of the original pool key. The cause is a simple programming mistake at line 67, where *self.recipient.key is assigned instead of removed_position.pool. This leads to corruption of the pool reference in the transferred position, making it point to an invalid or non-existent pool. An attacker could potentially exploit positions with incorrect pool keys to disrupt accounting or cause failed transactions. The impact is medium as it corrupts state integrity and may lead to loss of access or incorrect behavior, though it does not directly enable fund theft.\n"
+        },
+        {
+            "title": "Arithmetic overflows",
+            "description": "Multiple variables across the codebase are susceptible to arithmetic overflow due to insufficient type safety and lack of runtime overflow checks. The root causes include using narrow integer types (e.g., u32 for head counters, u128 for position_iterator) and performing unchecked arithmetic operations on values like timestamps, tick indices, and fee accumulators. For example, decrementing owner_list.head without underflow protection or incrementing position_iterator without bounds checking could lead to wraparound. An attacker could exploit these overflows to manipulate state, bypass logic, or cause unexpected behavior. The impact is low because the protocol uses runtime checks in some places and the likelihood of hitting exact overflow conditions may be low, but the potential for state corruption exists.\n"
+        },
+        {
+            "title": "Not resetting the last position after moving",
+            "description": "In the transfer_position_ownership instruction, when moving the last position into the slot of the removed one, the original last position is not reset to a default or empty state. The cause is the omission of a reset step (e.g., *last_position = Default::default()) after transferring its data. This leaves stale data in the last position account, which could be misinterpreted as a valid position in future operations. An attacker might exploit this by triggering edge cases where the stale position is accessed, potentially leading to incorrect state transitions or double usage. The impact is low as it affects internal state consistency but does not directly enable fund loss.\n"
+        },
+        {
+            "title": "Inconsistent tick checks",
+            "description": "There is inconsistency in how tick bounds are validated across the codebase. Some functions allow tick == MAX_TICK while others enforce strict inequality (tick < MAX_TICK). The root cause is a lack of unified validation logic and unclear specification on whether MAX_TICK is a valid state. This can lead to unpredictable behavior when positions are created or modified at boundary ticks. An attacker could potentially exploit the discrepancy to create edge-case positions that behave differently than expected during swaps or fee calculations. The impact is low as it primarily affects edge-case correctness rather than core functionality.\n"
+        },
+        {
+            "title": "Missing checks on tick_spacing",
+            "description": "The create_fee_tier instruction does not validate that tick_spacing is non-zero, despite tick_spacing being used in arithmetic operations like division and bit shifting. The root cause is the absence of a basic input validation check. A zero tick_spacing would lead to division-by-zero errors or infinite loops in tick-related calculations. An attacker could create a fee tier with tick_spacing = 0, causing subsequent operations (e.g., pool creation, swaps) to fail or panic. The impact is low as it leads to denial of service for specific pools rather than global fund loss.\n"
+        },
+        {
+            "title": "Inconsistent access control in change_protocol_fee",
+            "description": "The change_protocol_fee instruction uses an access control check that depends on the current fee_receiver being the admin. However, if the fee_receiver has been changed to a non-admin account via change_fee_receiver, the access control will permanently fail. The root cause is a flawed dependency between two independent state-changing functions. This creates a situation where the protocol fee cannot be updated after a fee receiver change, effectively locking the fee at its current value. The impact is low as it results in a loss of protocol governance flexibility but does not compromise fund security.\n"
+        },
+        {
+            "title": "Inconsistent amount_out and amount_in in swap",
+            "description": "In the swap logic, when the output amount exceeds the specified limit, amount_out is clamped to the limit, but amount_in is not adjusted accordingly. The root cause is incomplete logic in the swap amount capping mechanism. This leads to inconsistency between input and output amounts, potentially causing incorrect slippage calculations or user confusion. While the protocol may still function safely, the discrepancy could affect accounting accuracy or frontend interpretations. The impact is informational as it does not break core functionality or lead to fund loss.\n"
+        },
+        {
+            "title": "Redundancies in PDA seeds and account checks",
+            "description": "The code contains redundant checks and seed constructions. For example, in the swap instruction, checking reserve_x.owner and reserve_x.mint is redundant if reserve_x is already verified via PDA derivation. Similarly, including the program_id in PDA seeds is unnecessary since it is already part of the address derivation. The root cause is over-cautious or copy-pasted validation logic. While safe, these redundancies increase code complexity and gas costs slightly. The impact is informational as they do not introduce vulnerabilities but represent suboptimal design.\n"
+        },
+        {
+            "title": "Swap exceeds computation limit",
+            "description": "The swap instruction contains a loop that iterates through ticks until remaining_amount is zero, which can exceed Solana's compute limit under certain conditions. The root cause is the unbounded loop and lack of early termination when liquidity reaches zero. As shown in the PoC, the loop continues even when liquidity is zero, leading to unnecessary iterations and potential out-of-memory errors. An attacker could craft a scenario with many ticks and zero liquidity to force transaction failure, causing denial of service. The impact is informational as it affects reliability but not security per se.\n"
+        },
+        {
+            "title": "Oracle can be set but is not used",
+            "description": "The initialize_oracle instruction allows setting an oracle address, but the oracle is not used anywhere in the current code. The root cause is an incomplete or placeholder feature. This raises questions about future plans and potential attack surfaces if the oracle is later activated without proper safeguards. The impact is informational as it does not affect current functionality but may indicate technical debt or undocumented design choices.\n"
+        },
+        {
+            "title": "Redundant account and access control",
+            "description": "The change_fee_receiver instruction includes a program_authority account that is not used in the handler logic, making it redundant. Additionally, the #[access_control] macro duplicates a constraint already enforced by the account validation. The root cause is inconsistent code design and overuse of access control patterns. While not insecure, it increases complexity and gas usage. The impact is informational as it reflects poor code hygiene but no direct risk.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided code, I identified several security vulnerabilities across different functions.\n\nFirst, in the `change_fee_receiver.rs` file, the `ChangeFeeReceiver` instruction handler allows any admin to change the fee receiver without proper validation of the new fee receiver account. This creates an Improper Access Control (CWE-284) vulnerability where an admin could redirect fees to any arbitrary account.\n\nSecond, in the `transfer_position_ownership.rs` file, the `TransferPositionOwnership` handler has a critical flaw in the position transfer logic. When transferring a position, the code creates a new position for the recipient but fails to properly validate that the recipient's position list is legitimate or that the recipient has sufficient space for a new position. This represents an Improper Control of a Resource Through its Lifetime (CWE-664) issue.\n\nThird, in the `swap.rs` file, the swap handler contains a potential Incorrect Calculation (CWE-682) vulnerability in the fee calculation logic. The fee amount is calculated as `amount - amount_in` in one branch and `amount_in.big_mul_up(fee)` in another, which could lead to inconsistent fee calculations depending on the execution path.\n\nAdditionally, the `create_position.rs` file (referenced in lib.rs but not provided) likely has similar access control issues based on the pattern observed in other functions.\n",
+            "findings": [
+                {
+                    "title": "Improper Access Control in ChangeFeeReceiver",
+                    "description": "The ChangeFeeReceiver instruction allows any admin to change the fee receiver to any arbitrary account without validating that the new fee receiver is a legitimate wallet or has proper constraints. This could allow an admin to redirect protocol fees to a malicious address.",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Resource Control Vulnerability in TransferPositionOwnership",
+                    "description": "The TransferPositionOwnership handler creates a new position account for the recipient without proper validation of the recipient's position list capacity or legitimacy. This could lead to resource exhaustion or unauthorized position creation, representing improper control over account resources.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Inconsistent Fee Calculation in Swap Function",
+                    "description": "The swap handler calculates fees differently based on execution path - using `amount - amount_in` in one branch and `amount_in.big_mul_up(fee)` in another. This inconsistency could lead to incorrect fee calculations and potential loss of fees, constituting an incorrect calculation vulnerability.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract contains three potential security issues. First, in the `TransferPositionOwnership` instruction, the `recipient` account is not validated as a signer, allowing any address to be specified as the recipient without proving control, which could lead to unauthorized transfers. Second, in the `change_fee_receiver` function, while the admin is checked, the `fee_receiver` account is not validated for correctness or ownership, potentially allowing the fee receiver to be set to an invalid or unintended address. Third, in the `swap` function, there is a potential for price manipulation if the `sqrt_price_limit` is not properly enforced, although the checks are in place, the complexity of the swap logic could lead to edge cases where the limit is not correctly applied.\n",
+            "findings": [
+                {
+                    "title": "Missing Signer Validation for Recipient in TransferPositionOwnership",
+                    "description": "The `recipient` account in the `TransferPositionOwnership` instruction is not validated as a signer. This allows any address to be specified as the recipient without proving control over that address, potentially leading to unauthorized transfers of position ownership.",
+                    "category": "CWE-287",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Insecure Fee Receiver Account Validation",
+                    "description": "In the `change_fee_receiver` function, the `fee_receiver` account is not properly validated. The function only checks the admin but does not ensure the `fee_receiver` is a valid or appropriate account, which could allow setting the fee receiver to an unintended or invalid address.",
+                    "category": "CWE-285",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Potential Price Limit Enforcement Issue in Swap Function",
+                    "description": "The `swap` function has complex logic for enforcing the `sqrt_price_limit`. While checks are present, the intricate conditions and calculations could lead to edge cases where the price limit is not correctly enforced, potentially allowing price manipulation.",
+                    "category": "CWE-662",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-662",
+            "CWE-193",
+            "CWE-501",
+            "CWE-269",
+            "CWE-704",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-666",
+            "CWE-669",
+            "CWE-118",
+            "CWE-191",
+            "CWE-911",
+            "CWE-610",
+            "CWE-496",
+            "CWE-668",
+            "CWE-1270",
+            "CWE-372",
+            "CWE-190",
+            "CWE-923",
+            "CWE-673",
+            "CWE-1267",
+            "CWE-487",
+            "CWE-135",
+            "CWE-1229",
+            "CWE-706",
+            "CWE-913",
+            "CWE-404",
+            "CWE-369",
+            "CWE-221",
+            "CWE-665",
+            "CWE-495",
+            "CWE-128",
+            "CWE-1335",
+            "CWE-282",
+            "CWE-1339",
+            "CWE-1329",
+            "CWE-400",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-410",
+            "CWE-922",
+            "CWE-580"
+        ]
+    ]
+}

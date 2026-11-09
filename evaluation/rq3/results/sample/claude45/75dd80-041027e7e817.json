@@ -1,0 +1,200 @@
+{
+    "project": "ellipsis_plasma_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/ellipsis_plasma_audit_final.pdf.json/crates/plasma_state/src/amm.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.1111111111111111,
+        "recall": 1.0,
+        "f1": 0.19999999999999998
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-1339",
+        "CWE-664",
+        "CWE-697",
+        "CWE-190",
+        "CWE-682",
+        "CWE-691",
+        "CWE-703",
+        "CWE-369",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Inconsistencies in the AMM Fee Logic",
+            "description": "1. **Description:** The function `amm::get_limit_order_size_in_base_and_quote` incorrectly applies fees to the base asset amount after converting from the quote asset, rather than applying the fee directly to the quote asset before conversion. This leads to an incorrect post-fee calculation and premature termination of limit orders due to fee adjustments.\n\n2. **Cause:** The root cause is the incorrect order of operations in fee application: the system converts the quote amount to base using the exchange rate and then applies the fee on the resulting base amount, instead of applying the fee on the original quote amount prior to conversion.\n\n3. **Exploitation:** An attacker could exploit this by placing limit orders that are prematurely stopped due to miscalculated fees, allowing them to manipulate execution prices or re-enter the market at improved prices after partial execution, potentially gaining unfair trading advantages.\n\n4. **Impact:** The impact includes incorrect execution of limit orders at suboptimal prices, loss of potential price improvements for users, and possible economic inefficiencies in the AMM due to improper fee handling and order termination.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After thorough analysis of the Solana AMM smart contract code, I have identified several security vulnerabilities stemming from the provided CWE categories:\n\n1. **CWE-682 (Incorrect Calculation)**: Multiple instances of potential arithmetic issues:\n   - In `get_limit_order_size_in_base_and_quote`, the calculation for `size_in_quote` in the Buy side uses division that could lead to precision loss and incorrect limit order sizing\n   - The `get_fee_splits` function uses integer division that rounds down, potentially causing fee calculation discrepancies\n   - In various swap functions, the use of `saturating_sub(1)` and `saturating_add(1)` for rounding could lead to accumulated errors over many transactions\n   - The `k` invariant calculations use `saturating_sub(1)` which could cause the invariant to drift over time\n\n2. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: \n   - The `apply_fees` function checks if `lp_fees + protocol_fees != total_fees` but this check may fail to catch all edge cases due to rounding\n   - Division by zero is not explicitly checked in several places (e.g., `deposit_amount_quote`, `deposit_amount_base`) when reserves could theoretically be zero\n   - The `downcast` function checks for overflow but doesn't handle the case where the conversion might lose precision\n\n3. **CWE-664 (Improper Control of a Resource Through its Lifetime)**:\n   - The `maybe_update_snapshot` function updates snapshots based on slot comparison, but there's no validation that the new slot is reasonable or that the reserves haven't been manipulated before the snapshot\n   - The `total_lp_shares` can be modified through mint/burn operations without proper validation of the resulting state\n\n4. **CWE-697 (Incorrect Comparison)**:\n   - In `get_limit_order_size_in_base_and_quote`, the comparison `quote_snapshot * base_reserves > base_snapshot * quote_reserves` could overflow for large values before the comparison is made\n   - Similar overflow risks exist in other comparison operations throughout the code\n\n5. **CWE-691 (Insufficient Control Flow Management)**:\n   - The swap functions have complex control flow with multiple branches that update reserves, but the invariant checks happen after all updates, potentially allowing intermediate invalid states\n",
+            "findings": [
+                {
+                    "title": "Integer Overflow Risk in Limit Order Size Calculation",
+                    "description": "In the `get_limit_order_size_in_base_and_quote` function, the comparison `quote_snapshot * base_reserves > base_snapshot * quote_reserves` can overflow before the comparison is evaluated. For large reserve values, this multiplication could exceed u128::MAX, causing incorrect limit order sizing or panic.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Precision Loss in Fee Calculation",
+                    "description": "The `get_fee_splits` function uses integer division `(total_fees * self.protocol_allocation_in_pct as u64) / 100` which rounds down. The subsequent check `if lp_fees + protocol_fees != total_fees` may fail due to rounding, but the error handling returns a MismatchedFees error. However, accumulated rounding errors over many transactions could lead to significant fee discrepancies.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Invariant Drift Due to Rounding in K Calculation",
+                    "description": "The constant product invariant `k` is calculated using `(base_reserves * quote_reserves).saturating_sub(1)` in multiple functions. This systematic subtraction of 1 for rounding purposes could cause the invariant to drift downward over many transactions, potentially allowing value extraction.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Missing Division by Zero Checks in Deposit Calculations",
+                    "description": "Functions `deposit_amount_quote` and `deposit_amount_base` perform division by `self.base_reserves` and `self.quote_reserves` respectively without checking if these values are zero. While the pool should not operate with zero reserves, there's no explicit guard against this condition, which could cause a panic.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Snapshot Update Without State Validation",
+                    "description": "The `maybe_update_snapshot` function updates the pool's snapshot based solely on slot comparison without validating that the current reserves are in a valid state or haven't been manipulated. This could allow an attacker to lock in manipulated reserve values as the new snapshot.",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Potential Integer Overflow in Reserve Comparisons",
+                    "description": "Multiple comparison operations throughout the code (e.g., in `get_limit_order_size_in_base_and_quote`) perform multiplications before comparisons without checking for overflow. For example, `base_snapshot * quote_reserves` could overflow u128 for large values, leading to incorrect comparison results and wrong execution paths.",
+                    "category": "CWE-697",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unchecked Intermediate State in Multi-Step Swaps",
+                    "description": "In swap functions like `buy_exact_in`, reserves are updated multiple times (first for limit order, then for pool swap) before the final invariant check. If an error occurs after the first update but before the second, the pool could be left in an inconsistent state. While Rust's error handling should prevent this, the complex control flow increases risk.",
+                    "category": "CWE-691",
+                    "severity": "low",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Reward Factor Calculation Precision Loss",
+                    "description": "In `apply_fees`, the reward factor is updated using `I80F48::from_fraction(lp_fees, self.total_lp_shares)`. If `total_lp_shares` is very large relative to `lp_fees`, this could result in precision loss or zero increments, causing LPs to lose rewards over time.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.75
+                }
+            ]
+        },
+        {
+            "reasoning": "After carefully analyzing the Solana smart contract code for potential security issues related to the specified CWEs, I have identified several vulnerabilities:\n\n1. **CWE-369 (Divide By Zero)**: Multiple division operations exist without proper zero checks:\n   - In `deposit_amount_quote()` and `deposit_amount_base()`, divisions by `self.base_reserves` and `self.quote_reserves` occur without verifying they are non-zero\n   - In `burn()`, division by `self.total_lp_shares` happens without checking if it's zero\n   - In `apply_fees()`, division by `self.total_lp_shares` in the reward_factor calculation lacks zero validation\n   - In `get_fee_splits()`, division by 100 is safe, but the pattern shows lack of defensive programming\n\n2. **CWE-190 (Integer Overflow)**: Several multiplication operations could overflow:\n   - In `get_base_out_from_quote_in()`, `base_reserves * quote_reserves` could overflow u128\n   - In `get_quote_out_from_base_in()`, similar multiplication without overflow checks\n   - In `get_limit_order_size_in_base_and_quote()`, multiplications like `quote_snapshot * base_reserves` could overflow\n   - In `mint()`, `base_amount_desired.upcast() * quote_amount_desired.upcast()` could overflow u128\n   - In `pre_fee_adjust_rounded_up()`, `amount * FEE_ADJUST_MULITPLIER` could overflow\n\n3. **CWE-191 (Integer Underflow)**: Subtraction operations use `saturating_sub()` in many places, but some direct subtractions could underflow:\n   - In `get_quote_in_from_base_out()`, the final subtraction `(k / (base_reserves - base_out)).saturating_add(1) - quote_reserves` could underflow if the division result is less than quote_reserves\n   - In `get_base_in_from_quote_out()`, similar pattern with potential underflow\n   - In `update_pool_reserves_after_buy()` and `update_pool_reserves_after_sell()`, while checked_sub is used, the error handling converts to generic Underflow/Overflow errors\n\n4. **CWE-1339 (Insufficient Precision)**: The fee calculations use integer division which loses precision:\n   - In `fee_rounded_down()`, `amount * self.fee_in_bps.upcast() / 10000_u128` loses fractional parts\n   - In `get_fee_splits()`, `(total_fees * self.protocol_allocation_in_pct as u64) / 100` rounds down, potentially causing fee accounting issues\n   - The reward_factor uses I80F48 fixed-point, but the division in `apply_fees()` may lose precision when `lp_fees` is small relative to `total_lp_shares`\n",
+            "findings": [
+                {
+                    "title": "Division by Zero in deposit_amount_quote",
+                    "description": "The function `deposit_amount_quote()` performs division by `self.base_reserves` without checking if it's zero. If base_reserves is 0, this will cause a panic/crash.",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Division by Zero in deposit_amount_base",
+                    "description": "The function `deposit_amount_base()` performs division by `self.quote_reserves` without checking if it's zero. If quote_reserves is 0, this will cause a panic/crash.",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Division by Zero in burn Function",
+                    "description": "The function `burn()` divides by `self.total_lp_shares` without verifying it's non-zero. While the function checks if withdrawn amounts are zero afterward, a zero total_lp_shares would cause division by zero panic before that check.",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Division by Zero in apply_fees",
+                    "description": "The function `apply_fees()` calculates `I80F48::from_fraction(lp_fees, self.total_lp_shares)` without checking if total_lp_shares is zero, which could cause a division by zero error.",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Integer Overflow in Constant Product Calculation",
+                    "description": "In functions like `get_base_out_from_quote_in()`, the calculation `base_reserves * quote_reserves` multiplies two u128 values which could overflow u128. While saturating_sub is used afterward, the initial multiplication could silently overflow.",
+                    "category": "CWE-190",
+                    "severity": "critical",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Integer Overflow in pre_fee_adjust_rounded_up",
+                    "description": "The calculation `amount * FEE_ADJUST_MULITPLIER` in `pre_fee_adjust_rounded_up()` multiplies two u128 values without overflow checking. For large amounts, this could overflow.",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Integer Overflow in mint Initial K Calculation",
+                    "description": "In the `mint()` function, `base_amount_desired.upcast() * quote_amount_desired.upcast()` calculates initial_k without overflow protection. Large deposit amounts could cause overflow.",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.87
+                },
+                {
+                    "title": "Potential Integer Underflow in get_quote_in_from_base_out",
+                    "description": "The expression `(k / (base_reserves - base_out)).saturating_add(1) - quote_reserves` could underflow if the division result plus 1 is less than quote_reserves, causing a panic.",
+                    "category": "CWE-191",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Potential Integer Underflow in get_base_in_from_quote_out",
+                    "description": "The expression `(k / (quote_reserves - quote_out)).saturating_add(1) - base_reserves` could underflow if the division result plus 1 is less than base_reserves, causing a panic.",
+                    "category": "CWE-191",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Precision Loss in Fee Calculations",
+                    "description": "The fee calculation in `fee_rounded_down()` uses integer division `amount * self.fee_in_bps.upcast() / 10000_u128`, which loses fractional precision. Over many transactions, this could lead to accumulated rounding errors affecting fee accounting.",
+                    "category": "CWE-1339",
+                    "severity": "low",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Precision Loss in Protocol Fee Split",
+                    "description": "In `get_fee_splits()`, the calculation `(total_fees * self.protocol_allocation_in_pct as u64) / 100` uses integer division that rounds down. This could cause the sum of lp_fees and protocol_fees to not equal total_fees due to rounding, though there is a check for this.",
+                    "category": "CWE-1339",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-135",
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-191",
+            "CWE-1339"
+        ]
+    ]
+}

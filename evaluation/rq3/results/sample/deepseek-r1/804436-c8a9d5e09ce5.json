@@ -1,0 +1,73 @@
+{
+    "project": "getcode_splitter_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/getcode_splitter_audit_final.pdf.json/splitter/programs/splitter/src/lib.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-691",
+        "CWE-1284",
+        "CWE-20",
+        "CWE-834"
+    ],
+    "cwe_detected": [
+        "CWE-284"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Insufficient Input Validation",
+            "description": "1. **Description:** The InitializePool function lacks proper input validation for the `levels` parameter and the `name` string length. Specifically, setting `levels` to zero causes the `calc_zeros` function to return an empty vector, leading to a runtime panic when attempting to unwrap the last element. Additionally, the `name` field has no length check, allowing it to exceed the defined NAME_DEFAULT_SIZE of 32 bytes.\n2. **Cause:** The absence of boundary checks on user-provided inputs in the `MerkleTree::new` function and the `InitializePool` instruction.\n3. **Exploitation:** An attacker could initialize a pool with `levels = 0`, causing subsequent operations that access `filled_subtrees` or `zero_values` to panic and halt execution. Similarly, providing a long `name` string could lead to serialization issues or memory inefficiencies.\n4. **Impact:** This could result in denial of service by making the program unusable for certain pools or lead to unexpected transaction failures, degrading user experience and reliability.\n"
+        },
+        {
+            "title": "Compute Budget Limit",
+            "description": "1. **Description:** The `MerkleTree::verify` function uses a loop to process a Merkle proof, which may consume excessive compute units if the proof is large, leading to transaction failure due to exceeding Solana's compute budget.\n2. **Cause:** The loop iterates over the entire proof in a single transaction without chunking or offloading computation, making it vulnerable to compute limit exhaustion.\n3. **Exploitation:** An attacker could craft a very long Merkle proof, forcing the verification to exceed the compute budget and causing the transaction to fail, potentially leading to denial of service.\n4. **Impact:** Users may be unable to verify valid proofs if they are too long, reducing the reliability and usability of the system.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract contains three critical access control vulnerabilities (CWE-284). First, the `save_recent_root` function allows any user to update the pool's merkle root history, compromising the integrity of merkle tree validation. Second, the `upload_proof` function permits unauthorized users to modify proof data, enabling proof corruption. Third, `close_token_account` transfers funds without verifying proof validation, allowing premature draining of commitment vaults.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized Merkle Root Updates in save_recent_root",
+                    "description": "The `save_recent_root` function modifies the pool's merkle root history without access control checks. \nAny attacker can alter historical roots, enabling manipulation of merkle validation in `transfer_with_commitment`.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unauthorized Proof Data Modification in upload_proof",
+                    "description": "The `upload_proof` function appends data to proof accounts without verifying the caller's permissions. \nMalicious actors can corrupt proof data or disrupt merkle verification processes.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unverified Fund Transfer in close_token_account",
+                    "description": "The `close_token_account` function transfers funds from commitment vaults without checking \nif the associated proof has been verified. Attackers can drain vaults before proof validation completes.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.9
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

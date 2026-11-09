@@ -1,0 +1,130 @@
+{
+    "path": "reports/ackee-blockchain-wormhole-worldcoin-world-id-state-root-bridge-report.pdf",
+    "project_info": {
+        "url": "https://github.com/wormholelabs-xyz/solana-world-id-program",
+        "commit_id": "70f0346c3bea804a6131903d208f3df47ca7d8ee",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-10-01",
+        "project_path": "contracts/ackee-blockchain-wormhole-worldcoin-world-id-state-root-bridge-report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "H1: The latest available root may be inactive and potentially undesirably removed",
+            "description": "This vulnerability allows for a denial of service during the proof of personhood verification process. The CleanUpRoot instruction permits anyone to close a root account that is no longer active, which depends heavily on the periodic update of root accounts. If the root_expiry is set too low and a new state root has not yet been submitted to Solana, the latest available root may become inactive and be closed by an attacker. The root cause lies in the lack of a check to prevent the deletion of the latest root stored in the LatestRoot account. An attacker could exploit this by invoking CleanUpRoot on the refund_recipient\u2019s behalf when the root is inactive but before a new one is submitted. The impact is high, as users would be unable to verify their proofs, and the system could enter a state where no valid root exists until a new one is submitted or the account is reinitialized.\n",
+            "severity": "high",
+            "files": [
+                "programs/solana-world-id-program/src/instructions/clean_up_root.rs",
+                "programs/solana-world-id-program/src/instructions/verify_groth16_proof.rs"
+            ],
+            "location": [
+                "verify_groth16_proof.rs",
+                "verify_and_execute.rs",
+                "clean_up_root.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "M1: Possible arithemtic overflow during root is_active check",
+            "description": "This vulnerability involves a potential arithmetic overflow in the is_active function of the root verification logic. The function calculates expiry_time by adding read_block_time_in_secs and config_root_expiry without proper overflow checks. Although overflow-checks is enabled in release mode, an overflow would cause a panic, leading to a denial of service for instructions like CleanUpRoot and VerifyGroth16Proof. The root cause is the use of unchecked arithmetic in a critical path. An attacker cannot directly trigger this due to Guardian signature requirements, but if config_root_expiry is mistakenly set too high, the addition could overflow. The exploitation would occur when the sum exceeds u64::MAX, causing the program to panic. The impact is a denial of service, preventing key operations from succeeding.\n",
+            "severity": "medium",
+            "files": [
+                "programs/solana-world-id-program/src/instructions/clean_up_root.rs",
+                "programs/solana-world-id-program/src/instructions/verify_groth16_proof.rs"
+            ],
+            "location": [
+                "clean_up_root.rs",
+                "verify_groth16_proof.rs",
+                "verify_and_execute.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "M2: Missing mut constraint",
+            "description": "This vulnerability arises from missing mut constraints on accounts that are intended to receive lamports upon closure of other accounts. Specifically, the refund_recipient accounts in UpdateRootWithQuery, CleanUpRoot, and CloseSignatures instructions lack the mut modifier, making them read-only even though they are expected to be credited with rent refunds. The root cause is incorrect account annotation in the Anchor framework, which results in transaction failure when the account is not mutable (e.g., when it's not the fee payer). An attacker cannot directly exploit this for gain, but it can lead to operational failures when different accounts are used for signing and refunding. The impact is medium, as it disrupts normal functionality and could prevent successful execution of critical instructions unless workarounds are applied.\n",
+            "severity": "medium",
+            "files": [
+                "programs/solana-world-id-program/src/instructions/clean_up_root.rs",
+                "programs/solana-world-id-program/src/instructions/close_signatures.rs",
+                "programs/solana-world-id-program/src/instructions/update_root_with_query.rs"
+            ],
+            "location": [
+                "clean_up_root.rs",
+                "close_signatures.rs",
+                "update_root_with_query.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "W1: Possible Reinitialization",
+            "description": "1. **Description:** The PostSignatures instruction uses the `init_if_needed` constraint on the `guardian_signatures` account, which allows the account to be reinitialized if it is already in an uninitialized state. This can lead to a reinitialization vulnerability where data may be reset unintentionally.\n2. **Cause:** The use of `init_if_needed` without a proper check to ensure the account has not already been initialized. This constraint does not prevent reinitialization if the account is uninitialized again, especially when called with an empty signatures vector.\n3. **Exploitation:** An attacker could potentially reinitialize the `guardian_signatures` account by calling the PostSignatures instruction with an empty signatures list and a different payer, thereby changing the refund_recipient. If the account were a PDA, this would be easier as no private key would be required.\n4. **Impact:** The primary impact is a denial of service, particularly in relation to the UpdateRootWithQuery instruction, which may fail if the refund_recipient is changed and not writable, preventing state root updates.\n",
+            "severity": "informational",
+            "files": [
+                "programs/solana-world-id-program/src/instructions/post_signatures.rs"
+            ],
+            "location": [
+                "PostSignatures#6-12"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "I1: Signature Malleability due to accepting S values with high and also low order",
+            "description": "1. **Description:** The contract uses `solana_program::secp256k1_recover`, which does not enforce canonical S values in ECDSA signatures, allowing for signature malleability.\n2. **Cause:** ECDSA signatures are malleable because the S value in the signature can be replaced with its additive inverse modulo the curve order, producing another valid signature for the same message.\n3. **Exploitation:** An attacker who observes a valid signature can create a modified but still valid version of it. This requires access to the original signature from a guardian.\n4. **Impact:** While no direct security risk is identified in the current context\u2014since signatures are only used for verification and not for replay protection or uniqueness\u2014the issue could pose risks in future extensions where signature uniqueness is required.\n",
+            "severity": "informational",
+            "files": [
+                "programs/solana-world-id-program/src/instructions/update_root_with_query.rs"
+            ],
+            "location": [
+                "update_root_with_query.rs"
+            ]
+        }
+    ]
+}

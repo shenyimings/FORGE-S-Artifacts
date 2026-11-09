@@ -1,0 +1,1201 @@
+{
+    "path": "reports/oaksecurity/2025-12-24 Audit Report - Structured CosmWasm and Solana Updates v1.0.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/structured-org/maxbtc-solana",
+            "https://github.com/structured-org/aum-oracle",
+            "https://github.com/structured-org/maxbtc-neutron"
+        ],
+        "commit_id": [
+            "e10d6b4d3a187f0e75919f6c7589ee05a5bc131f",
+            "2ed17e99debca94b712758484c81f46efd3f4e9a",
+            "9721fc1557cb6d56aab2b201d16e1c9f71f27829"
+        ],
+        "address": [],
+        "chain": "solana/cosmwasm",
+        "compiler_version": "n/a",
+        "audit_date": "2025-12-24",
+        "project_path": "contracts/2025-12-24 Audit Report - Structured CosmWasm and Solana Updates v1.0.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing oracle staleness validation before using price data in Solana programs",
+            "description": "1. **Description:** The `custody_aum` function in the Solana program uses price data from the Doves oracle without validating whether the data is stale. This can lead to incorrect asset valuation and flawed protocol decisions.\n2. **Cause:** The code accesses `doves_oracle.price` and `doves_oracle.expo` but fails to check the timestamp of the oracle update, leaving it vulnerable to outdated price data.\n3. **Exploitation:** An attacker could manipulate the system during periods of market volatility by providing or allowing the use of stale prices, leading to favorable trades, incorrect AUM calculations, or flawed liquidity operations.\n4. **Impact:** This could result in financial losses, incorrect state transitions, or manipulation of the protocol's economic model due to reliance on invalid price inputs.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-solana:packages/base/src/formulas.rs:139-186"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Lack of AUM Oracle state validation can lead to incorrect deposit flow tracking",
+            "description": "1. **Description:** The `execute_lock` and `execute_unlock` functions in the Waitasaurus contract do not properly validate the state of the AUM oracle data, leading to potential misattribution of deposits and incorrect unlocking conditions.\n2. **Cause:** `execute_lock` transitions to the Locked state without confirming the spot balance is zero, and `execute_unlock` does not verify that the oracle data was published after the lock event, risking use of outdated data.\n3. **Exploitation:** An attacker or external process could manipulate the spot balance via rebalancing or prior deposits, causing the system to incorrectly attribute funds or unlock prematurely.\n4. **Impact:** This could result in double-counting of deposits, incorrect asset tracking, and potential loss of funds due to flawed accounting during deposit and withdrawal flows.\n",
+            "severity": "high",
+            "location": [
+                "aum-oracle:contracts/waitasaurus/src/contract.rs"
+            ],
+            "files": [
+                "2ed17e99debca94b712758484c81f46efd3f4e9a/aum-oracle/contracts/waitasaurus/src/contract.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Permissionless burn enables denom recreation failure and withdrawal DoS",
+            "description": "1. **Description:** The `execute_withdraw` function in the maxBTC core contract incorrectly assumes that a zero supply of a redemption token means the denom does not exist, leading to failed withdrawals if the token was burned after creation.\n2. **Cause:** The logic relies solely on supply checks rather than explicit denom existence checks, and the burn function is permissionless, allowing any user to burn tokens.\n3. **Exploitation:** An attacker can trigger a withdrawal to mint a redemption token, then immediately burn it, causing all future withdrawals for that batch to fail when they attempt to recreate an already-existing denom.\n4. **Impact:** This results in a denial-of-service for withdrawals of affected batches, locking user funds and disrupting protocol functionality.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:569-580"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-core/src/contract.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Oversized unlocks allow overpayment and cross-batch imbalance in claim logic",
+            "description": "The execute_claim function in the withdrawal manager calculates user BTC payouts based on a pro-rata share of batch.collected_amount, which is adjusted by previously paid amounts. However, the collected_amount can become inflated because the core contract's execute_tick_withdraw_pending function adds a locker’s locked amount to the batch without capping it to the actual remaining withdrawal need. This uncapped addition allows excessive or surplus lock amounts to overfund the batch. Since the Unlock call transfers the full balance, the inflated collected_amount is used for payout calculations, leading to overpayment to early claimants and misallocation of funds. The root cause is the lack of reconciliation between declared lock amounts and actual batch requirements. This results in under-collateralization of future batches and undermines claim fairness, with impact including financial loss and systemic imbalance.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-withdrawal-manager/src/contract.rs:106-164",
+                "contracts/maxbtc-neutron-core/src/contract.rs"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-withdrawal-manager/src/contract.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Waitasaurus does not validate oracle data timestamp",
+            "description": "The waitasaurus contract queries oracle data but fails to validate the freshness of the data by checking the timestamp field in the ConsensusOutcome structure. Although the oracle may have its own staleness checks, the waitasaurus contract fully trusts the received data without comparing the timestamp to the current block time. The cause is the absence of a validation mechanism for data age. An attacker could exploit this by providing or relaying stale oracle data, leading to unlock decisions based on outdated information. This could result in incorrect unlocking of funds, potentially causing financial loss or manipulation of protocol state.\n",
+            "severity": "high",
+            "location": [
+                "aum-oracle:contracts/waitasaurus/src/contract.rs:119-124"
+            ],
+            "files": [
+                "2ed17e99debca94b712758484c81f46efd3f4e9a/aum-oracle/contracts/waitasaurus/src/contract.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Minted fee amount can be manipulated in both directions",
+            "description": "The calculate_fee_to_mint function uses the spot total supply of MaxBTC while the time-weighted average exchange rate (TWAER) reflects a time-averaged supply. This creates a vulnerability because external actors can change the spot supply via deposits or withdrawals between the TWAER update and the fee collection. The root cause is the mixing of spot and time-weighted inputs. An attacker can manipulate the spot supply to either inflate or deflate the calculated fee. If spot supply is higher than TWAS, over-minting occurs; if lower, fees are reduced. This enables profitable attacks, including MEV-based sandwich attacks where an adversary burns MaxBTC just before fee collection and reclaims deposits afterward, leading to protocol revenue loss and unfair fee distribution.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-fee-collector/src/contract.rs:306-346",
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:96-158"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-fee-collector/src/contract.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Deposit flushing is vulnerable to Denial-of-Service attacks",
+            "description": "In the Idle state, when the operator issues a Tick, execute_tick_idle sends btc_requested to the withdrawal manager if sufficient deposits exist. However, any remaining deposit amount is not processed until the next Tick. A DoS attack is possible if an attacker withdraws a single unit of MaxBTC between Ticks, preventing further deposit processing. The cause is the lack of automatic flushing. This allows an attacker to block deposit progression indefinitely with minimal cost. The impact is a denial of service for legitimate depositors, halting deposit servicing and degrading protocol availability.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:209-274"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-core/src/contract.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "Missing rent-exemption checks for SOL withdrawals",
+            "description": "The withdraw_asset instruction in the Jupiter helper allows withdrawing the entire lamport balance of a PDA without ensuring it remains above the rent-exemption threshold. The cause is the absence of a rent check. An attacker can drain lamports, potentially causing the PDA to be closed by the runtime. This results in loss of the PDA address and associated state, leading to permanent loss of functionality and potential fund lockup.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-solana:programs/jupiter-helper/src/instructions/withdraw_asset.rs:27-30"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Sanctioned addresses can purchase and redeem MaxBTC",
+            "description": "While deposits are restricted via a KYC allow list, withdrawals do not perform the same check. The execute_withdraw handler does not validate the sender against the allow list. The cause is inconsistent access control. This allows sanctioned addresses to buy MaxBTC on secondary markets and redeem them for underlying assets, bypassing KYC restrictions. The impact is regulatory non-compliance and undermining of the protocol’s compliance framework.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:470",
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:521-603",
+                "maxbtc-neutron:contracts/maxbtc-neutron-allow-list/src/contract.rs:84-93"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-core/src/contract.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Lack of exchange rate liveliness checks allows over-minting of MaxBTC",
+            "description": "The calculate_mint_amount function uses the TWAER to determine mint amounts but does not validate the published_at timestamp of the rate. The cause is missing liveness validation. If the TWAER is stale due to off-chain service failure, users can mint more MaxBTC than justified by the current market rate. This leads to over-minting and dilution of existing holders, resulting in economic imbalance and potential loss of peg stability.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:767-794"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-core/src/contract.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing mint alignment check may cause a miscalculated AUM",
+            "description": "The get_aum function assumes a fixed index offset (5 + i) between custody accounts and their corresponding oracle price feeds. However, it does not validate that the paired accounts belong to the same asset mint. The cause is hardcoded indexing without validation. If inputs are misordered, mismatched oracles and custodies will be used, leading to incorrect AUM calculations. This could result in erroneous liquidity provisioning, incorrect fee calculations, and financial loss.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-solana:packages/base/src/formulas.rs:188-209"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Unrestricted access enables sandwich attack on the process handler",
+            "description": "The process_handler function allows any signer to trigger processing when allowed_processor is None. The cause is missing access control. A malicious actor can monitor mempool transactions and sandwich legitimate calls by front-running or back-running with liquidity manipulation. This allows profit from slippage at the expense of users or the protocol. The impact includes MEV exploitation, loss of user funds, and reduced capital efficiency, especially in volatile or low-liquidity conditions.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-solana:programs/jupiter-helper/src/instructions/process.rs:38-47"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Existing MaxBTC issuer contract migration does not transfer current deposits",
+            "description": "During migration from the legacy issuer to the new core contract, the deposit balance is included in instantiation parameters but not actually transferred. The cause is missing fund transfer logic. As a result, the new core initializes with zero on-chain balance despite a positive internal state. This breaks deposit continuity and causes withdrawal failures. The impact is operational disruption, requiring redeployment or emergency fixes, increasing risk and downtime.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-token/src/contract.rs:233–421"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-token/src/contract.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-405"
+                ],
+                "4": [
+                    "CWE-408"
+                ]
+            },
+            "title": "Using the vault account as the Wormhole bridge fee payer allows griefing by fee draining",
+            "description": "The Wormhole bridge instruction uses the vault account to pay fees, not the signer. The cause is incorrect fee payer assignment. An attacker can repeatedly bridge small amounts to drain the vault’s lamports. This leads to denial of service when the vault is depleted, preventing legitimate bridging operations. The impact is operational disruption and potential loss of bridge functionality.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-solana:programs/wormhole-helper/src/instructions/bridge_tokens.rs:87"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "Unchecked unwrap on optional cap field causes panic",
+            "description": "The UpdateConfig handler unconditionally calls unwrap on the optional deposits_cap field when logging. The cause is unsafe handling of optional values. If the cap is set to None, this triggers a runtime panic, halting contract execution. The impact is denial of service and potential freeze of critical functionality.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:394"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-core/src/contract.rs"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Misleading use of TOTAL_DEPOSITED leads to protocol lock",
+            "description": "TOTAL_DEPOSITED is a cumulative counter that is never decremented, yet it is used to enforce a deposit cap. The cause is incorrect state tracking. As deposits accumulate, the cap is hit even when actual AUM is low. This leads to the protocol rejecting valid deposits, causing unnecessary restrictions and reduced capital efficiency.\n",
+            "severity": "high",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:508"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-core/src/contract.rs"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "No validation for lock amount allows negative and zero values",
+            "description": "The execute_lock function accepts SignedDecimal256 amounts without enforcing positivity. The cause is missing input validation. Zero or negative values allow immediate unlocking regardless of oracle conditions, defeating the lock mechanism. This enables bypass of security gates by authorized actors, undermining the intended access control.\n",
+            "severity": "low",
+            "location": [
+                "aum-oracle:contracts/waitasaurus/src/contract.rs:83-104",
+                "aum-oracle:contracts/waitasaurus/src/contract.rs:131-133"
+            ],
+            "files": [
+                "2ed17e99debca94b712758484c81f46efd3f4e9a/aum-oracle/contracts/waitasaurus/src/contract.rs"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "Fixed Wormhole Helper configuration cannot be updated to match Wormhole fee changes",
+            "description": "The update_config_handler only allows updating the target_address field. The cause is incomplete configurability. If Wormhole fees or nonce change, the program cannot adapt without redeployment. This leads to operational inflexibility and potential failure to bridge.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/wormhole-helper/src/instructions/update_config.rs:13-25"
+            ],
+            "files": []
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Configuration changes while locked can prevent unlocking",
+            "description": "execute_update_config allows changing contract address or asset name while locked. The unlock logic uses current config, not the one at lock time. The cause is mutable state during locked period. Changing config can make unlocking impossible even if original conditions are met. This breaks expected behavior and can permanently lock funds.\n",
+            "severity": "low",
+            "location": [
+                "aum-oracle:contracts/waitasaurus/src/contract.rs:56-81"
+            ],
+            "files": [
+                "2ed17e99debca94b712758484c81f46efd3f4e9a/aum-oracle/contracts/waitasaurus/src/contract.rs"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-369"
+                ]
+            },
+            "title": "Potential division by zero in liquidity calculations",
+            "description": "The process instruction divides by total_supply_jlp without checking for zero. The cause is missing arithmetic safeguard. If JLP supply becomes zero, the program panics, disabling liquidity operations. This leads to denial of service and locked user funds.\n",
+            "severity": "low",
+            "location": [
+                "maxtbc-solana:programs/jupiter-helper/src/instructions/process.rs:175",
+                "maxtbc-solana:programs/jupiter-helper/src/instructions/process.rs:308"
+            ],
+            "files": []
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Liquidity operation fees can be set up to 100%",
+            "description": "The maximum_fee_bps parameter allows up to 10,000 bps (100%). The cause is insufficient upper bound enforcement. At 100%, fee calculations result in zero output, allowing full extraction of user input as fees. This enables abuse and loss of user funds under the guise of legitimate fees.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/jupiter-helper/src/instructions/initialize.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ],
+                "4": [
+                    "CWE-606"
+                ]
+            },
+            "title": "Missing validation on collection period allows invalid or inconsistent configuration",
+            "description": "The collection_period_seconds parameter is accepted without validation for positivity or minimum threshold. The cause is missing input sanitization. Setting zero or very short periods leads to excessive fee collection, gas waste, or logic errors. The impact is misconfiguration risk and degraded system stability.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-fee-collector/src/contract.rs"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-fee-collector/src/contract.rs"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ],
+                "4": [
+                    "CWE-940"
+                ]
+            },
+            "title": "Unverified trust assumption in Jupiter Perpetuals integration",
+            "description": "The process instruction performs CPI to Jupiter Perpetuals without validating account ownership or oracle correctness. The cause is over-trust in external programs. If Jupiter fails to validate, it could lead to unauthorized access or incorrect outcomes. This introduces centralization and integrity risks.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/jupiter-helper/src/instructions/process.rs:353–355"
+            ],
+            "files": []
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ]
+            },
+            "title": "Permissionless bridge function allows griefing attacks",
+            "description": "The bridge_tokens function is callable by anyone with no minimum amount check. The cause is lack of spam protection. Attackers can spam with small amounts, wasting resources and causing congestion. This leads to operational inefficiency and increased costs.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/wormhole-helper/src/instructions/bridge_tokens.rs:29-57"
+            ],
+            "files": []
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ],
+                "4": [
+                    "CWE-638"
+                ]
+            },
+            "title": "Owner can withdraw assets regardless of the lock state",
+            "description": "The withdraw_asset function does not check the current WaitosaurState. The cause is missing state validation. The owner can bypass the lock mechanism at any time, undermining the security model and enabling unauthorized withdrawals.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/waitosaur/src/instructions/withdraw_asset.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "Owner can bypass lock state using reset_locker",
+            "description": "The reset_locker function allows the owner to change the state from locked to unlocked arbitrarily. The cause is excessive privilege. This completely undermines the lock/unlock flow, allowing the owner to bypass intended security guarantees.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/waitosaur/src/instructions/reset_locker.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Core contract reassignment without namespacing risks withdrawal state corruption",
+            "description": "The withdrawal manager allows updating the core contract address but tracks claims only by batch_id. The cause is lack of namespace isolation. If a new core reuses old batch IDs, stale accounting data may be reused, leading to incorrect payout denials or underflows.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-withdrawal-manager/src/contract.rs:198-229"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-withdrawal-manager/src/contract.rs"
+            ]
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Protocol centralization due to off-chain operator dependency",
+            "description": "Protocol state transitions depend entirely on a centralized operator. The cause is architectural centralization. Failure or compromise of the operator halts the protocol, introducing systemic risk and reducing decentralization.\n",
+            "severity": "low",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-439"
+                ]
+            },
+            "title": "Fragile local calculation of output amount depends on external program logic",
+            "description": "The jlp_amount_out function locally computes output based on assumptions about Jupiter’s logic. The cause is logic duplication. If Jupiter changes its implementation, the helper becomes desynchronized, leading to incorrect liquidity provisioning and potential losses.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/jupiter-helper/src/instructions/process.rs:296-328"
+            ],
+            "files": []
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Conflicting configuration flags allow ambiguous processor update",
+            "description": "The update_config function allows setting and removing allowed_processor simultaneously. The cause is lack of parameter validation. This leads to ambiguous state and potential logic errors in access control.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/jupiter-helper/src/instructions/update_config.rs:34-49"
+            ],
+            "files": []
+        },
+        {
+            "id": 30,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Zero-value lock permitted due to missing aggregate amount validation",
+            "description": "The lock_handler allows entering Locked state with zero asset values. The cause is missing input validation. This undermines the semantic meaning of locking and enables misuse.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/waitosaur/src/instructions/lock.rs:14-36"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-waitosaur-holder/src/contract.rs"
+            ]
+        },
+        {
+            "id": 31,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Single-block instant withdrawal can stifle AUM growth",
+            "description": "execute_claim allows immediate claiming after batch finalization in the same block. The cause is lack of delay. MEV actors can front-run Tick messages to withdraw at favorable rates, extracting value and suppressing AUM growth. This distorts incentives and reduces capital efficiency.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-withdrawal-manager/src/contract.rs",
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-withdrawal-manager/src/contract.rs"
+            ]
+        },
+        {
+            "id": 32,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-405"
+                ],
+                "4": [
+                    "CWE-407"
+                ]
+            },
+            "title": "Manual allow list growth can cause deposit Denial-of-Service",
+            "description": "The allow list is stored as a vector, leading to O(N) iteration. The cause is inefficient data structure. A large list can cause out-of-gas errors, blocking deposits. This introduces operational risk.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-allow-list/src/state.rs:6",
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:470"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-allow-list/src/state.rs"
+            ]
+        },
+        {
+            "id": 33,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1286"
+                ]
+            },
+            "title": "Lack of validation for KYC service addresses allows for deposit Denial-of-Service",
+            "description": "UpdateZkMeSettings does not validate addresses before storage. The cause is missing deserialization validation. Invalid addresses cause query failures, leading to DoS on deposits.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-allow-list/src/msg.rs:22-23"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-allow-list/src/msg.rs"
+            ]
+        },
+        {
+            "id": 34,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack of deposit cost validation can lead to a subtraction overflow",
+            "description": "deposit_cost is not validated to be less than one. The cause is missing input check. If set >1, a subtraction overflow occurs; if =1, mint amount is zero. Both cause deposit DoS.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:765-794",
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:55",
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:398-401"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-core/src/contract.rs"
+            ]
+        },
+        {
+            "id": 35,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-405"
+                ],
+                "4": [
+                    "CWE-407"
+                ]
+            },
+            "title": "Lack of pagination for finalized batches query may lead to out-of-gas error",
+            "description": "The FinalizedBatches query returns all batches if no ID is specified. The cause is missing pagination. As batch count grows, the query may exceed gas limits, causing DoS.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-neutron:packages/base/src/msg/core.rs:96",
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:689-704"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-core/src/contract.rs"
+            ]
+        },
+        {
+            "id": 36,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Contracts allow for downgrading without changing the contract version",
+            "description": "Migration handlers do not prevent downgrades. The cause is missing version guard. Downgrading can cause state mismatches and confuse version tracking.\n",
+            "severity": "low",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 37,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "Contracts instantiated by the maxbtc-neutron-factory contract cannot be upgraded",
+            "description": "The factory sets itself as upgrade admin but has no way to forward migration messages. The cause is missing upgrade delegation. This renders contracts unupgradeable unless the factory is first upgraded.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-factory/src/contract.rs:29-294"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-factory/src/contract.rs"
+            ]
+        },
+        {
+            "id": 38,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "Missing pubkey validation in Wormhole Helper initialization enables misconfiguration",
+            "description": "The initialize_handler accepts Pubkey fields without checking for default values. The cause is missing input validation. This can lead to misconfiguration, asset misrouting, or loss of control.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/wormhole-helper/src/instructions/initialize.rs:17-22"
+            ],
+            "files": []
+        },
+        {
+            "id": 39,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "Missing pubkey validation in Waitosaur initialization enables misconfiguration",
+            "description": "The initialize_handler function in the Waitosaur program fails to validate critical public key fields such as locker, unlocker, owner, and recipient array entries. While mint keys are checked against Pubkey::default, these other fields are accepted without validation. This omission allows the contract to be initialized with invalid or default public keys, which could lead to misconfigured access controls or broken logic in recipient handling. An attacker or misconfigured deployment could set these fields to Pubkey::default, resulting in a contract that behaves unpredictably or becomes unusable. The impact includes potential loss of functionality or incorrect access control assumptions.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/waitosaur/src/instructions/initialize.rs:16-35"
+            ],
+            "files": [
+                "2ed17e99debca94b712758484c81f46efd3f4e9a/aum-oracle/contracts/waitasaurus/src/contract.rs"
+            ]
+        },
+        {
+            "id": 40,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Configuration updates allowed while the Waitosaur is locked may lead to an inconsistent state",
+            "description": "The update_config instruction in the Waitosaur program and the corresponding contract on Neutron allow configuration changes without verifying the current state of the contract. This means that critical parameters such as recipient addresses, locker/unlocker roles, asset details, or withdrawal managers can be modified even when the contract is in a Locked state. Such updates during a sensitive operational period can break assumptions made by ongoing processes, leading to inconsistent state or misrouted funds. The root cause is the absence of a state check before applying configuration changes. This could be exploited by a privileged actor to alter behavior during lock periods, undermining the integrity of the locking mechanism.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-solana:programs/waitosaur/src/instructions/update_config.rs",
+                "maxbtc-neutron:contracts/maxbtc-neutron-waitosaur-holder/src/contract.rs"
+            ],
+            "files": [
+                "2ed17e99debca94b712758484c81f46efd3f4e9a/aum-oracle/contracts/waitasaurus/src/contract.rs"
+            ]
+        },
+        {
+            "id": 41,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1286"
+                ]
+            },
+            "title": "Unvalidated recipient address in claim execution may lead to misrouted funds",
+            "description": "The execute_claim function in the withdrawal manager contract constructs a CosmosMsg::Bank::Send using a recipient address that is not validated. This lack of input validation means that malformed or invalid addresses can be used, potentially resulting in funds being sent to an unintended or non-existent account. The cause is the absence of address format or validity checks before constructing the send message. An attacker could exploit this by providing a malformed address during a claim, leading to irreversible loss of funds. The impact is limited to misrouting rather than theft, but still results in user fund loss.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-withdrawal-manager/src/contract.rs:168"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-withdrawal-manager/src/contract.rs"
+            ]
+        },
+        {
+            "id": 42,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Inaccessible SetTokenMetadata entrypoint leaves token without metadata",
+            "description": "The execute_set_token_metadata function is protected by an ownership check via cw_ownable::assert_owner, but the token contract is owned by the maxbtc-neutron-core contract, which does not expose any method to forward the SetTokenMetadata call. As a result, no on-chain actor can invoke this function post-deployment, making the metadata-setting functionality unreachable. Although the factory is set as the wasm admin, this role cannot override the cw_ownable ownership logic. The root cause is a deployment architecture mismatch between ownership and functionality. This leads to an inability to set or update token metadata unless done at instantiation or via migration, reducing usability and transparency.\n",
+            "severity": "low",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-token/src/contract.rs:181-210"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-token/src/contract.rs"
+            ]
+        },
+        {
+            "id": 43,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "Inefficient ZkMe error handling",
+            "description": "When the ZkMe contract query fails, the function returns false instead of propagating the error. This silent failure makes it impossible to distinguish between a user being unapproved and a service outage. The root cause is improper error handling in the ZkMe integration logic. This behavior could deny access to legitimate users during ZkMe downtime, as the system treats all failures uniformly. The impact is reduced reliability and user experience, especially during external service disruptions, potentially leading to false rejections of valid users.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-allow-list/src/contract.rs:84-95"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-allow-list/src/contract.rs"
+            ]
+        },
+        {
+            "id": 44,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Configurable discriminator could lead to incorrect message types",
+            "description": "The discriminator field in the wormhole-helper config is configurable, but it determines the message type for Wormhole cross-chain messages. Using an incorrect value could result in parsing errors on the destination chain, breaking message interoperability. The root cause is exposing a critical protocol-level constant to configuration. This increases the risk of operational failure due to misconfiguration. An attacker with configuration access could intentionally set an invalid discriminator, disrupting cross-chain communication. The impact is message delivery failure or misrouting across chains.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-solana:programs/wormhole-helper/src/config.rs:5"
+            ],
+            "files": []
+        },
+        {
+            "id": 45,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Broad version range in migration logic may lead to unintended upgrades",
+            "description": "The migration logic in the token contract uses a permissive check (storage_version < version) that allows migration from any earlier version without regard for intermediate steps. This could result in skipped invariants or partial upgrades if structural changes are required between versions. The root cause is the lack of version pinning or stepwise migration enforcement. If the contract is upgraded from a version that requires intermediate state transformations, the migration may fail silently or corrupt state. The impact includes potential state inconsistency or broken functionality post-upgrade.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-token/src/contract.rs:239"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-token/src/contract.rs"
+            ]
+        },
+        {
+            "id": 46,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "Missing event emissions reduce observability",
+            "description": "The waitosaur-holder contract emits only basic attributes in events, omitting critical details such as locked amounts, timestamps, and transferred values. This lack of detailed event data reduces off-chain observability and makes monitoring contract activity difficult. The root cause is incomplete event emission in state-changing functions. This impacts developers, auditors, and users who rely on event logs for tracking behavior. Without comprehensive events, debugging issues or building reliable indexing services becomes significantly harder.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-waitosaur-holder/src/contract.rs"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-waitosaur-holder/src/contract.rs"
+            ]
+        },
+        {
+            "id": 47,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Contracts should implement a two-step ownership transfer",
+            "description": "The fee-collector contract allows a one-step ownership transfer, which poses a risk of ownership being sent to an incorrect address with no recovery mechanism. The root cause is the absence of a confirmation step in the ownership transfer process. A two-step model would require the current owner to propose a new owner, and the proposed owner to claim ownership. This prevents accidental loss of control. The impact of the current design is permanent loss of contract control if the owner address is mistyped, leading to governance and operational failure.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-neutron:maxbtc-neutron-fee-collector"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-fee-collector/src/contract.rs"
+            ]
+        },
+        {
+            "id": 48,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Incomplete TODO comments",
+            "description": "The deposit_pending and deposit_jlp_tick functions in the core contract contain TODO comments indicating incomplete implementation. These functions perform state transitions but lack full logic as described in documentation. The root cause is unfinished development. This increases the risk of deploying a contract with partial functionality, leading to incorrect behavior or halted operations. The impact is potential protocol failure or incorrect state updates when these functions are called before completion.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-neutron:maxbtc-neutron-core/src/contract.rs:298, 308"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-core/src/contract.rs"
+            ]
+        },
+        {
+            "id": 49,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unused error variants increase codebase complexity",
+            "description": "The ContractError enum in the waitosaur-holder contract defines unused variants such as NoDataInContract and NoAssetFound. These unused errors add unnecessary complexity and cognitive load for developers reviewing the code. The root cause is failure to clean up error types after implementation changes. This makes the error surface harder to audit and increases the chance of confusion during debugging. The impact is reduced code clarity and maintainability, especially in security-critical sections.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-waitosaur-holder/src/error.rs"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-waitosaur-holder/src/error.rs"
+            ]
+        },
+        {
+            "id": 50,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-240"
+                ]
+            },
+            "title": "Incorrect event emission on token minting",
+            "description": "The execute_mint function emits an event that logs cfg.denom, but does not validate that the minted amount's denom matches this value. This can result in misleading event data, where redemption tokens are tagged with the MaxBTC denom. The root cause is incorrect event data construction without validation. The impact is inaccurate off-chain indexing and user confusion, as events do not reflect the actual token type being minted, potentially leading to incorrect balance tracking.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-token/src/contract.rs:133-154"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-token/src/contract.rs"
+            ]
+        },
+        {
+            "id": 51,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing associated token account mint constraint",
+            "description": "The withdraw_asset instruction in the wormhole-helper program lacks an associated_token::mint = mint constraint on the recipient_ata account. While the SPL token program will eventually reject invalid mints, failing early with a constraint check is more efficient. The root cause is missing validation at the instruction level. This leads to unnecessary computation before rejection. The impact is higher transaction costs and delayed error reporting, though no funds are lost.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-solana:programs/wormhole-helper/src/instructions/withdraw_asset.rs:81"
+            ],
+            "files": []
+        },
+        {
+            "id": 52,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1106"
+                ]
+            },
+            "title": "Use of magic numbers increases maintenance costs",
+            "description": "Multiple instances of magic numbers exist in the Jupiter helper program, such as in update_config, initialize, and process instructions. These unnamed constants reduce code readability and increase maintenance difficulty. The root cause is the lack of named constants for fixed values. This makes it harder to understand the purpose of values and increases the risk of errors during updates. The impact is higher cognitive load and increased likelihood of bugs during future modifications.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-solana:programs/jupiter-helper/src/instructions/update_config.rs:21",
+                "maxbtc-solana:programs/jupiter-helper/src/instructions/initialize.rs:22",
+                "maxbtc-solana:programs/jupiter-helper/src/instructions/process.rs:172",
+                "maxbtc-solana:programs/jupiter-helper/src/instructions/process.rs:197",
+                "maxbtc-solana:programs/jupiter-helper/src/instructions/process.rs:305"
+            ],
+            "files": []
+        },
+        {
+            "id": 53,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ]
+            },
+            "title": "Misleading error",
+            "description": "The execute_mint_fee handler returns ContractError::InvalidDepositDenom when the minted coin is not MaxBTC, even though the action is not a deposit. This misnamed error can confuse users and developers during debugging. The root cause is incorrect error variant usage. Returning an error that references \"deposit\" in a minting context creates misleading diagnostics. The impact is increased debugging time and potential misdiagnosis of configuration issues.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:336"
+            ],
+            "files": [
+                "9721fc1557cb6d56aab2b201d16e1c9f71f27829/maxbtc-neutron/contracts/maxbtc-neutron-core/src/contract.rs"
+            ]
+        },
+        {
+            "id": 54,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Dead code and misleading comments increase maintenance costs",
+            "description": "Multiple instances of dead code exist, such as redundant Decimal::floor/ceil calls, unnecessary init_if_needed flags, and unused accounts in instructions. Additionally, misleading comments incorrectly describe function behavior, ownership roles, and configuration options. The root cause is outdated code and documentation. This reduces code clarity and increases maintenance burden. The impact includes confusion during audits, higher risk of incorrect assumptions, and increased likelihood of bugs due to reliance on incorrect comments.\n",
+            "severity": "informational",
+            "location": [
+                "maxbtc-solana:packages/base/src/formulas.rs:157-161",
+                "maxbtc-solana:programs/waitosaur/src/instructions/withdraw_asset.rs:100-101",
+                "maxbtc-solana:programs/wormhole-helper/src/instructions/bridge_tokens.rs:112-118",
+                "maxbtc-solana:programs/wormhole-helper/src/instructions/withdraw_asset.rs:68-69",
+                "maxbtc-neutron:contracts/maxbtc-neutron-core/src/contract.rs:607-608",
+                "maxbtc-neutron:contracts/maxbtc-neutron-token/src/contract.rs:143",
+                "maxbtc-neutron:contracts/maxbtc-neutron-token/src/contract.rs:170-171",
+                "maxbtc-neutron:contracts/maxbtc-neutron-factory/src/contract.rs:73",
+                "maxbtc-neutron:contracts/maxbtc-neutron-factory/src/contract.rs:143",
+                "maxbtc-solana:programs/wormhole-helper/src/instructions/initialize.rs:78",
+                "maxbtc-solana:programs/waitosaur/src/instructions/unlock.rs:154"
+            ],
+            "files": []
+        }
+    ]
+}

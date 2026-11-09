@@ -1,0 +1,103 @@
+{
+    "path": "reports/VAR_57_blocks_240709_timelock_contract.pdf",
+    "project_info": {
+        "url": "https://github.com/57blocks/stellar-timelock-contract",
+        "commit_id": "f143245",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-07-11",
+        "project_path": "contracts/VAR_57_blocks_240709_timelock_contract.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ]
+            },
+            "title": "Centralization Risk",
+            "description": "The vulnerability lies in the inability to fully decentralize administrative control of the timelock contract. Unlike the OpenZeppelin TimelockController design, which allows the admin to renounce their role and enforce governance through timelocked proposals, this implementation does not support such a mechanism. The root cause is the lack of functionality to schedule administrative operations (like grant_role, revoke_role, update_min_delay, and update_owner) as timelocked actions. As a result, the Owner retains permanent control, creating a centralization risk. An attacker who compromises the Owner's private keys could indefinitely control all privileged operations. The impact is a single point of failure and reduced trust in the system’s decentralization, potentially leading to unilateral changes without community oversight.\n",
+            "severity": "low",
+            "files": [
+                "time_lock/src/contract.rs"
+            ],
+            "location": [
+                "time_lock/src/contract.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Operation delay bounds are not enforced",
+            "description": "The timelock contract fails to enforce both minimum and maximum bounds when updating the minimum delay value via the update_min_delay() function. While the initialization enforces a non-zero minimum delay, the update function lacks validation, allowing the Owner to set a delay that is too short (e.g., 1 second), undermining the timelock's purpose of providing a reasonable review period. Additionally, there is no upper bound, enabling the setting of excessively long delays (e.g., years), which could freeze the system indefinitely. The root cause is missing input validation in the update_min_delay() function. An attacker with Owner privileges could exploit this to either rush proposals or paralyze governance. The impact includes potential denial of governance functionality and reduced user confidence in the timelock mechanism.\n",
+            "severity": "low",
+            "files": [
+                "time_lock/src/contract.rs"
+            ],
+            "location": [
+                "time_lock/src/contract.rs.initialize",
+                "time_lock/src/contract.rs.update_min_delay",
+                "time_lock/src/contract.rs.schedule"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "Number of proposers is not enforced",
+            "description": "The contract enforces a maximum number of privileged accounts only during initialization but fails to do so in the grant_role() function. This allows unlimited addition of proposers, cancellers, and executors over time, potentially leading to an unmanageable number of privileged users. Conversely, there is no lower bound check in revoke_role(), risking a scenario where too few or zero privileged users remain, leading to governance paralysis. The root cause is the absence of upper and lower bound validation in role management functions. A malicious or compromised Owner could flood the system with proposers or revoke all roles, leading to either security degradation or denial of service. The impact is reduced system stability and long-term operability.\n",
+            "severity": "informational",
+            "files": [
+                "time_lock/src/contract.rs"
+            ],
+            "location": [
+                "time_lock/src/contract.rs.grant_role",
+                "time_lock/src/contract.rs.revoke_role"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Function name not validated in administrative operations",
+            "description": "When scheduling administrative operations (e.g., update_min_delay, grant_role, revoke_role, update_owner), the contract checks that the destination address is its own but does not validate the function name (fn_name) parameter. This allows users to schedule operations with misspelled or incorrect function names, which will only fail at execution time. The root cause is the lack of explicit whitelisting or validation of allowed function names in the schedule() function. An attacker or user error could result in a scheduled operation being reverted upon execution, wasting time and potentially blocking the queue if batch processing were implemented. The impact is operational inefficiency and user experience degradation, though no direct fund loss occurs.\n",
+            "severity": "informational",
+            "files": [
+                "time_lock/src/contract.rs"
+            ],
+            "location": [
+                "time_lock/src/contract.rs.schedule"
+            ]
+        }
+    ]
+}

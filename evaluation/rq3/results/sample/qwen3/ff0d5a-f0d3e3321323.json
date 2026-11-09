@@ -1,0 +1,110 @@
+{
+    "project": "sanctum_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/sanctum_audit_final.pdf.json/programs/s-controller/src/processor/swap_exact_in.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3333333333333333,
+        "recall": 0.5,
+        "f1": 0.4
+    },
+    "cwe_ground_truth": [
+        "CWE-682",
+        "CWE-1339"
+    ],
+    "cwe_detected": [
+        "CWE-284",
+        "CWE-682",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Rounding Error During Swaps",
+            "description": "1. **Description:** The vulnerability arises in the `swap_exact_in` function where the `U64RatioFloor::reverse` method is used during a cross-program invocation to convert SOL value to LST amount. This method rounds up the resulting value, potentially allowing users to receive one more lamport than intended.\n2. **Cause:** The root cause is the use of a rounding-up operation in `U64RatioFloor::reverse`, which introduces a rounding error in favor of the user. This becomes exploitable when protocol fees are zero, as the absence of fees makes the exact output amount critical.\n3. **Exploitation:** An attacker could repeatedly perform small swaps with zero-fee configurations, benefiting from the upward rounding to extract slightly more tokens than deserved, accumulating gains over time.\n4. **Impact:** The impact includes gradual loss of funds from the liquidity pool due to inflated token payouts, undermining the economic model and potentially leading to imbalance or depletion of reserves.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code implements a `swap_exact_in` function for a Solana program that facilitates token swaps in a liquidity pool. Upon analysis, three potential security issues were identified based on the specified CWEs.\n\nFirst, the function `sync_sol_value_unchecked` is called before and after the swap operations using accounts derived from user inputs (`src_sync_sol_value_accounts` and `dst_sync_sol_value_accounts`). However, there is no explicit validation that these accounts are actually authorized or belong to the correct pool reserves. This could allow a malicious actor to manipulate value calculations if they can control the CPI targets, leading to incorrect state updates — pointing to CWE-693 (Protection Mechanism Failure), as the protection via account verification is insufficient.\n\nSecond, arithmetic operations such as `checked_add` are used for `dst_lst_out` and `to_protocol_fees_lst_amount`, but earlier in the flow, `dst_lst_out` is derived from untrusted external CPI calls (`invoke_sol_to_lst`). If the pricing oracle or CPI returns an unexpectedly large or manipulated value due to a compromised downstream program, it could cause miscalculations in fee distribution or liquidity checks. This represents CWE-682 (Incorrect Calculation), as the correctness of calculations depends on unvalidated external inputs.\n\nThird, while access control is partially enforced via `verify_swap_exact_in`, the signer (`accounts.signer`) is only checked for signature presence, not role-based permissions. There is no explicit check ensuring that the signer is an allowed user or wallet — however, since this is a public swap function, this may be by design. Still, the lack of granular access control on sensitive operations like `transfer_checked_decimal_agnostic_invoke_signed` with `pool_state` as authority suggests potential misuse if the `pool_state` PDA's signing capability is overprivileged without runtime constraints, aligning with CWE-284 (Improper Access Control).\n",
+            "findings": [
+                {
+                    "title": "Potential Protection Mechanism Failure in sync_sol_value_unchecked",
+                    "description": "The function `sync_sol_value_unchecked` is called with accounts derived from user-supplied inputs without sufficient validation that the accounts are legitimate pool reserves. This could allow manipulation of SOL value synchronization if malicious CPI targets are provided, bypassing intended protections.",
+                    "category": "CWE-693",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Risk of Incorrect Calculation Due to Untrusted Oracle Output",
+                    "description": "The output amount `dst_lst_out` is calculated using `invoke_sol_to_lst`, which relies on external CPI calls. If the pricing oracle returns an incorrect or manipulated value, subsequent calculations including fee distribution and slippage checks may be compromised, leading to incorrect token transfers or loss of funds.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Access Control on Pool State Authority in Token Transfers",
+                    "description": "The `pool_state` PDA is used as the authority for transferring tokens from pool reserves. While signed with a PDA bump, there is no additional validation that the operation is authorized beyond signature verification. This could allow unintended token movements if the PDA is used in an unexpected context or if privilege escalation occurs via CPI.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code implements a swap function (`process_swap_exact_in`) in a Solana program that allows swapping tokens with exact input. After analyzing the code for the specified CWEs, no direct evidence of vulnerabilities from the listed root causes was found. The function performs several security-relevant checks:\n\n- It verifies account keys and privileges via `swap_exact_in_verify_account_keys` and `swap_exact_in_verify_account_privileges`.\n- It validates that the input amount is non-zero.\n- It checks slippage tolerance and ensures output is greater than zero.\n- It prevents overflow in arithmetic using `checked_add` and returns an error on failure.\n- It ensures the pool does not lose SOL value after the swap by comparing pre- and post-swap values.\n- It uses signed CPI calls with the correct seeds for transferring tokens from the pool reserves.\n- It validates list state and disables trading for disabled LSTs.\n\nThere are no obvious cases of improper authentication, missing privilege checks, integer overflows (due to use of `checked_add`), or incorrect user management. The arithmetic operations are guarded, and the use of `index_to_usize` does not appear to lead to off-by-one errors because it's used to index into a list that was already validated via account loading and state checks.\n\nAdditionally, all sensitive operations are protected by ownership checks (via `pool_state` as signer with PDA) and the use of PDAs for signing token transfers. There is no use of weak cryptography, and no dangerous functions are exposed without access control.\n\nTherefore, no security issues stemming from the listed CWEs were identified.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-193",
+            "CWE-269",
+            "CWE-287",
+            "CWE-286",
+            "CWE-655",
+            "CWE-346",
+            "CWE-191",
+            "CWE-345",
+            "CWE-182",
+            "CWE-778",
+            "CWE-654",
+            "CWE-807",
+            "CWE-358",
+            "CWE-1270",
+            "CWE-357",
+            "CWE-190",
+            "CWE-923",
+            "CWE-311",
+            "CWE-326",
+            "CWE-1267",
+            "CWE-135",
+            "CWE-757",
+            "CWE-184",
+            "CWE-369",
+            "CWE-327",
+            "CWE-424",
+            "CWE-656",
+            "CWE-128",
+            "CWE-1339",
+            "CWE-282",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-330",
+            "CWE-1335"
+        ]
+    ]
+}

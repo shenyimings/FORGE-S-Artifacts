@@ -1,0 +1,57 @@
+{
+    "path": "reports/2025-04-serai-dex-security-review.pdf",
+    "project_info": {
+        "url": "https://github.com/serai-dex/serai",
+        "commit_id": "19422de231592690ac324edb57e32ba1517d1db4",
+        "address": [],
+        "chain": null,
+        "compiler_version": "n/a",
+        "audit_date": "2025-04-17",
+        "project_path": "contracts/2025-04-serai-dex-security-review.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1286"
+                ]
+            },
+            "title": "Disabling validation when dealing with untrusted calldata leads to undefined behavior",
+            "description": "This vulnerability arises from disabling validation when decoding untrusted calldata during the processing of ERC-20 transactions intended as deposits into the Serai DEX. The off-chain Ethereum/ERC-20 processor decodes transaction calldata using an alternative ABI (SeraiIERC20) without proper validation, relying on the `abi_decode` function with validation disabled. The root cause is the use of a third-party library (alloy-sol-types) that allows disabling ABI decoding validation, which can lead to undefined behavior such as integer overflows when parsing malformed or malicious input. An attacker could craft a transaction with specially crafted calldata that, when processed by the off-chain processor, triggers a panic due to an arithmetic overflow in the decoder (e.g., \"attempt to add with overflow\" in `alloy-sol-types`). This would result in the crash of the processor component, leading to a denial of service for deposit processing functionality. While the on-chain system remains unaffected, the off-chain processor's failure disrupts the system's ability to detect and handle valid deposits, impacting availability and operational continuity.\n",
+            "severity": "informational",
+            "files": [
+                "processor/ethereum/erc20/src/lib.rs"
+            ],
+            "location": [
+                "processor/ethereum/erc20/src/lib.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Public key checks are not explicit",
+            "description": "The vulnerability lies in the handling of Schnorr public keys within the Serai codebase, where there is no explicit check for the point at infinity, a special value on the elliptic curve that should be rejected for security reasons. Although the point at infinity is effectively disallowed, this is due to an implicit side effect—namely, a check that rejects public keys with a zero x-coordinate—rather than an intentional, explicit validation. The root cause is the reliance on representation-specific artifacts (where the point at infinity maps to (0,0) in affine coordinates) instead of performing a direct cryptographic check for the point at infinity. An attacker could potentially exploit this by submitting a public key corresponding to the point at infinity, which might bypass intended security assumptions if the underlying library or implementation behavior changes. While current logic prevents its use, the lack of an explicit check increases the risk of future vulnerabilities if the coordinate representation or conversion logic evolves. The impact is primarily on the robustness and clarity of cryptographic validation, potentially leading to subtle security flaws in signature verification if not addressed.\n",
+            "severity": "informational",
+            "files": [
+                "networks/ethereum/schnorr/src/public_key.rs"
+            ],
+            "location": [
+                "networks/ethereum/schnorr/src/public_key.rs"
+            ]
+        }
+    ]
+}

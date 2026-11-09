@@ -1,0 +1,54 @@
+{
+    "path": "reports/Rujira - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": "https://gitlab.com/thorchain/rujira",
+        "commit_id": "78506b97f60dd33da005ef40d507998fb09a8c46",
+        "address": [],
+        "chain": "cosmos",
+        "compiler_version": "n/a",
+        "audit_date": "2024-11-28",
+        "project_path": "contracts/Rujira - Zellic Audit Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Withdrawal does not send tokens",
+            "description": "1. **Description:** The `execute_withdraw` function in the rujira-merge contract does not include logic to send $RUJI tokens to the user upon withdrawal. While the function calculates the correct amount to withdraw and emits an event, it fails to generate a `BankMsg::Send` message to transfer the actual tokens.\n\n2. **Cause:** The vulnerability stems from the omission of the token transfer instruction in the response object. The function constructs a default response and only adds an event with withdrawal details, but does not include any message to dispatch the tokens to the user's address.\n\n3. **Exploitation:** An attacker does not need to exploit this vulnerability actively; instead, any legitimate user attempting to withdraw funds would receive zero tokens despite the transaction appearing successful due to the emitted event. This leads to user funds being locked in the contract indefinitely.\n\n4. **Impact:** Users lose access to their funds upon withdrawal, resulting in a complete denial of service for fund retrieval and potential total loss of user trust and assets.\n",
+            "severity": "critical",
+            "files": [
+                "contracts/rujira-merge/src/state.rs"
+            ],
+            "location": [
+                "rujira-merge/state.rs#ExecuteMsg::Withdraw"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Revenue contract allows adding duplicate target denom",
+            "description": "1. **Description:** The `sudo` function in the rujira-revenue contract allows privileged users to add a target denomination (denom) to the `target_denoms` list without checking for duplicates. This can result in the same denom being added multiple times.\n\n2. **Cause:** The lack of a uniqueness check before pushing a new denom into the `target_denoms` vector is the root cause. The contract blindly appends the input denom without verifying its presence in the list.\n\n3. **Exploitation:** A privileged user (or attacker who gains sudo access) could accidentally or maliciously add the same denom multiple times. During the distribution phase, the contract iterates over all entries in `target_denoms`, attempting to send funds for each occurrence.\n\n4. **Impact:** When distributing funds, duplicated denoms cause multiple `BankMsg::Send` messages for the same asset. Since the total balance is not adjusted for duplication, the sum of requested transfers exceeds available funds, causing the entire transaction to fail with insufficient funds. This disrupts revenue distribution and may block further operations until the list is manually corrected.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/rujira-revenue/src/contract.rs"
+            ],
+            "location": [
+                "rujira-revenue/contract.rs#SudoMsg::AddTargetDenom"
+            ]
+        }
+    ]
+}

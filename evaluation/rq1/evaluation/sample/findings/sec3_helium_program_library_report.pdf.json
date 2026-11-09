@@ -1,0 +1,558 @@
+{
+    "path": "reports/sec3_helium_program_library_report.pdf",
+    "project_info": {
+        "url": "https://github.com/helium/helium-program-library",
+        "commit_id": "ed3f1e71a5fcad6897bfba01538b755130d6f893",
+        "address": [
+            "Address1PublicKey...",
+            "Address2PublicKey..."
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-03-19",
+        "project_path": "contracts/sec3_helium_program_library_report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Token account close authority not cleared",
+            "description": "The vulnerability arises because the close authority of a non-native SPL token account is not cleared when setting a new account owner via the circuit breaker mechanism. The SPL Token program only clears the close authority for native accounts, leaving non-native accounts vulnerable to closure by their existing close authority. This allows an attacker with close authority privileges to bypass the circuit breaker's protection by closing the account, thus circumventing intended restrictions. The impact includes potential disruption of system functionality and loss of access to funds or state if the account is unexpectedly closed.\n",
+            "severity": "low",
+            "files": [
+                "programs/circuit-breaker/src/instructions/initialize_account_windowed_breaker_v0.rs"
+            ],
+            "location": [
+                "InitializeAccountWindowedBreakerV0.handler#38-70"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-369"
+                ]
+            },
+            "title": "Missing argument check",
+            "description": "The vulnerability exists because the `window_size_seconds` parameter is used as a divisor in time decay calculations without being validated for zero. If a user provides a zero value, the division operation will cause the program to panic, leading to a denial of service. The root cause is the lack of input validation on user-provided configuration parameters. An attacker could exploit this by initializing a circuit breaker with a zero window size, causing subsequent operations to fail. The impact is a potential DoS condition that disrupts normal program operation.\n",
+            "severity": "informational",
+            "files": [
+                "programs/circuit-breaker/src/window.rs"
+            ],
+            "location": [
+                "time_decay_previous_value#4-20"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Inconsistent Anchor discriminator and padding space",
+            "description": "This issue stems from inconsistent use of space allocation in Anchor account initializations, where some structs reserve 8 bytes for the discriminator and others do not, leading to potential layout mismatches. The root cause is a discrepancy in how account space is calculated across different programs, such as `circuit-breaker` and `treasury-management`. While this may not lead to immediate exploitation, it introduces risk of deserialization errors or incorrect account interpretation if not handled consistently. The impact is potential runtime errors or undefined behavior during account deserialization, especially in cross-program interactions.\n",
+            "severity": "informational",
+            "files": [
+                "programs/circuit-breaker/src/instructions/initialize_mint_windowed_breaker_v0.rs",
+                "programs/treasury-management/src/instructions/initialize_treasury_management_v0.rs"
+            ],
+            "location": [
+                "InitializeMintWindowedBreakerV0#16-26",
+                "InitializeTreasuryManagementV0#20-32"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "Block the creation of treasury_management (DoS)",
+            "description": "The vulnerability lies in the PDA derivation for the `treasury_management` account, which uses only the `supply_mint` in its seed, excluding the `treasury_mint`. This allows an attacker to front-run the legitimate initialization by creating a `treasury_management` account with a malicious `treasury_mint`, thereby preventing the correct configuration from being deployed. The root cause is insufficient validation and seed design that does not bind both mints. Exploitation involves creating a conflicting PDA before the legitimate deployment. The impact is a denial of service, blocking the proper setup of the treasury system.\n",
+            "severity": "informational",
+            "files": [
+                "programs/treasury-management/src/instructions/initialize_treasury_management_v0.rs"
+            ],
+            "location": [
+                "InitializeTreasuryManagementV0#22-36"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-191"
+                ]
+            },
+            "title": "Validate mint precision",
+            "description": "The issue occurs in the `precise_supply_amt` function, which performs arithmetic operations assuming the mint's decimals are at most 12. If a mint with more than 12 decimals is provided, the subtraction in the exponent calculation results in a negative value, causing an integer underflow and program panic. The root cause is the lack of input validation on the mint's decimal field. An attacker could exploit this by supplying a high-decimal mint, leading to a denial of service. The impact is a potential crash of the program when processing such mints.\n",
+            "severity": "informational",
+            "files": [
+                "programs/shared-utils/src/precise_number.rs"
+            ],
+            "location": [
+                "precise_supply_amt#49-57"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Floor of negatives",
+            "description": "The `floor()` function in `SignedPreciseNumber` does not conform to the mathematical definition of floor for negative numbers, instead truncating toward zero. While this behavior is consistent with the C implementation it was derived from (e.g., `e_exp.c`), it deviates from standard expectations and could lead to incorrect results if used in other contexts. The root cause is an implementation that mimics C-style casting rather than proper flooring. Exploitation is unlikely in current usage, but future misuse could result in miscalculations. The impact is potential logic errors in numerical computations if the function is used outside its intended scope.\n",
+            "severity": "informational",
+            "files": [
+                "programs/shared-utils/src/precise_number.rs"
+            ],
+            "location": [
+                "SignedPreciseNumber.floor#147-151"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-240"
+                ]
+            },
+            "title": "Missing max_depth argument check",
+            "description": "The `max_depth` parameter in `initialize_lazy_transactions_v0` is not validated against the actual size of the canopy data structure. This could lead to inconsistencies or out-of-bounds operations if the canopy is larger than allowed by the specified depth. The root cause is the absence of a constraint check between `max_depth` and canopy size. An attacker could potentially initialize with a small `max_depth` and a large canopy, leading to undefined behavior. The impact is potential runtime errors or incorrect state transitions in the lazy transaction system.\n",
+            "severity": "informational",
+            "files": [
+                "programs/lazy-transactions/src/instructions/initialize_lazy_transactions_v0.rs"
+            ],
+            "location": [
+                "InitializeLazyTransactionsArgsV0#9",
+                "InitializeLazyTransactionsV0#14-34"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Incomplete transfer_v0",
+            "description": "The `transfer_v0` instruction fails to perform the actual SPL token transfer between accounts, only updating the `amount_deposited_native` fields in the source and target positions. The root cause is the omission of a token transfer call, making the internal accounting inconsistent with on-chain token balances. An attacker could exploit this to manipulate stake amounts without transferring actual tokens, leading to inflation or double-spending. The impact is severe, as it breaks the fundamental integrity of the staking system.\n",
+            "severity": "high",
+            "files": [
+                "programs/voter-stake-registry/src/instructions/transfer_v0.rs"
+            ],
+            "location": [
+                "TransferV0.handler#73-125"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Self-transfer accounting",
+            "description": "The `transfer_v0` instruction does not prevent the same position from being used as both source and target. Because the program treats them as separate variables, subtracting and then adding the same amount results in a net increase, effectively minting tokens. The root cause is the lack of a self-transfer check. An attacker can exploit this by passing the same account twice, causing the position's balance to be incorrectly inflated. The impact is unauthorized token minting and corruption of staking state.\n",
+            "severity": "high",
+            "files": [
+                "programs/voter-stake-registry/src/instructions/transfer_v0.rs"
+            ],
+            "location": [
+                "TransferV0.handler#73-125"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Permissionless update_voter_weight_record_v0",
+            "description": "The `update_voter_weight_record_v0` instruction allows any payer to update a voter weight record for any owner, without requiring authorization from the owner. The root cause is the absence of a signature or authority check on `args.owner`. An attacker can exploit this to manipulate voting weights, clear targets, or alter voting actions on behalf of other users. The impact includes vote manipulation, undermining the integrity of the governance system.\n",
+            "severity": "high",
+            "files": [
+                "programs/voter-stake-registry/src/instructions/update_voter_weight_record_v0.rs"
+            ],
+            "location": [
+                "UpdateVoterWeightRecordV0#23-37"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Manipulate num_active_votes in position",
+            "description": "The instruction `update_voter_weight_record_v0` and `cast_vote_v0` do not validate that the position account corresponds to the provided token account's mint. This allows an attacker to pass unrelated position accounts, manipulating the `voter_weight` calculation or incrementing `num_active_votes` on arbitrary positions. The root cause is missing mint consistency checks. Exploitation involves passing mismatched accounts to inflate voting power or lock positions incorrectly. The impact is vote manipulation and potential denial of service for legitimate voters.\n",
+            "severity": "high",
+            "files": [
+                "programs/voter-stake-registry/src/instructions/update_voter_weight_record_v0.rs",
+                "programs/voter-stake-registry/src/instructions/cast_vote_v0.rs"
+            ],
+            "location": [
+                "update_voter_weight_record_v0#62-83",
+                "cast_vote_v0#87-138"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "Nonfunctional unique NFT mint checker",
+            "description": "The `resolve_vote_weight` function incorrectly checks for duplicate NFTs by using the `token_account.key()` instead of `token_account.mint`, leading to a flawed uniqueness check. The root cause is a logic error in the deduplication mechanism. An attacker can exploit this by using multiple token accounts from the same mint, bypassing the duplicate detection and casting multiple votes with a single NFT. The impact is vote inflation and compromise of the one-NFT-one-vote principle.\n",
+            "severity": "medium",
+            "files": [
+                "programs/voter-stake-registry/src/lib.rs"
+            ],
+            "location": [
+                "resolve_vote_weight#9-38"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Multiple position authorities",
+            "description": "The `initialize_position_v0` instruction assumes that the position is the sole authority for the mint, but it does not verify that the mint's supply is zero before minting. If tokens were previously minted, their owners remain authorities, creating multiple valid authorities for the position. The root cause is the lack of a supply check during initialization. An attacker who previously obtained tokens from the mint can retain control, potentially unfreezing or reconfiguring the position. The impact is unauthorized control over the position and potential bypass of security mechanisms.\n",
+            "severity": "medium",
+            "files": [
+                "programs/voter-stake-registry/src/instructions/initialize_position_v0.rs"
+            ],
+            "location": [
+                "InitializePositionV0#30-69"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unused accounts in context",
+            "description": "1. **Description:** The `close_position_v0` instruction includes several accounts in its context (`collection_metadata`, `collection`, and `metadata`) that are not actually used within the function logic.\n2. **Cause:** These accounts were included in the context struct but are not referenced in the handler function, leading to unnecessary complexity and potential confusion.\n3. **Exploitation:** While not directly exploitable for financial gain, an attacker could potentially use this to increase transaction costs or cause confusion during integration.\n4. **Impact:** Increases gas cost slightly and reduces code clarity, making audits and integrations more error-prone.\n",
+            "severity": "informational",
+            "files": [
+                "programs/voter-stake-registry/src/instructions/close_position_v0.rs"
+            ],
+            "location": [
+                "ClosePositionV0#7-46"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Unchecked reward receiver in distribute_compression_rewards_v0",
+            "description": "1. **Description:** The `distribute_compression_rewards_v0` instruction does not validate that the provided `ctx.accounts.common.owner` actually holds the NFT corresponding to the submitted Merkle proof.\n2. **Cause:** The function calls `verify_compressed_nft`, which checks the validity of the Merkle proof (root, hash, index), but does not confirm ownership of the NFT by the claimed owner.\n3. **Exploitation:** An attacker can call this permissionless function with a valid Merkle proof and any arbitrary `owner` account, allowing them to redirect rewards to themselves even if they do not own the NFT.\n4. **Impact:** This allows theft of rewards intended for legitimate NFT holders, leading to direct financial loss for users.\n",
+            "severity": "critical",
+            "files": [
+                "programs/lazy-distributor/src/instructions/distribute/distribute_compression_rewards_v0.rs"
+            ],
+            "location": [
+                "DistributeCompressionRewardsV0.handler#32-54"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Validate recipient current_config_version in distribute",
+            "description": "1. **Description:** When distributing rewards, the program does not clear outdated rewards if the `recipient.current_config_version` does not match the `lazy_distributor.version`, unlike the behavior in `set_current_rewards_v0`.\n2. **Cause:** Missing validation and cleanup logic when configuration versions are mismatched, leading to potential use of stale reward data.\n3. **Exploitation:** An attacker could manipulate reward distribution by exploiting version mismatches, potentially claiming outdated or incorrect rewards.\n4. **Impact:** Could result in incorrect reward distribution and economic imbalance in the system.\n",
+            "severity": "medium",
+            "files": [
+                "programs/lazy-distributor/src/instructions/distribute/common.rs"
+            ],
+            "location": [
+                "distribute#"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1285"
+                ],
+                "4": [
+                    "CWE-129"
+                ]
+            },
+            "title": "Argument range check",
+            "description": "1. **Description:** The `SetRewardsArgsV0.oracle_index` is used to index into `lazy_distributor.oracles` without bounds checking.\n2. **Cause:** The program uses `usize::try_from(args.oracle_index).unwrap()` without first validating that the index is within the bounds of the `oracles` vector.\n3. **Exploitation:** A user can provide an `oracle_index` that is out of bounds, causing the program to panic and potentially disrupt service.\n4. **Impact:** Leads to denial of service via program panic when invalid input is provided.\n",
+            "severity": "low",
+            "files": [
+                "programs/lazy-distributor/src/instructions/set_current_rewards_v0.rs"
+            ],
+            "location": [
+                "SetRewardsV0.handler#29-46"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ]
+            },
+            "title": "calculate_utility_score_v0 is permissionless and time-sensitive",
+            "description": "1. **Description:** The `calculate_utility_score_v0` instruction is designed to be permissionless and callable once per epoch, but its output depends on `Clock::get()?.unix_timestamp`, which varies based on when the instruction is invoked.\n2. **Cause:** The use of real-time clock input introduces non-determinism in a function expected to be permissionless and consistent.\n3. **Exploitation:** An attacker could call the function at a strategically chosen time to maximize rewards or manipulate the total rewards calculation.\n4. **Impact:** Undermines fairness and predictability in reward distribution, potentially leading to economic imbalance.\n",
+            "severity": "medium",
+            "files": [
+                "programs/helium-sub-daos/src/instructions/calculate_utility_score_v0.rs"
+            ],
+            "location": [
+                "CalculateUtilityScoreV0.handler#67-93"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Inconsistent formula implementation",
+            "description": "1. **Description:** In `calculate_utility_score_v0`, the constants `TWO_PREC` and `FOUR_PREC` are incorrectly used in logarithmic divisions for computing square root and fourth root.\n2. **Cause:** The code divides by `FOUR_PREC` when computing the square root (should be `TWO_PREC`) and by `TWO_PREC` when computing the fourth root (should be `FOUR_PREC`).\n3. **Exploitation:** An attacker could exploit the incorrect mathematical calculation to inflate or manipulate the utility score.\n4. **Impact:** Results in incorrect utility score calculations, affecting reward distribution and system fairness.\n",
+            "severity": "medium",
+            "files": [
+                "programs/helium-sub-daos/src/instructions/calculate_utility_score_v0.rs"
+            ],
+            "location": [
+                "CalculateUtilityScoreV0.handler#167-200"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-191"
+                ]
+            },
+            "title": "Panic due to integer overflow",
+            "description": "1. **Description:** The `get_emissions_at` function can panic due to underflow when `high = middle - 1` and `middle` is 0, causing `high` to become -1 (which overflows as an unsigned integer).\n2. **Cause:** The binary search loop uses unsigned integers (`usize`) for `high` and `low`, and when `high` is 0, decrementing it causes an arithmetic overflow.\n3. **Exploitation:** An attacker can trigger this panic by calling the function with a small emission schedule (1 or 2 items) and a timestamp that forces the loop into the underflow condition.\n4. **Impact:** Causes program panic and denial of service, disrupting functionality dependent on emission calculations.\n",
+            "severity": "low",
+            "files": [
+                "programs/helium-sub-daos/src/state.rs"
+            ],
+            "location": [
+                "EmissionScheduleItem.get_emissions_at#59-85"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Validate the input size",
+            "description": "1. **Description:** The `initialize_dao_v0` instruction uses `args.emission_schedule.len()` to calculate account space without validating the size of the input vector.\n2. **Cause:** Lack of bounds checking on user-provided `emission_schedule` length can result in allocating more space than allowed for a PDA.\n3. **Exploitation:** An attacker can provide a very large `emission_schedule` array, causing the account creation to fail or exceed Solana's maximum account size.\n4. **Impact:** Could prevent DAO initialization or lead to runtime errors during deployment.\n",
+            "severity": "low",
+            "files": [
+                "programs/helium-sub-daos/src/instructions/initialize_dao_v0.rs"
+            ],
+            "location": [
+                "InitializeDaoV0#28-35"
+            ]
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Insufficient Pyth price feed validation",
+            "description": "1. **Description:** The `hnt_price_oracle` account is not validated for ownership by the Pyth program, nor is it checked against known HNT price feed addresses.\n2. **Cause:** The account is only loaded via `load_price_feed_from_account_info`, which does not verify the account owner or the price feed identity.\n3. **Exploitation:** An attacker could pass a fake price feed account (e.g., from a different token) to manipulate price data.\n4. **Impact:** Could lead to incorrect price assumptions and financial loss in price-dependent logic.\n",
+            "severity": "medium",
+            "files": [
+                "programs/data-credits/src/instructions/initialize_data_credits_v0.rs"
+            ],
+            "location": [
+                "InitializeDataCreditsV0.handler#64-77"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-708"
+                ]
+            },
+            "title": "Incorrect owner/delegate keys in compressed NFT validation",
+            "description": "1. **Description:** The `onboard_iot_hotspot_v0` and `onboard_mobile_hotspot_v0` instructions pass `ctx.accounts.hotspot_owner.owner.key()` as both `owner` and `delegate`, but should pass `ctx.accounts.hotspot_owner.key()`.\n2. **Cause:** Incorrect field access in the account struct leads to wrong key being used for ownership verification.\n3. **Exploitation:** Could allow onboarding of hotspots with incorrect ownership proofs, potentially enabling spoofing or unauthorized access.\n4. **Impact:** Undermines the integrity of compressed NFT validation and could allow invalid hotspots to be onboarded.\n",
+            "severity": "low",
+            "files": [
+                "programs/helium-entity-manager/src/instructions/onboard_iot_hotspot_v0.rs",
+                "programs/helium-entity-manager/src/instructions/onboard_mobile_hotspot_v0.rs"
+            ],
+            "location": [
+                "OnboardIotHotspotV0.handler#130-144",
+                "OnboardMobileHotspotV0.handler#129-147"
+            ]
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Onboarding location payment and accounting",
+            "description": "1. **Description:** The `rewardable_entity_config` is not properly validated, allowing location setting without paying fees when the wrong config type is provided.\n2. **Cause:** The condition checks for `IotConfig` in both `onboard_iot_hotspot_v0` and `onboard_mobile_hotspot_v0`, even when a `MobileConfig` is expected.\n3. **Exploitation:** An attacker could bypass location staking fees by providing a mismatched config type.\n4. **Impact:** Enables free location updates, undermining the economic model and potentially enabling spam or abuse.\n",
+            "severity": "low",
+            "files": [
+                "programs/helium-entity-manager/src/instructions/onboard_iot_hotspot_v0.rs",
+                "programs/helium-entity-manager/src/instructions/onboard_mobile_hotspot_v0.rs"
+            ],
+            "location": [
+                "OnboardIotHotspotV0.handler#148-171",
+                "OnboardMobileHotspotV0.handler#158-171"
+            ]
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Improvements in iot and mobile updates",
+            "description": "1. **Description:** The `update_iot_info_v0` and `update_mobile_info_v0` functions allow updating to the same location and still charge fees.\n2. **Cause:** No check is performed to see if the new location is different from the current one before applying fees.\n3. **Exploitation:** Users can be charged unnecessarily for no change, or attackers could exploit this in loops to drain fees.\n4. **Impact:** Poor user experience and potential for unnecessary cost, though not directly exploitable for profit.\n",
+            "severity": "informational",
+            "files": [
+                "programs/helium-entity-manager/src/instructions/update_iot_info_v0.rs",
+                "programs/helium-entity-manager/src/instructions/update_mobile_info_v0.rs"
+            ],
+            "location": [
+                "UpdateIotInfoV0.handler#",
+                "UpdateMobileInfoV0.handler#"
+            ]
+        }
+    ]
+}

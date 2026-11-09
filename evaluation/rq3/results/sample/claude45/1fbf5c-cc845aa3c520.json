@@ -1,0 +1,198 @@
+{
+    "project": "blocksec_memefarming_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_memefarming_v1.0-signed.pdf.json/contracts/boost-farming/src/actions_of_farmer_seed.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2,
+        "recall": 0.25,
+        "f1": 0.22222222222222224
+    },
+    "cwe_ground_truth": [
+        "CWE-358",
+        "CWE-664",
+        "CWE-682",
+        "CWE-666",
+        "CWE-372",
+        "CWE-693"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-664",
+        "CWE-697",
+        "CWE-190",
+        "CWE-404",
+        "CWE-682",
+        "CWE-691",
+        "CWE-703",
+        "CWE-662",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Improper Decreasing Logic of farmer_count",
+            "description": "1. **Description:** The `farmer_count` field tracks the number of non-empty `FarmerSeed` entries in the `Seed`. However, when removing a `FarmerSeed`, the logic does not verify whether the entry was previously non-empty.\n2. **Cause:** The function `unlock_and_unstake_seed()` allows unstaking zero tokens, which may correspond to an already empty `farmer_seed`. The count is decremented regardless of the prior state.\n3. **Exploitation:** A user could repeatedly call the function with zero amount, causing `farmer_count` to be incorrectly decremented even when no actual removal occurs.\n4. **Impact:** The `farmer_count` becomes an inaccurate representation of the actual number of active farmers, potentially affecting metrics or logic that depend on this count.\n"
+        },
+        {
+            "title": "Incorrect Timestamp in Roll Back Logic",
+            "description": "1. **Description:** In `callback_withdraw_seed()`, when a withdrawal promise fails, the system rolls back the state using `add_withdraw_seed()`. However, during rollback, the `apply_timestamp` is set to the current block timestamp.\n2. **Cause:** The function `add_withdraw_seed()` always sets `apply_timestamp = env::block_timestamp()` regardless of whether this is a new withdrawal or a rollback of a failed one.\n3. **Exploitation:** After a failed withdrawal, the timestamp is reset, forcing the user to wait another full `delay_withdraw_sec` period before retrying, even though the original delay had already elapsed.\n4. **Impact:** Users experience unnecessary delays in withdrawing funds after a failed attempt, degrading user experience and potentially affecting liquidity.\n"
+        },
+        {
+            "title": "Incorrect Calculation of decreased_seed_power",
+            "description": "1. **Description:** In `unlock_and_unstake_seed()`, the `decreased_seed_power` logged in the `SeedUnlock` event only accounts for the unlocking portion of the operation and ignores the unstaking component.\n2. **Cause:** The calculation logic fails to aggregate both the unlocked and unstaked amounts when computing the total reduction in seed power.\n3. **Exploitation:** An attacker cannot directly exploit this, but it misrepresents the actual change in seed power in emitted events.\n4. **Impact:** Off-chain systems relying on the `SeedUnlock` event for analytics or UI updates will display incorrect data, leading to potential misinterpretation of user actions.\n"
+        },
+        {
+            "title": "Lack of assert_one_yocto Check",
+            "description": "1. **Description:** The function `withdraw_seed()` performs a token transfer but does not include a `assert_one_yocto()` check to ensure the caller has attached at least one yoctoNEAR, which is a common pattern to prevent unauthorized calls in NEAR-based contracts. (Note: This may be less relevant on Solana, but the audit appears to reference NEAR patterns.)\n2. **Cause:** The absence of a mandatory small payment check could allow unauthorized or replayed calls if not otherwise protected.\n3. **Exploitation:** If the function relies on `assert_one_yocto()` as an access control mechanism and it is missing, an attacker might invoke the function without proper authorization.\n4. **Impact:** Potential for unauthorized execution if the function depends on payment attachment for security, though the project notes that earnings stop after withdrawal, reducing risk.\n"
+        },
+        {
+            "title": "Lack of Minimum Deposit Check",
+            "description": "1. **Description:** The function `unlock_and_unstake_seed()` does not verify that the remaining `free_amount` and `locked_amount` in `farmer_seed` are above `seed.min_deposit` after the operation.\n2. **Cause:** Missing validation logic to prevent leaving dust amounts that fall below the minimum deposit threshold.\n3. **Exploitation:** Users could leave negligible balances in their `farmer_seed`, fragmenting state and potentially violating the design principle of maintaining meaningful deposits.\n4. **Impact:** Accumulation of dust balances increases state bloat and contradicts the intended design of the staking mechanism, possibly affecting efficiency and gas costs.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided Solana smart contract code (which is actually a NEAR Protocol contract written in Rust), I've identified several security issues stemming from the candidate CWE root causes:\n\n1. **CWE-682 (Incorrect Calculation)**: In the `unlock_and_unstake_seed` function, there's a critical calculation error when updating `seed.total_seed_power`. The code uses `seed.total_seed_power = seed.total_seed_power - prev + farmer_seed.get_seed_power()`, but this doesn't properly account for the `decreased_seed_power` from unlocking. When `unlock_amount > 0`, the power decrease is calculated but not properly applied to the total seed power calculation, leading to incorrect state.\n\n2. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: In the `withdraw_seed` function, the code calls `farmer.withdraws.get(&seed_id).unwrap()` without checking if the withdraw entry exists. If a user calls this function without having a pending withdrawal for that seed, the contract will panic. This is an improper handling of the exceptional condition where no withdrawal exists.\n\n3. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The `callback_withdraw_seed` function has a resource management issue. When a transfer fails and the farmer no longer exists, funds are moved to `seeds_lostfound`. However, there's no mechanism shown to recover these funds, potentially leading to permanent loss of user assets. The resource (user's seed tokens) is not properly controlled through its entire lifetime.\n\n4. **CWE-691 (Insufficient Control Flow Management)**: In `unlock_and_unstake_seed`, the control flow allows both `unlock_amount` and `unstake_amount` to be zero, which would result in unnecessary state updates and event emissions without any actual operation. The function should validate that at least one amount is non-zero before proceeding.\n\n5. **CWE-697 (Incorrect Comparison)**: In `unlock_and_unstake_seed`, the condition `if seed.farmer_count > 0` before decrementing is a defensive check, but it indicates a potential state inconsistency. If a farmer_seed exists and is being removed, farmer_count should always be > 0. The need for this check suggests the contract may reach invalid states where farmer_count could be 0 while farmers still have seeds.\n",
+            "findings": [
+                {
+                    "title": "Incorrect Seed Power Calculation in unlock_and_unstake_seed",
+                    "description": "The function `unlock_and_unstake_seed` incorrectly calculates the total seed power when both unlocking and unstaking occur. It uses `seed.total_seed_power = seed.total_seed_power - prev + farmer_seed.get_seed_power()`, which doesn't properly account for the decreased_seed_power from unlocking. This can lead to incorrect total_seed_power values in the seed state, affecting reward distributions and other power-dependent calculations.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Missing Existence Check for Withdrawal in withdraw_seed",
+                    "description": "The `withdraw_seed` function calls `farmer.withdraws.get(&seed_id).unwrap()` without first checking if a withdrawal entry exists for the given seed_id. If a user calls this function without having initiated a withdrawal for that seed, the contract will panic and the transaction will fail. This represents improper handling of the exceptional condition where no withdrawal exists.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Insufficient Resource Recovery Mechanism for Lost Funds",
+                    "description": "In the `callback_withdraw_seed` function, when a seed transfer fails and the farmer account no longer exists, the funds are moved to `seeds_lostfound`. However, there's no visible mechanism to recover these funds or return them to users. This represents improper control of the resource (user tokens) through its lifetime, potentially leading to permanent loss of user assets.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Insufficient Validation of Operation Amounts in unlock_and_unstake_seed",
+                    "description": "The `unlock_and_unstake_seed` function allows both `unlock_amount` and `unstake_amount` to be zero simultaneously. This results in unnecessary state updates, gas consumption, and event emissions without performing any actual operation. The function should validate that at least one amount is non-zero before proceeding with state modifications.",
+                    "category": "CWE-691",
+                    "severity": "low",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Potential State Inconsistency in Farmer Count Management",
+                    "description": "In `unlock_and_unstake_seed`, the code checks `if seed.farmer_count > 0` before decrementing when removing a farmer's seed. This defensive check suggests the contract may reach invalid states where farmer_count could be 0 while farmers still have seeds registered. This indicates a potential state inconsistency issue in the farmer count management logic.",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.78
+                }
+            ]
+        },
+        {
+            "reasoning": "After carefully analyzing the provided Solana smart contract code (which is actually a NEAR Protocol contract written in Rust), I've examined it from the perspective of each CWE in the candidate list. Here are my findings:\n\n1. **CWE-190 (Integer Overflow or Wraparound)**: The code performs arithmetic operations on Balance types without proper overflow checks in several places:\n   - In `unlock_and_unstake_seed`: `seed.total_seed_amount -= unstake_amount` could underflow\n   - In `force_unlock`: `seed.total_seed_amount -= seed_slashed` and `seed.total_seed_power -= reduced_seed_power` could underflow\n   - In `lock_free_seed`: `seed.total_seed_power += increased_seed_power` could overflow\n   - In `callback_withdraw_seed`: `seed_amount + amount` could overflow\n\n2. **CWE-191 (Integer Underflow)**: Related to the above, subtraction operations could result in underflow:\n   - `seed.total_seed_amount -= unstake_amount` in `unlock_and_unstake_seed`\n   - `seed.total_seed_amount -= seed_slashed` in `force_unlock`\n   - `seed.total_seed_power -= reduced_seed_power` in `force_unlock`\n   - `seed.farmer_count -= 1` in `unlock_and_unstake_seed` (though there's a check `if seed.farmer_count > 0`)\n\n3. **CWE-369 (Divide By Zero)**: While not directly visible in this file, the calculation of seed power and slashing rates could potentially involve division operations that aren't shown here but might be in the methods called (like `free_to_lock`, `unlock_to_free_with_slashed`).\n\n4. **CWE-665 (Improper Initialization)**: The code uses `.unwrap()` in several places which assumes resources are already initialized:\n   - `farmer.seeds.get(&seed_id).unwrap()` - if the seed doesn't exist for the farmer, this will panic\n   - `farmer.withdraws.get(&seed_id).unwrap()` in `withdraw_seed` - assumes withdraw entry exists\n\n5. **CWE-404 (Improper Resource Shutdown or Release)**: In `callback_withdraw_seed`, if the farmer doesn't exist and the transfer fails, funds go to `seeds_lostfound`, which may not be properly managed or recoverable.\n\n6. **CWE-662 (Improper Synchronization)**: The contract modifies multiple state variables (farmer, seed) without atomic guarantees. If the contract is called concurrently (though NEAR has sequential execution per account), the state updates could be inconsistent.\n\n7. **CWE-193 (Off-by-one Error)**: In `unlock_and_unstake_seed`, the calculation `seed.total_seed_power = seed.total_seed_power - prev + farmer_seed.get_seed_power()` could have off-by-one issues depending on how `get_seed_power()` is implemented.\n",
+            "findings": [
+                {
+                    "title": "Integer Underflow in Seed Amount Subtraction",
+                    "description": "In the `unlock_and_unstake_seed` function, the operation `seed.total_seed_amount -= unstake_amount` can underflow if `unstake_amount` is greater than `seed.total_seed_amount`. There's no explicit check to ensure `seed.total_seed_amount >= unstake_amount` before the subtraction. Similarly, in `force_unlock`, `seed.total_seed_amount -= seed_slashed` could underflow.",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Integer Underflow in Seed Power Subtraction",
+                    "description": "In the `force_unlock` function, the operation `seed.total_seed_power -= reduced_seed_power` can underflow if `reduced_seed_power` exceeds `seed.total_seed_power`. No validation ensures this subtraction is safe.",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Integer Overflow in Seed Power Addition",
+                    "description": "In the `lock_free_seed` function, `seed.total_seed_power += increased_seed_power` could overflow if the sum exceeds the maximum value for the Balance type. No overflow check is performed.",
+                    "category": "CWE-190",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Integer Overflow in Lost Found Accumulation",
+                    "description": "In `callback_withdraw_seed`, the operation `seed_amount + amount` when updating `seeds_lostfound` could overflow without checks, potentially causing incorrect accounting of lost funds.",
+                    "category": "CWE-190",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Unsafe Unwrap Leading to Panic on Missing Data",
+                    "description": "Multiple uses of `.unwrap()` on `Option` types (e.g., `farmer.seeds.get(&seed_id).unwrap()` in `lock_free_seed`, `unlock_and_unstake_seed`, and `force_unlock`) will cause the contract to panic if the expected data doesn't exist. This represents improper initialization handling where the code assumes data exists without proper validation.",
+                    "category": "CWE-665",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Improper Resource Management for Failed Withdrawals",
+                    "description": "In `callback_withdraw_seed`, when a transfer fails and the farmer account no longer exists, funds are moved to `seeds_lostfound`. This represents improper resource shutdown/release as there's no clear mechanism shown for recovering these funds, potentially leading to permanent loss of user assets.",
+                    "category": "CWE-404",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Potential State Inconsistency in Multi-Step Updates",
+                    "description": "Functions like `unlock_and_unstake_seed` and `force_unlock` perform multiple state updates (farmer, seed, withdraws) in sequence. If any intermediate step fails or if there's concurrent access (though NEAR execution is sequential per account), the state could become inconsistent. The lack of atomic transaction guarantees across all state modifications represents improper synchronization.",
+                    "category": "CWE-662",
+                    "severity": "low",
+                    "confidence": 0.6
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-135",
+            "CWE-410",
+            "CWE-487",
+            "CWE-118",
+            "CWE-369",
+            "CWE-501",
+            "CWE-911",
+            "CWE-1339",
+            "CWE-610",
+            "CWE-704",
+            "CWE-400",
+            "CWE-673",
+            "CWE-668",
+            "CWE-404",
+            "CWE-666",
+            "CWE-913",
+            "CWE-1329",
+            "CWE-580",
+            "CWE-190",
+            "CWE-662",
+            "CWE-128",
+            "CWE-496",
+            "CWE-669",
+            "CWE-372",
+            "CWE-922",
+            "CWE-193",
+            "CWE-1335",
+            "CWE-1229",
+            "CWE-495",
+            "CWE-191",
+            "CWE-706",
+            "CWE-665",
+            "CWE-221"
+        ]
+    ]
+}

@@ -1,0 +1,148 @@
+{
+    "project": "REP-Soda-Protocol-2021-10-26.pdf.json",
+    "files": [
+        "dataset/contracts/REP-Soda-Protocol-2021-10-26.pdf.json/program/src/state/user_obligation.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.25,
+        "recall": 0.25,
+        "f1": 0.25
+    },
+    "cwe_ground_truth": [
+        "CWE-1041",
+        "CWE-682",
+        "CWE-710",
+        "CWE-1339"
+    ],
+    "cwe_detected": [
+        "CWE-284",
+        "CWE-682",
+        "CWE-118",
+        "CWE-664"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "USE-01 : Division Before Multiplication",
+            "description": "The code performs division before multiplication in several mathematical calculations, which can lead to loss of precision due to integer truncation. \nThe cause is suboptimal arithmetic ordering in financial calculations. \nWhile not directly exploitable for fund theft, an attacker could leverage the precision loss in edge cases to gain unfair advantages in token distribution or interest calculation. \nThe impact is potential economic imbalance over time, especially in high-volume or high-precision scenarios.\n"
+        },
+        {
+            "title": "USE-02 : Redundant Statement",
+            "description": "The code reconstructs a vector after calling `find_and_remove`, which updates the vector in place, making the reconstruction redundant. \nThe cause is unnecessary code that does not affect functionality but reduces clarity and efficiency. \nThis cannot be exploited by an attacker but reflects poor code hygiene. \nThe impact is purely on code maintainability and performance, with no security implications.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided code, several potential security issues were identified based on the specified CWEs. The main concerns revolve around improper access control, incorrect calculations, and insufficient handling of exceptional conditions.\n\nFirst, the `UserObligation` struct contains a `manager` and `owner` field, but there are multiple functions that modify the state of the obligation without verifying that the caller is either the manager or owner. For example, functions like `pledge`, `new_pledge`, `redeem`, `replace_collateral`, and `liquidate` do not perform any authorization checks. This constitutes a clear case of improper access control (CWE-284), as any caller could potentially manipulate the obligation state.\n\nSecond, in the `borrow_in` and `new_borrow_in` functions, the check `if self.loans_value < Decimal::from_scaled_val(MIN_LOANS_VALUE)` is performed *after* adding the new loan value to `self.loans_value`. This means that even if the resulting total is below the minimum threshold, the state has already been mutated, which could lead to inconsistent state or be exploited in edge cases involving rounding or precision loss. This is an instance of incorrect calculation (CWE-682) because the order of operations affects the correctness of the validation.\n\nThird, the `repay` function allows removing a loan when its balance reaches zero, but it does so by calling `self.loans.remove(index)`. If the index is out of bounds or if the loan at that index has already been modified, this could lead to incorrect state manipulation. While there is a check via `find_loan`, the direct use of `index` without full validation in all code paths could lead to improper control over resource lifetime (CWE-664), especially if the index is not properly sanitized before reaching this point.\n\nAdditionally, the `validate_health` and `validate_liquidation` functions accept an `Option<Self>` parameter, allowing state validation across two obligations (e.g., for friend-linked accounts). However, these functions do not validate that the `other` obligation actually belongs to a permitted party (like a friend), opening up potential for unauthorized health checks or liquidation validations. This represents another access control issue (CWE-284).\n\nFinally, several arithmetic operations use `try_add`, `try_sub`, etc., which is good practice, but in some cases (e.g., `calculate_amount_and_decimal`), the error handling is not fully audited in this file. If external functions fail to handle overflow or underflow correctly, it could lead to improper handling of exceptional conditions (CWE-703), although the use of `Result` types mitigates this to some extent.\n",
+            "findings": [
+                {
+                    "title": "Lack of Access Control in Obligation Modification Functions",
+                    "description": "Multiple functions in the UserObligation struct, such as pledge, redeem, and replace_collateral, modify the state without verifying that the caller is the owner or manager. This allows any external caller to manipulate the obligation's collateral and loan state, leading to unauthorized asset management.",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Incorrect Order of Validation in Borrow Functions",
+                    "description": "In borrow_in and new_borrow_in, the minimum loan value check is performed after the loans_value has already been updated. This can result in a state where the obligation's loans_value is temporarily or permanently below the minimum threshold, violating business logic and potentially enabling dust attacks despite the intended protection.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Control Over Loan Resource Lifetime",
+                    "description": "The repay function removes a loan from the vector when its balance reaches zero. However, the removal relies on an index that may not be fully validated in all execution paths, risking incorrect memory manipulation or state corruption if an invalid index is provided after a race condition or logic flaw.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unverified Cross-Obligation State Validation",
+                    "description": "Functions like validate_health and validate_liquidation accept an Option<Self> to combine state with another obligation, but they do not verify that the other obligation belongs to an authorized entity (e.g., a bound friend). This allows potential manipulation of health checks by unauthorized parties.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.93
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code implements a Solana smart contract for managing user obligations in a lending protocol, including collaterals and loans. After analyzing the code with respect to the given CWE list, several potential security issues were identified.\n\nFirst, in the `Pack` implementation for `UserObligation`, the `unpack_from_slice` function uses `u8::from_le_bytes(*collaterals_len)` and `u8::from_le_bytes(*loans_len)` to determine the number of collaterals and loans. These values are directly derived from user-controlled input (the account data), and while there is a check that the total number of reserves does not exceed `MAX_OBLIGATION_RESERVES` (12) in some functions like `new_pledge` and `new_borrow_in`, this check is not enforced during deserialization. This could allow an attacker to craft an account with more than 12 items if the `collaterals_len` or `loans_len` fields are manually manipulated, potentially leading to memory corruption or denial of service. This constitutes a CWE-118 (Incorrect Access of Indexable Resource) because the code does not validate the bounds of the `collaterals_len` and `loans_len` values before using them to compute offsets and iterate over chunks.\n\nSecond, in the `redeem` and `replace_collateral` functions, when removing a collateral at a given index, the code uses `self.collaterals.remove(index)`. Rust's `Vec::remove` shifts all elements after the removed element, which is safe, but the code assumes the index is valid. While `find_collateral` is used in other places to validate the index, `redeem` and `replace_collateral` accept the index directly from the caller without validating it against the vector bounds before access. Although the function calls `checked_sub` on `self.collaterals[index].amount`, this implies that `index` must already be within bounds. If an invalid index is passed, the code will panic due to a bounds check, but this is not gracefully handled. However, since the `find_collateral` method is public and used elsewhere, and these functions are internal to the obligation, it's assumed that callers validate the index. Still, the lack of explicit bounds check before access could be considered a CWE-118.\n\nThird, in the `liquidate` function, when `IsCollateral::BOOL` is true, the code calculates `repay_amount_decimal` and checks if it is zero or exceeds `max_repay_amount_decimal`. However, the `max_repay_amount_decimal` is computed as `self.loans[loan_index].borrowed_amount_wads.try_mul(...)`, but the code does not validate that `loan_index` is within bounds of `self.loans` before accessing `self.loans[loan_index]`. Similarly, `collateral_index` is used without bounds check before accessing `self.collaterals[collateral_index]`. While other functions use `find_loan` to validate, this function accepts raw indices. This could lead to a panic or potentially be exploited if bounds are not externally validated, again pointing to CWE-118.\n\nHowever, upon closer inspection, the `liquidate` function is only callable after `validate_liquidation`, which may not directly validate indices. The indices are passed directly from the instruction, and while the program logic likely validates them before calling this method, the method itself does not perform bounds checks, making it unsafe if called from an untrusted context.\n\nDespite these concerns, the most critical issue is the lack of validation of `collaterals_len` and `loans_len` in the `unpack` function, which could allow a crafted account to set these lengths beyond the actual data or beyond `MAX_OBLIGATION_RESERVES`, leading to out-of-bounds reads or memory safety issues.\n",
+            "findings": [
+                {
+                    "title": "Missing Bounds Check on Deserialized Vector Lengths in UserObligation",
+                    "description": "The `unpack_from_slice` method for `UserObligation` uses `collaterals_len` and `loans_len` directly from the input data to compute memory offsets and iterate over chunks without validating that these lengths are within the allowed maximum (`MAX_OBLIGATION_RESERVES = 12`) or that the total size does not exceed the buffer. This could allow an attacker to craft account data with oversized lengths, leading to out-of-bounds access or denial of service.",
+                    "category": "CWE-118",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Potential Out-of-Bounds Access in liquidate Function",
+                    "description": "The `liquidate` function accesses `self.collaterals[collateral_index]` and `self.loans[loan_index]` without first validating that the indices are within bounds. While higher-level logic may validate these, the function itself does not perform bounds checks, making it vulnerable if called with untrusted indices.",
+                    "category": "CWE-118",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-662",
+            "CWE-193",
+            "CWE-501",
+            "CWE-269",
+            "CWE-704",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-191",
+            "CWE-666",
+            "CWE-669",
+            "CWE-118",
+            "CWE-911",
+            "CWE-610",
+            "CWE-496",
+            "CWE-668",
+            "CWE-1270",
+            "CWE-372",
+            "CWE-190",
+            "CWE-923",
+            "CWE-673",
+            "CWE-1267",
+            "CWE-487",
+            "CWE-135",
+            "CWE-1229",
+            "CWE-706",
+            "CWE-369",
+            "CWE-404",
+            "CWE-913",
+            "CWE-221",
+            "CWE-665",
+            "CWE-495",
+            "CWE-922",
+            "CWE-128",
+            "CWE-1339",
+            "CWE-282",
+            "CWE-1329",
+            "CWE-400",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-410",
+            "CWE-1335",
+            "CWE-580"
+        ]
+    ]
+}

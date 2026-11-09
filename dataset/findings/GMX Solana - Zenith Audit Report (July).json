@@ -1,0 +1,201 @@
+{
+    "path": "reports/zenith/GMX Solana - Zenith Audit Report (July).pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/gmsol-labs/gmx-solana"
+        ],
+        "commit_id": [
+            "bf7b175859f776308de7f6c18b24ed0628fd64aa"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-07-18",
+        "project_path": "contracts/GMX Solana - Zenith Audit Report (July).pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Markets are vulnerable to systemic negative price impact",
+            "description": "The vulnerability arises because the price impact calculation for markets sharing the same token does not account for cross-market liquidity. This leads to independent price impact calculations across markets, which can result in cascading imbalances and a higher-than-expected global negative price impact. The root cause is the lack of coordination between markets that share an underlying asset, allowing repeated large orders in one market (e.g., solUsdc), then repeating the same in a correlated market (e.g., solUsdt), amplifying negative price impacts without appropriate price adjustments. An attacker could exploit this by executing large trades in one market (e.g., solUsdc), then repeating the same in a correlated market (e.g., solUsdt), amplifying negative price impacts without sufficient mitigation. The impact includes increased slippage, reduced trading efficiency, and potential manipulation of market prices across multiple pools, undermining the protocol's economic model.\n",
+            "severity": "high",
+            "location": [
+                "crates/model/src/action/increase_position.rs#277-306",
+                "crates/model/src/position.rs#583",
+                "crates/model/src/position.rs#534"
+            ],
+            "files": [
+                "gmx-solana/crates/model/src/action/increase_position.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Virtual inventory impact should be excluded for GLV shift between markets in the same VI",
+            "description": "When performing a GLV shift between markets that belong to the same virtual inventory (VI), the protocol unnecessarily calculates virtual price impacts for both withdrawal and deposit actions. Since there is no net change in virtual inventory, these impacts should be ignored, as done in the GMXv2 Solidity implementation. The root cause is the failure to detect and handle same-VI market shifts differently. An attacker or user could trigger a GLV shift where the negative virtual price impact exceeds the positive one, causing the net impact to surpass the maximum allowed threshold and resulting in transaction failure. This leads to denial of service for legitimate GLV shifts, preventing users from rebalancing positions even when economically justified.\n",
+            "severity": "medium",
+            "location": [
+                "market.rs#548-613"
+            ],
+            "files": [
+                "gmx-solana/crates/utils/src/market.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "create_virtual_inventory_for_positions() prevents creation of new virtual inventory account",
+            "description": "The function create_virtual_inventory_for_positions uses the index_token.key() as a seed for the account, enforcing a canonical account per index token. However, if the virtual inventory account becomes disabled or needs to be recreated, the function cannot initialize a new account due to the same seed being reused. The root cause is the deterministic seeding without a mechanism to rotate or reset the account. An attacker cannot directly exploit this, but it creates an operational risk where a corrupted or disabled account cannot be replaced, leading to permanent denial of service for that index token's virtual inventory functionality. This limits the system's resilience and upgradability.\n",
+            "severity": "medium",
+            "location": [
+                "virtual_inventory.rs#265-269",
+                "virtual_inventory.rs#314"
+            ],
+            "files": [
+                "gmx-solana/crates/programs/src/model/market.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-636"
+                ]
+            },
+            "title": "An imbalance between VI for swaps and pool liquidity may cause a DoS",
+            "description": "The virtual inventory update for swaps uses checked arithmetic that reverts on underflow, unlike the Solidity version which uses saturating arithmetic to clamp values at zero. This discrepancy means that if the virtual inventory (VI) value drops below the actual pool liquidity due to any desynchronization, the function will revert. The root cause is the use of strict arithmetic checks instead of safe saturation. An attacker could potentially trigger this condition if a bug elsewhere causes VI to diverge from actual liquidity, or during edge-case market conditions. The impact is a denial of service, where swap operations fail even when liquidity exists, disrupting trading and potentially freezing the market until manual intervention.\n",
+            "severity": "medium",
+            "location": [
+                "crates/model/src/market/base.rs#452-455"
+            ],
+            "files": [
+                "gmx-solana/crates/model/src/market/base.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Lack of validation of expires_at may result in stale prices",
+            "description": "The expires_at field in the Chainlink datastream report, which indicates the latest timestamp for on-chain verification, is not validated during the verification process. Although the field is stored, it is never checked against the current time. The root cause is the omission of a time validation check in the verifier logic. An attacker could submit an expired price report that passes verification, leading to the use of stale or outdated prices in trading and liquidation calculations. This could result in unfair trades, incorrect liquidations, or arbitrage opportunities that harm users and destabilize the market.\n",
+            "severity": "medium",
+            "location": [
+                "chainlink-datastreams/src/report.rs#28"
+            ],
+            "files": [
+                "gmx-solana/crates/chainlink-datastreams/src/report.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-191"
+                ]
+            },
+            "title": "from_chainlink_report() could fail due to underflow error in for last_update_diff",
+            "description": "The function from_chainlink_report calculates last_update_diff using checked_sub between observations_timestamp_ns (scaled to nanoseconds) and last_update_timestamp_ns (already in nanoseconds). Due to rounding down during scaling, observations_timestamp_ns can be smaller than last_update_timestamp_ns, causing an underflow and transaction failure. The root cause is the precision mismatch and lack of tolerance for small timestamp discrepancies. An attacker could exploit this by submitting reports with carefully timed stamps to induce underflow, or it could occur naturally due to clock skew. The impact is a denial of service where valid price reports are rejected, disrupting oracle updates and potentially halting trading.\n",
+            "severity": "medium",
+            "location": [
+                "crates/chainlink-datastreams/src/gmsol.rs#53-57"
+            ],
+            "files": [
+                "gmx-solana/crates/chainlink-datastreams/src/gmsol.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "join_virtual_inventory_for_swaps fails to verify pool token decimals",
+            "description": "The join_virtual_inventory_for_swaps function allows adding a market to a virtual inventory but does not validate that the long/short token decimals match those of existing markets in the inventory. The root cause is the absence of an on-chain decimal consistency check. If a market with different decimals is added, the virtual inventory balance calculations will be incorrect due to unit mismatch, leading to erroneous price impact computations. While this may not be directly exploitable, it introduces operational risk and potential for accidental misconfiguration by the Market Keeper, resulting in incorrect trading behavior and financial loss.\n",
+            "severity": "low",
+            "location": [
+                "virtual_inventory.rs#207-220"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/states/market/mod.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Zero price impact is not capped",
+            "description": "The price impact capping logic only applies to strictly positive impacts (> 0), whereas the Solidity version caps non-negative impacts (>= 0). This creates a discrepancy in handling zero price impact cases. The root cause is a deviation in logical condition implementation. Although currently benign due to surrounding arithmetic, this inconsistency increases the risk of future bugs if the code evolves. An attacker could potentially exploit this if a future change makes zero impact meaningful, leading to uncapped behavior in edge cases. The impact is low but includes potential for future vulnerabilities and reduced code reliability.\n",
+            "severity": "low",
+            "location": [
+                "crates/model/src/market/perp.rs#308"
+            ],
+            "files": [
+                "gmx-solana/crates/model/src/market/perp.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "is_market_open() should verify last_update_timestamp regardless of last_update_diff_nanos",
+            "description": "The is_market_open function skips the heartbeat check when last_update_diff_nanos is zero or negative, assuming the price is current. However, this is incorrect because a zero difference does not guarantee the price is from the current session. The root cause is a flawed conditional check that bypasses stale price protection. While a subsequent check in check_and_get_price mitigates the risk, this flaw makes the is_market_open function semantically incorrect. An attacker could potentially exploit this if the follow-up check were removed or bypassed, allowing stale prices from previous sessions to be accepted, leading to trading during closed markets and unfair advantages.\n",
+            "severity": "low",
+            "location": [
+                "/crates/utils/src/price/feed_price.rs#106-123"
+            ],
+            "files": [
+                "gmx-solana/crates/utils/src/price/feed_price.rs"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,201 @@
+{
+    "path": "reports-without-source/2026-03-20_DeGate_Solana_LP_Handler_audit_report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/degatedev/solana_lp_handler"
+        ],
+        "commit_id": [
+            "17ea3eac2fb57ea79f69ffb9aad01627aa530134"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-03-20",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Lamport injection into SecurityConfig PDA will DoS all protocol operations",
+            "description": "The vulnerability allows any external actor to perform a denial-of-service (DoS) attack on all protocol operations by sending a minimal amount of lamports (e.g., 1 lamport) to the SecurityConfig PDA. The root cause is an absolute lamport balance check in the exit_check function, which verifies that program-owned accounts do not exceed the rent-exempt minimum. Since the SecurityConfig PDA is the only such account, injecting lamports causes this check to fail permanently. An attacker can exploit this by sending lamports via a simple system transfer, requiring no special permissions. This causes all subsequent transactions (e.g., swap_and_deposit, increase_liquidity, decrease_liquidity) to revert due to the failed validation. The impact is a complete halt of protocol operations, although no funds are directly at risk due to atomic reverts. However, the protocol remains blocked until an admin closes and reinitializes the PDA, which can be repeatedly disrupted by the attacker.\n",
+            "severity": "high",
+            "location": [
+                "solana_lp_handler/17ea3eac/programs/lp_handler/src/security/mod.rs#L508-L516"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Lack of explicit handling of external farming rewards in decrease_liquidity will cause loss of fee revenue and uncontrolled reward routing",
+            "description": "The decrease_liquidity instruction fails to explicitly handle external farming reward tokens distributed by Raydium CLMM pools, despite charging integrator fees on trading fee rewards. This vulnerability arises because the instruction only tracks balance changes in the two primary token accounts (signer_token0_account and signer_token1_account) and computes fees exclusively on those, ignoring any farming reward tokens transferred via remaining_accounts.\n\nThe root cause is the absence of logic to snapshot, measure, and apply the integrator fee (fee_percent) to farming reward token deltas after the CPI call. Additionally, the instruction does not enforce destination constraints on where farming rewards are sent, allowing uncontrolled routing based on transaction construction.\n\nAn attacker (or backend with control over transaction construction) could exploit this by including the fee_owner's token accounts in remaining_accounts, causing farming rewards to be routed directly to the fee_owner—bypassing the fee_percent cap that applies to trading fees. Conversely, rewards could be routed to the signer instead of the recipient, bypassing intended distribution.\n\nThe impact includes loss of expected fee revenue for fee owners when farming rewards are not charged, and potential unfair capture of 100% of farming rewards by the fee_owner, which exceeds the intended fee_percent cap. Additionally, users cannot claim farming rewards-only through lp_handler due to the NoBalanceChange check, forcing them to use Raydium directly. However, funds are not permanently lost, as direct interaction with Raydium remains an option.\n",
+            "severity": "high",
+            "location": [
+                "solana_lp_handler/17ea3eac/programs/lp_handler/src/instructions/decrease_liquidity.rs:L289-L292"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Token2022 transfer fees are not accounted for in lp_handler's token amount calculations",
+            "description": "The vulnerability arises because the lp_handler performs token amount calculations using gross (raw) amounts without deducting Token2022 transfer fees. The root cause is the lack of fee-aware logic in liquidity and zap calculations, particularly in the prepare_zap_plan_and_swap_if_needed function. This leads to incorrect liquidity computations during deposit and withdrawal operations. An attacker or even normal execution in fee-bearing token environments can trigger miscalculations, causing transaction failures or incorrect liquidity provisioning. On the deposit path, this may result in insufficient liquidity being added due to unaccounted fees, while on the decrease path, expected principal amounts may not match actual received amounts after fees. The impact includes failed transactions, user fund loss due to incorrect slippage expectations, and degraded user experience, especially when interacting with Token2022-compliant tokens that charge transfer fees.\n",
+            "severity": "medium",
+            "location": [
+                "solana_lp_handler/17ea3eac/programs/lp_handler/src/instructions/zap_common.rs#L360-L366"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "prepare_zap_plan_and_swap_if_needed auto-swap on out-of-range positions overwrites the user-provided min_out enabling sandwich attacks",
+            "description": "When a user attempts to add liquidity to an out-of-range position, the prepare_zap_plan_and_swap_if_needed function automatically triggers a swap but overrides the user-provided min_out with a dynamically computed exec_swap_min_out based on the current (and potentially manipulated) spot price. The root cause is the replacement of user-controlled slippage protection with a price-derived threshold that can be influenced by attackers. An attacker can exploit this by front-running the user's transaction with a large swap, manipulating the spot price downward, which reduces the computed min_out. The victim's transaction then executes with a lower effective floor, allowing the attacker to back-run and profit from the price recovery. The impact is economic loss for users due to reduced output amounts and increased vulnerability to sandwich attacks, particularly in the auto-swap path for out-of-range positions. This undermines user trust in slippage guarantees.\n",
+            "severity": "medium",
+            "location": [
+                "solana_lp_handler/17ea3eac/programs/lp_handler/src/instructions/zap_common.rs#L192-L221"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Out-of-range zap flow does not enforce price boundaries on swap, causing deposit failure or double swap fees with negligible liquidity",
+            "description": "This vulnerability arises in the out-of-range zap deposit flow where the full balance of the opposing token is swapped without enforcing price boundaries, potentially causing the swap to push the pool price into the position's tick range. The root cause is that the decision to perform a single-sided swap is made at the beginning based on the current price being out of range, but no validation is performed after the swap to ensure the price remains out of range. The swap is executed with sqrt_price_limit_x64 = 0, meaning no price cap is enforced, allowing large swaps to cross tick boundaries. As a result, the post-swap state may be in-range, leading to negligible liquidity deposits and double swap fees when the leftover is swapped back. The impact is that users intending to create single-sided positions may end up with near-zero-value two-sided positions and lose significant value in fees, violating their intent and degrading user experience.\n",
+            "severity": "medium",
+            "location": [
+                "zap_common.rs::swap_v2_common#191-222"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Permisionless SecurityConfig initialization can be front-run",
+            "description": "The init_security_config instruction allows any signer to initialize the security_config PDA and become its authority, granting them permanent control over critical whitelists such as pool and fee-owner lists. The root cause is the lack of access control on the initialization function, which accepts any Signer as the authority. This creates a front-running risk during deployment or after the PDA is closed and re-initialized, allowing an attacker to seize control and potentially disable protocol functionality by setting restrictive policies. Although the developer response indicates a bootstrap admin is now used, the on-chain logic does not enforce this, leaving the system vulnerable if the deployment process fails or is bypassed. The impact is a medium-severity governance and availability risk where an unauthorized actor could disrupt operations.\n",
+            "severity": "medium",
+            "location": [
+                "security_config.rs::InitSecurityConfig#81"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Claiming path (liquidity=0) in decrease_liquidity fails to protect against sandwich attacks due to computing amount-out threshold using on-chain spot price",
+            "description": "When decrease_liquidity is called with convert_to_usdc = true and liquidity = 0 (claim-only), the swap's minimum output threshold is computed using the current on-chain spot price, which is vulnerable to manipulation. The root cause is that calc_min_amount_out uses the manipulated price within the same transaction, making the slippage check ineffective against sandwich attacks. An attacker can manipulate the price before the transaction, causing the victim's fee conversion to execute at a worse rate, and then revert the price afterward to profit. Since mint_amount_0 and mint_amount_1 checks are skipped when liquidity = 0, there is no user-supplied slippage protection. The impact is loss of value during fee claims, particularly affecting users withdrawing accumulated rewards, with no on-chain protection against front-running.\n",
+            "severity": "medium",
+            "location": [
+                "decrease_liquidity.rs::calc_min_amount_out#384-395"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Reused swap_remaining accounts can cause swap_and_deposit / increase_liquidity to revert",
+            "description": "The swap_and_deposit and increase_liquidity instructions reuse the same remaining_accounts slice (swap_remaining) for both the main swap and the cleanup swap (swap_back_remaining). The root cause is that Raydium's swap_v2 requires tick array accounts specific to the swap direction and current pool state. After the main swap, the pool state (e.g., tick_current, liquidity) changes, potentially requiring different tick arrays for the cleanup swap. Reusing the original account list may result in a revert if the path has changed, even if the initial quote was valid. This can occur when swaps are in opposite directions or when the main swap crosses a tick array boundary. The impact is transaction failure despite correct user input, leading to a poor user experience and potential confusion, though funds remain safe.\n",
+            "severity": "low",
+            "location": [
+                "swap_and_deposit.rs::plan.swap_remaining#244"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Dust reward branch confiscates 100% of the non-target reward and omits it from fee accounting",
+            "description": "In the decrease_liquidity instruction, when principal_other_in == 0 and the swap amount is below MIN_USDC_SWAP_AMOUNT, the entire non-target reward is transferred to the fee owner without applying the configured fee_percent. The root cause is a hardcoded branch that skips the swap and directly transfers the full amount as fee, deviating from the expected fee model. This behavior is invisible to external systems because the emitted event and fee accounting only reflect fees taken from the target side. The impact is that users lose 100% of small reward amounts instead of paying only the configured fee_percent, leading to unexpected value loss and inaccurate fee reporting, though it is framed as a product decision.\n",
+            "severity": "low",
+            "location": [
+                "decrease_liquidity.rs::transfer_fee#408-412"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Unconstrained fee token accounts will lead to fee fragmentation",
+            "description": "The decrease_liquidity instruction does not enforce that fee_token0_account and fee_token1_account are the canonical associated token accounts (ATAs) for the fee_owner. The root cause is that the account constraints only check the mint and authority, allowing any token account with the correct mint and authority to be used. This can lead to fee fragmentation, where fees are分散 across multiple non-standard accounts, complicating fee collection and accounting. The issue contradicts documentation stating that ATAs are validated. The impact is operational inefficiency and potential loss of fees if non-canonical accounts are not monitored, though funds are not at direct risk. The recommendation is to enforce canonical ATAs or update documentation to reflect the actual behavior.\n",
+            "severity": "low",
+            "location": [
+                "decrease_liquidity.rs::fee_token0_account#82-93"
+            ],
+            "files": []
+        }
+    ]
+}

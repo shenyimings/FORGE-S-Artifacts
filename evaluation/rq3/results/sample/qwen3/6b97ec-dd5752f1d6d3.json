@@ -1,0 +1,94 @@
+{
+    "project": "2022-02-anchor.md.json",
+    "files": [
+        "dataset/contracts/2022-02-anchor.md.json/contracts/anchor-token-contracts/contracts/community/src/contract.rs",
+        "dataset/contracts/2022-02-anchor.md.json/contracts/anchor-token-contracts/contracts/distributor/src/contract.rs",
+        "dataset/contracts/2022-02-anchor.md.json/contracts/money-market-contracts/contracts/market/src/contract.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3333333333333333,
+        "recall": 0.1111111111111111,
+        "f1": 0.16666666666666666
+    },
+    "cwe_ground_truth": [
+        "CWE-664",
+        "CWE-755",
+        "CWE-703",
+        "CWE-710",
+        "CWE-248",
+        "CWE-1041",
+        "CWE-372"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-284",
+        "CWE-435"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Spend limit on owner can be bypassed",
+            "description": "The spend limit set on the owner in the distributor and community contracts can be bypassed because the config.spend_limit value is never decreased after a successful spend operation. This lack of decrement logic allows the owner to repeatedly call the spend function with amounts up to the spend limit, effectively spending an unlimited total amount. The root cause is the missing state update to reduce the spend limit after each transaction. An attacker (or malicious owner) could exploit this by sending multiple transactions, each for the full spend limit, thereby bypassing the intended restriction. The impact includes potential loss of funds from the contract due to unbounded spending by the owner, undermining the security model that relies on spend limits for protection.\n"
+        },
+        {
+            "title": "community contract :: execute function",
+            "description": "1. **Description:** The `execute` function in the community contract handles governance actions such as `UpdateConfig` and `Spend`. Currently, governance authorization checks are implemented separately within each handler.\n2. **Cause:** Redundant access control checks are performed inside individual functions instead of being centralized at the entry point (`execute`).\n3. **Exploitation:** While not directly exploitable, this design increases code complexity and the risk of inconsistent permission enforcement.\n4. **Impact:** It leads to code duplication and reduced maintainability. Centralizing the governance check in `execute` would improve code clarity and reduce the likelihood of future security flaws due to missing checks.\n"
+        },
+        {
+            "title": "money-market-contracts/contracts/market claim_rewards may revert due to spend_limit set on distributor",
+            "description": "The `claim_rewards` function in the market contract calls `distributor_contract#spend()`, which reverts if the requested amount exceeds the `spend_limit`. The root cause is the hard cap enforced by the distributor contract without dynamic adjustment or user-controlled partial claims. An attacker cannot directly exploit this, but users may be unable to claim rewards once the limit is reached, especially after large accruals. This results in a denial of service for reward claiming, leading to loss of yield until the limit is increased by an admin.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code contains multiple instances of improper access control (CWE-284) and incorrect handling of exceptional conditions (CWE-703). In the first two contract files, the `spend` function checks authorization against a governance contract or a whitelist, but in the third contract, several functions lack proper access control. For example, the `deposit_stable`, `borrow_stable`, and `repay_stable` functions are callable by any user without explicit authorization checks, which could lead to unauthorized actions if not intended. Additionally, the `execute_epoch_operations` function only checks that the caller is the overseer contract, but does not validate input parameters thoroughly, potentially leading to incorrect state updates under exceptional conditions. There is also a potential for improper interaction between entities (CWE-435) in the third contract where the `execute_epoch_operations` function interacts with multiple external contracts (interest model, distribution model), and incorrect responses from these could lead to inconsistent state transitions.\n",
+            "findings": [
+                {
+                    "title": "Improper Access Control in Critical Functions",
+                    "description": "Several functions such as `deposit_stable`, `borrow_stable`, and `repay_stable` in the third contract do not perform any access control checks, allowing any user to call them. While these may be intended to be public, the lack of explicit documentation or safeguards increases the risk of unauthorized or unintended usage, especially if the functions were meant to have restrictions.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Insufficient Validation of Input Parameters in Epoch Operations",
+                    "description": "The `execute_epoch_operations` function performs a critical state update but does not validate the input parameters such as `deposit_rate`, `target_deposit_rate`, and `threshold_deposit_rate` for合理性 (e.g., non-negative values, within expected ranges). This could lead to incorrect calculations and state corruption if malicious or erroneous values are provided by the overseer contract.",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Potential Improper Interaction Between Multiple Contracts",
+                    "description": "The `execute_epoch_operations` function queries multiple external contracts (interest model, distribution model) and uses their responses in sequence to update state. If one contract fails or returns unexpected data, the function may enter an inconsistent state. There is no error handling or rollback mechanism to ensure atomicity across these interactions, leading to potential state divergence.",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided Rust source code for potential security issues based on the specified CWEs, no direct evidence of the listed CWE vulnerabilities was found. The code follows standard CosmWasm patterns and includes appropriate access control checks (e.g., verifying sender authorization against stored contract addresses), proper error handling using `StdResult` and custom error types, and input validation via `addr_canonicalize` and `addr_validate`. \n\nSpecifically:\n- CWE-393 (Return of Wrong Status Code): All functions return appropriate `StdResult` or `Result` types with meaningful errors when conditions fail, such as unauthorized access or invalid state.\n- CWE-397 (Declaration of Throws for Generic Exception): The code uses specific error types like `ContractError` rather than throwing generic exceptions. Even when using `StdError::generic_err`, it's done with descriptive messages.\n- CWE-228 (Improper Handling of Syntactically Invalid Structure): Address parsing and validation are handled via `addr_canonicalize` and `addr_validate`, which properly handle malformed inputs by returning errors.\n- CWE-755 (Improper Handling of Exceptional Conditions): The code consistently propagates errors using the `?` operator and defines custom error types to handle exceptional conditions appropriately.\n- CWE-754 (Improper Check for Unusual or Exceptional Conditions): Required preconditions (like initial deposit amount in instantiate) are checked explicitly, and edge cases such as zero balances or duplicate entries are validated.\n\nTherefore, no actionable findings matching the specified CWE categories were identified.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-393",
+            "CWE-397",
+            "CWE-228",
+            "CWE-755",
+            "CWE-754"
+        ]
+    ]
+}

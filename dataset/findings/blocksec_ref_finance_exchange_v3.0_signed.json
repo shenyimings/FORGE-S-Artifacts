@@ -1,0 +1,229 @@
+{
+    "path": "reports/blocksec_ref_finance_exchange_v3.0_signed.pdf",
+    "project_info": {
+        "url": "https://github.com/ref-finance/ref-contracts/tree/main/ref-exchange",
+        "commit_id": "edea28e1f9bb4f66f5f64eb8448f681f92ef3f10",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-09-28",
+        "project_path": "contracts/blocksec_ref_finance_exchange_v3.0_signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Improper Account Unregistration",
+            "description": "The function storage_unregister() allows users to unregister their accounts and reclaim their NEAR deposits. However, it fails to verify whether the user's legacy_tokens field is empty before proceeding with unregistration. This omission is caused by missing input validation on the account state prior to deregistration. An attacker could exploit this by unregistering an account while still holding tokens in the legacy_tokens mapping, which would make those tokens permanently inaccessible. The impact is loss of user funds, as the tokens in legacy_tokens are not transferred or cleared during unregistration, effectively burning them.\n",
+            "severity": "medium",
+            "files": [
+                "ref-exchange/src/storage_impl.rs"
+            ],
+            "location": [
+                "storage_unregister#"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "Lack of Storage Usage Check in function ft_on_transfer",
+            "description": "The ft_on_transfer function, used in HotZap to enable single-transaction swaps and liquidity provisioning, does not validate whether the user has sufficient storage staking to cover potential increases in storage usage. This is caused by the absence of a storage deposit check before modifying state. An attacker could exploit this by triggering liquidity additions that increase storage usage without having paid the required storage fees, thereby bypassing the economic safeguards. The impact includes potential under-collection of storage fees and the possibility for users to later claim excess fees via remove_liquidity functions, leading to financial loss for the protocol.\n",
+            "severity": "medium",
+            "files": [
+                "ref-exchange/src/token_receiver.rs"
+            ],
+            "location": [
+                "ft_on_transfer#"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Unrestricted Referral Account",
+            "description": "The protocol allows users to specify a referral account during swaps to earn referral rewards, but it does not enforce that the referral account be different from the sender's own account. This flaw stems from missing access control and input validation. An attacker can exploit this by setting their own address as the referral, effectively claiming the referral fee in addition to their normal transaction output. The impact is that users can earn unintended additional fees, which undermines the incentive model and leads to unexpected distribution of protocol revenue.\n",
+            "severity": "low",
+            "files": [
+                "ref-exchange/src/token_receiver.rs"
+            ],
+            "location": [
+                "ft_on_transfer#"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect Admin Fees Calculation in Simple Pool",
+            "description": "In the Simple Pool, the calculation for minting shares to the admin as part of admin fees is mathematically incorrect. The current formula results in fewer shares being minted than required to achieve the configured admin fee rate. This is caused by an erroneous derivation of the share minting logic based on geometric mean invariants. An attacker (or more accurately, the protocol itself) exploits this by consistently under-collecting admin fees, which can be observed over time. The impact is that the protocol collects less revenue than intended, leading to financial loss and misaligned incentives between LPs and the protocol.\n",
+            "severity": "medium",
+            "files": [
+                "ref-exchange/src/simple_pool.rs"
+            ],
+            "location": [
+                "simple_pool.rs#"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Lack of Check on Guardians’ Removal",
+            "description": "The remove_guardians function allows the owner to remove guardian accounts but does not verify whether the specified guardians actually exist in the current set. This is caused by silently ignoring non-existent entries during removal. An attacker with owner privileges could exploit this by removing non-existent guardians, leading to a false sense of security or misconfiguration. The impact is operational risk and potential confusion for the owner, as the function does not provide feedback on whether the removal was meaningful or effective.\n",
+            "severity": "n/a",
+            "files": [
+                "ref-exchange/src/owner.rs"
+            ],
+            "location": [
+                "remove_guardians#65-71"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Two-Step Transfer of Privileged Account Ownership",
+            "description": "The set_owner function directly updates the owner without a confirmation step from the new owner. This is caused by using a single-step ownership transfer mechanism. An attacker (or mistaken admin) could set an incorrect or unreachable account as the new owner, resulting in permanent loss of control over privileged functions. The impact is high availability risk, as the contract may become unmanageable if the new owner cannot sign transactions, leading to a denial of service for critical administrative operations.\n",
+            "severity": "n/a",
+            "files": [
+                "ref-exchange/src/owner.rs"
+            ],
+            "location": [
+                "set_owner#15-19"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Potential Elastic Supply Token Problem",
+            "description": "The protocol does not support elastic supply tokens (e.g., rebasing or deflationary tokens), as it assumes the amount received in ft_on_transfer matches the actual transferred amount. However, such tokens may burn or mint on transfer, creating a discrepancy. This is caused by trusting the incoming amount without validating the actual balance change. An attacker could exploit this by using a deflationary token, causing the contract to credit more tokens than were actually received. The impact includes incorrect state accounting, potential loss of funds, and vulnerability to manipulation in swap or liquidity operations.\n",
+            "severity": "n/a",
+            "files": [
+                "ref-exchange/src/token_receiver.rs"
+            ],
+            "location": [
+                "ft_on_transfer#"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Improper Check on the Admin Fees",
+            "description": "The modify_admin_fee function allows the sum of exchange_fee and referral_fee to reach FEE_DIVISOR (100%), which means all fees from a swap could be allocated to the admin, leaving nothing for liquidity providers. This is caused by insufficient validation of fee limits. An attacker with owner privileges could set maximum fees, making the pool unattractive to LPs and potentially draining their expected rewards. The impact is economic unfairness and potential collapse of liquidity due to misaligned incentives.\n",
+            "severity": "n/a",
+            "files": [
+                "ref-exchange/src/owner.rs"
+            ],
+            "location": [
+                "modify_admin_fee#138-144"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Lack of Check in retrieve_unmanaged_token()",
+            "description": "The retrieve_unmanaged_token function allows the owner to withdraw any NEP-141 tokens sent to the contract, but it does not restrict the amount or verify if the tokens belong to user deposits. This is caused by overly permissive access control. An attacker with owner privileges could exploit this to withdraw large amounts of user funds, mistaking them for \"unmanaged\" tokens. The impact is potential loss of user assets if the owner acts maliciously or makes an error during withdrawal.\n",
+            "severity": "n/a",
+            "files": [
+                "ref-exchange/src/owner.rs"
+            ],
+            "location": [
+                "retrieve_unmanaged_token#"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Lack of Check on the Gas Used by migrate()",
+            "description": "The migrate function lacks a validation check on the amount of gas attached to the transaction. This is caused by missing runtime gas requirements enforcement. An attacker could call the function with insufficient gas, causing the migration to fail partway and potentially leave the contract in an inconsistent state. The impact is operational risk and potential failure of critical upgrade procedures, leading to denial of service or state corruption.\n",
+            "severity": "n/a",
+            "files": [
+                "ref-exchange/src/owner.rs"
+            ],
+            "location": [
+                "migrate#"
+            ]
+        }
+    ]
+}

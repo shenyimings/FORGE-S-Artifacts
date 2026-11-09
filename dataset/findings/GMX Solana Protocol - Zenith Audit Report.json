@@ -1,0 +1,1405 @@
+{
+    "path": "reports/zenith/GMX Solana Protocol - Zenith Audit Report.pdf",
+    "project_info": {
+        "url": "https://github.com/gmsol-labs/gmx-solana",
+        "commit_id": "d91fedbed571a7b92e99695b124b0a62bb839128",
+        "address": "n/a",
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-01-16",
+        "project_path": "contracts/GMX Solana Protocol - Zenith Audit Report.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Incorrect authority for token transfer in withdraw_from_treasury_vault()",
+            "description": "The authority for the WithdrawFromTreasuryVault CPI context is incorrectly set to `self.config.to_account_info()` instead of `self.treasury_vault_config.to_account_info()`. This misconfiguration causes the `withdraw_from_treasury_vault()` function to always fail when invoked.\nThe root cause is the incorrect assignment of the authority in the CPI context, which violates the expected token transfer semantics in Solana programs.\nAn attacker cannot directly exploit this for financial gain, but the vulnerability leads to a denial of service for treasury withdrawals, as all such calls will revert.\nThe impact is high because it blocks legitimate treasury operations, potentially freezing funds or disrupting protocol functionality that depends on treasury access.\n",
+            "severity": "high",
+            "location": [
+                "programs/gmsol-treasury/src/instructions/treasury.rs#544-556"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-treasury/src/instructions/treasury.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "It’s impossible to set the price feed data if any token uses a Chainlink oracle",
+            "description": "Chainlink price feeds set both min and max prices to the same value, but the price validation logic requires that max price must be strictly greater than min price. This causes price updates to fail whenever a token uses Chainlink as its oracle.\nThe root cause is an overly strict validation check `require_gt!(price.max.value, price.min.value)` that does not account for oracles like Chainlink that provide a single price value.\nAn attacker could exploit this by forcing the use of Chainlink oracles to prevent price updates, leading to stale prices and potential manipulation.\nThe impact is high because it disrupts price feeds across the protocol, affecting trading, liquidations, and risk management, which could lead to financial losses or insolvency.\n",
+            "severity": "high",
+            "location": [
+                "gmsol-store/src/states/oracle/chainlink.rs#57-58",
+                "gmsol-store/src/states/oracle/price_map.rs#51"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/oracle/chainlink.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Time-locked instructions will fail to execute due to insufficient signing",
+            "description": "Time-locked instructions are set to require the executor account as a signer, but during execution, only the executor's wallet keypair signs the transaction. The executor account itself is not a signer, causing instruction execution to fail.\nThe root cause is a mismatch between the expected signer (executor account) and the actual signer (wallet), due to incorrect CPI signing logic.\nAn attacker could exploit this by scheduling critical governance actions that later fail to execute, leading to a permanent denial of service for protocol upgrades or emergency functions.\nThe impact is high because it blocks execution of time-locked operations, which are essential for secure governance and protocol maintenance.\n",
+            "severity": "high",
+            "location": [
+                "programs/gmsol-timelock/src/instructions/instruction_buffer.rs#389-395"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-timelock/src/instructions/instruction_buffer.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Wrong funding factor on markets with adaptive funding",
+            "description": "On markets with adaptive funding enabled (increase_factor_per_second > 0), the funding factor calculation incorrectly returns zero when the funding differential is zero, even though adaptive funding should still apply.\nThe root cause is a logic error in the `update_funding_state` function that fails to distinguish between zero differential and disabled adaptive funding.\nAn attacker could manipulate funding conditions to avoid paying or receiving correct funding rates, leading to unfair advantages or loss of revenue for liquidity providers.\nThe impact is high because it distorts the funding mechanism, which is critical for price equilibrium and trader incentives in perpetual markets.\n",
+            "severity": "high",
+            "location": [
+                "gmsol-store/src/ops/market.rs#263",
+                "gmsol-model/src/action/update_funding_state.rs#175"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/ops/market.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing feed ID verification in case of Switchboard provider",
+            "description": "When using Switchboard as a price provider, the system does not verify that the provided feed account matches the expected feed ID stored in the token configuration. This allows any valid Switchboard feed to be used for any token.\nThe root cause is the absence of feed ID validation in the `parse_from_feed_account` and `check_and_get_price` functions for Switchboard, unlike Chainlink and Pyth which do perform such checks.\nAn attacker could provide a manipulated or incorrect price feed from a different asset, leading to severe mispricing and potential loss of funds during trades or liquidations.\nThe impact is high because it allows price oracle manipulation, undermining the entire pricing mechanism of the protocol.\n",
+            "severity": "high",
+            "location": [
+                "programs/gmsol-store/src/states/oracle/mod.rs#384-386"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/oracle/mod.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-394"
+                ]
+            },
+            "title": "Permanent Denial of Service in initialize_glv instruction hence all GLV functions Due to Pre-Created Associated Token Accounts",
+            "description": "The `initialize_glv` instruction uses the `create` CPI to generate associated token accounts (ATAs) for market vaults, which fails if the ATA already exists. An attacker can pre-create these ATAs, causing initialization to fail permanently.\nThe root cause is the use of `create` instead of `create_idempotent`, which does not allow reinitialization even if the account is owned by the correct authority.\nAn attacker can exploit this by front-running GLV initialization and creating ATAs, blocking the entire GLV setup process at minimal cost.\nThe impact is high because it results in a permanent DoS of GLV functionality, preventing deployment and use of the entire GLV system.\n",
+            "severity": "high",
+            "location": [
+                "management.rs (initialize_vaults)"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/glv/management.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "min_output parameter is not passed in for increase order",
+            "description": "When creating an increase position order, the `min_output` parameter is not passed to `params.init_increase()`, causing it to default to zero. This disables slippage protection during execution.\nThe root cause is a missing parameter assignment in the `CreateIncreaseOrderOperation` flow, leading to unchecked swaps.\nAn attacker or malicious market maker could manipulate prices during execution, causing users to receive far less output than expected, resulting in financial loss.\nThe impact is high because it undermines user trust and leads to direct loss of funds due to uncontrolled slippage in collateral swaps.\n",
+            "severity": "high",
+            "location": [
+                "order.rs#280-297"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/ops/order.rs",
+                "gmx-solana/programs/gmsol-store/src/states/order.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Swaps Perturb Borrowing State",
+            "description": "During multi-market swaps, the borrowing state (lastBorrowingUpdate) is not updated for markets that are not the starting market in the swap path. This causes accrued borrowing fees to be lost or incorrectly applied.\nThe root cause is the failure to call `update_borrowing_state` on all affected markets before executing the swap.\nAn attacker could trigger swaps to avoid paying accrued borrowing fees or to induce sudden fee spikes, leading to unfair liquidations or reduced protocol revenue.\nThe impact is high because it distorts the borrowing fee mechanism, which is essential for risk management and economic balance in leveraged positions.\n",
+            "severity": "high",
+            "location": [],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/ops/swap.rs",
+                "gmx-solana/crates/gmsol-model/src/action/update_borrowing_state.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Users can shift high-risk GM tokens by bypassing the maximum PNL check",
+            "description": "Users can deposit market tokens directly into a GLV without triggering the maximum PNL check, which is only enforced when depositing long or short tokens. This allows circumvention of risk controls.\nThe root cause is the `is_market_deposit_required` flag being false when only market tokens are deposited, skipping the PNL validation.\nAn attacker could exploit this to withdraw from overexposed, high-risk markets by first depositing market tokens, effectively bypassing safety checks designed to prevent insolvency.\nThe impact is high because it allows users to exit high-risk positions that should be frozen, increasing the protocol's exposure to loss during volatile conditions.\n",
+            "severity": "high",
+            "location": [
+                "gmsol-store/src/ops/glv.rs#357"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/ops/glv.rs",
+                "gmx-solana/programs/gmsol-store/src/states/glv.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "gt_set_exchange_time_window() could cause mis-pricing of GT exchange",
+            "description": "The gt_set_exchange_time_window() function allows changing the time_window used to determine the time_window_index for the gt_exchange_vault. However, this change breaks the constraint required by deposit_treasury_vault(), which mandates that the store's gt().exchange_time_window() must equal the gt_exchange_vault's time_window(). As a result, deposits into gt_bank for buyback purposes are blocked, potentially leading to insufficient funds in gt_bank. This causes users requesting GT exchange to receive a lower price than expected due to inadequate backing value, resulting in economic loss for users.\n",
+            "severity": "medium",
+            "location": [
+                "programs/gmsol-store/src/instructions/gt.rs#L124-L134"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/gt.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "prepare_gt_exchange_vault() could fail due to seed collision",
+            "description": "The prepare_gt_exchange_vault() function creates a gt_exchange_vault account using a PDA with a seed that includes the time_window_index. Since the time_window can be changed via set_exchange_time_window(), it is possible for two different time_windows to map to the same time_window_index. This leads to a PDA address collision, where a previously created gt_exchange_vault with the same time_window_index but different time_window prevents the creation of a new vault. This results in a denial-of-service condition where new exchange vaults cannot be initialized, disrupting protocol operations.\n",
+            "severity": "medium",
+            "location": [
+                "programs/gmsol-store/src/instructions/gt.rs#L148"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/gt.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "unchecked_execute_instruction() fails to check approver is not revoked",
+            "description": "The unchecked_execute_instruction() function validates that an instruction is executable based on timelock conditions but does not verify whether the approver still holds the required role. This allows a revoked approver, whose revocation is still within the timelock period, to approve and execute malicious instructions. An attacker with a recently revoked role could exploit this to bypass access controls and perform unauthorized actions, potentially leading to fund loss or unauthorized state changes.\n",
+            "severity": "medium",
+            "location": [
+                "instruction_bufer.rs#L385f"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-timelock/src/instructions/instruction_buffer.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-115"
+                ]
+            },
+            "title": "unchecked_revoke_role() will always fail due to wrong signer",
+            "description": "The unchecked_revoke_role() function attempts to invoke the revoke_role() CPI using the executor wallet signer, but incorrectly sets the authority in the CPI context to self.executor.to_account_info() instead of self.wallet.to_account_info(). Since the wallet is the actual signer derived from the executor, using the wrong authority account causes the CPI call to fail due to a signer mismatch. This prevents the revocation of roles even when authorized, leading to a functional denial-of-service for administrative operations.\n",
+            "severity": "medium",
+            "location": [
+                "revoke_role.rs#L99"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-timelock/src/instructions/bypass/revoke_role.rs",
+                "gmx-solana/programs/gmsol-timelock/src/lib.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Incorrect access control for set_expected_price_provider()",
+            "description": "The set_expected_price_provider() function is restricted to the TIMELOCKED_ADMIN role, but the underlying unchecked_set_expected_price_provider() function is intended for use by TIMELOCKED_MARKET_KEEPER. This misconfiguration prevents legitimate market keepers from updating the expected price provider, disrupting price management workflows. The issue stems from incorrect access control annotation, leading to operational inefficiencies and potential delays in price updates.\n",
+            "severity": "medium",
+            "location": [
+                "lib.rs#L97"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-timelock/src/lib.rs"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing verification of the fee receiver address during Store initialization can cause DoS of claiming treasury fees",
+            "description": "During Store initialization, the authority address is used for multiple roles including the treasury fee receiver. However, the fee receiver address must be a PDA derived from a specific seed to be compatible with claim_fees and transfer_receiver instructions. If the provided authority is not derived from this seed, these instructions will fail due to account mismatch. This creates a denial-of-service condition where treasury fees cannot be claimed or transferred, permanently locking funds unless the correct PDA is used.\n",
+            "severity": "medium",
+            "location": [
+                "programs/gmsol-store/src/states/store.rs#L98",
+                "programs/gmsol-store/src/states/store.rs#L390-L392"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/store.rs"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Pyth prices with high variance devalue the protocol",
+            "description": "The Pyth oracle price parsing function pyth_price_with_confidence_to_price() does not validate the confidence interval relative to the mid price. Even if the confidence interval results in a very wide price range (e.g., 50% or more variance), the price is still accepted. Since the protocol's value is calculated using the sum of minimum prices, excessively low min prices due to high variance can artificially deflate the protocol's valuation, leading to economic imbalance and potential manipulation.\n",
+            "severity": "medium",
+            "location": [
+                "gmsol-store/src/states/oracle/pyth.rs#L62-L67"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/oracle/pyth.rs"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Order keeper can DoS others GLV Shift by calling close_glv_shift repeatedly",
+            "description": "The close_glv_shift function allows any order keeper to close a GLV shift PDA without verifying that the shift is completed or cancelled, due to skip_completion_check_for_keeper() always returning true. A malicious order keeper can exploit this to prematurely close active GLV shifts, preventing proper rebalancing of GLVs. Over time, this leads to unbalanced GLVs, disrupting portfolio management and potentially causing losses in asset allocation.\n",
+            "severity": "medium",
+            "location": [
+                "/programs/gmsol-store/src/instructions/glv/shif.rs#L234t"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/glv/shift.rs"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Changing the fee receiver causes permanent DoS of claiming treasury fees",
+            "description": "The transfer_receiver instruction allows the TREASURY_OWNER to change the fee receiver to any address. However, the claim_fees instruction expects the receiver account to be a PDA derived from a fixed seed. Once the receiver is changed, claim_fees fails because the new receiver does not match the expected PDA. Since the receiver is a PDA and cannot sign directly, there is no way to call claim_fees with the new receiver, resulting in a permanent denial-of-service for fee claiming.\n",
+            "severity": "medium",
+            "location": [
+                "programs/gmsol-treasury/src/instructions/store.rs#L35-L39",
+                "programs/gmsol-treasury/src/instructions/store.rs#L105-L109"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-treasury/src/instructions/store.rs"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "close_empty_claimable_account and remove_glv_market should refund rent to the account creator",
+            "description": "The functions close_empty_claimable_account and remove_glv_market close accounts and refund rent to the executor (authority), not the original account creator. Since the creator is not tracked, any ORDER_KEEPER or MARKET_KEEPER can claim the rent upon closure. This misdirects rent refunds away from the rightful owner (the creator), creating an unfair incentive and depriving the actual creator of their funds, which violates expected economic behavior.\n",
+            "severity": "medium",
+            "location": [
+                "/programs/gmsol-store/src/instructions/token.rs#L176-L197",
+                "/programs/gmsol-store/src/instructions/glv/management.rs#L414-L418"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/token.rs",
+                "gmx-solana/programs/gmsol-store/src/instructions/glv/management.rs"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "State Inconsistency Due to Solana Rollback",
+            "description": "Configuration-modifying functions in the protocol do not track when configurations were last updated. In the event of a Solana chain rollback, the protocol may continue operating with outdated configuration values that were reverted. This state inconsistency can lead to incorrect behavior, such as using deprecated parameters or security settings, potentially exposing the system to attacks or operational failures. The lack of a mechanism to detect such rollbacks increases systemic risk.\n",
+            "severity": "medium",
+            "location": [
+                "treasury.rs#L10-L20",
+                "config.rs#L61-L70"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-treasury/src/instructions/treasury.rs"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Funding calculation might not revert when total_open_interest is zero",
+            "description": "The funding calculation uses a debug_assert! to ensure total_open_interest is non-zero, but this assertion is removed in release builds. On markets with adaptive funding, it is possible for diff_value to be zero while total_open_interest is also zero, allowing execution to continue. This can lead to division by zero or invalid funding state updates in production, causing incorrect funding payments or accumulation, which distorts incentives and may lead to financial loss.\n",
+            "severity": "medium",
+            "location": [
+                "gmsol-store/src/ops/market.rs#L263",
+                "gmsol-model/src/action/update_funding_state.rs#L184"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/ops/market.rs"
+            ]
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Switchboard check_and_get_price() should use min slot of the min/max prices",
+            "description": "The check_and_get_price() function returns feed.result.slot as the reference slot for price validation, but the minimum and maximum prices may originate from earlier slots. Since validate_min_oracle_slot() only checks that this slot is not before the action's slot, an attacker could use stale min/max prices from earlier slots, even if the current median price is fresh. This allows outdated price data to influence protocol decisions, potentially leading to incorrect valuations and economic loss.\n",
+            "severity": "medium",
+            "location": [
+                "/programs/gmsol-store/src/states/oracle/switchboard.rs#L40-L41"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/oracle/switchboard.rs"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Anyone can prevent market removal from the GLV",
+            "description": "The `remove_glv_market` function checks that the GLV market token vault balance is zero before allowing removal. However, any user holding the market token can deposit a small amount into the vault, thereby preventing the market from being removed. This could be exploited repeatedly across multiple markets to block removals indefinitely. Since the GLV has a maximum limit on the number of supported markets (`MAX_ALLOWED_NUMBER_OF_MARKETS`), an attacker could prevent new markets from being added by clogging the list with non-removable ones. This leads to a denial-of-service condition on market management functionality.\n",
+            "severity": "medium",
+            "location": [
+                "programs/gmsol-store/src/instructions/glv/management.rs#L398-L402"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/glv/management.rs"
+            ]
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Malicious TIMELOCK_KEEPER can set is_signer for another TIMELOCK_KEEPER's account to steal funds from it",
+            "description": "The `create_instruction_buffer` function allows a TIMELOCK_KEEPER to specify which accounts are marked as signers in the instruction buffer. A malicious keeper can include another keeper’s wallet as a signer in a token transfer instruction. When the victim keeper executes the instruction, they must sign the transaction, which authorizes the transfer of their own funds. The assumption is that keepers are automated bots that execute approved instructions without inspecting their content. Although the approval process should catch malicious instructions, this risk remains due to the design flaw allowing arbitrary signer specification.\n",
+            "severity": "medium",
+            "location": [
+                "programs/gmsol-timelock/src/lib.rs#L46"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-timelock/src/lib.rs"
+            ]
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Imbalanced incentive for ADL creates unfair position closures and increases insolvency risk",
+            "description": "The Auto Deleverage (ADL) mechanism rewards keepers only when positions are fully closed via `position_cut_rent()`, but not for partial closures. This creates an incentive imbalance where keepers prefer closing small positions for profit while ignoring large ones that require partial closure. As a result, healthy positions may be unfairly closed just for the reward, and large risky positions remain open, increasing systemic insolvency risk. Additionally, keepers face transaction costs without compensation for partial ADLs, further disincentivizing them from acting on large positions even when necessary to maintain system health.\n",
+            "severity": "medium",
+            "location": [
+                "programs/gmsol-store/src/instructions/exchange/position_cut.rs#L258",
+                "programs/gmsol-store/src/ops/order.rs#L1675-L1677"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/exchange/position_cut.rs"
+            ]
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1023"
+                ]
+            },
+            "title": "Malicious order keeper can perform risk-free trade using different price in the same tx",
+            "description": "The `update_price_feed_with_chainlink` function uses `observations_timestamp` from Chainlink Data Streams, which provides sub-second precision. However, multiple price reports can share the same timestamp, making it impossible to determine the correct order. A malicious keeper can exploit this by updating the price feed twice in one transaction—first with a lower price to open a long position, then with a higher price to close it—effectively guaranteeing a profit. This attack requires high volatility and frontrunning capability but enables risk-free arbitrage at the expense of the protocol and other users.\n",
+            "severity": "medium",
+            "location": [
+                "programs/gmsol-store/src/states/oracle/feed.rs#L60-L87"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/oracle/feed.rs"
+            ]
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Far future price timestamps can block feed updates",
+            "description": "The `update_price_feed_with_chainlink` function only validates that the new price timestamp is greater than or equal to the previous one, without checking its proximity to the current time. A malicious actor can submit a price with a far-future timestamp, which will block all subsequent updates until the system clock reaches that time. This results in a denial-of-service on price updates, freezing the oracle and potentially disrupting trading, liquidations, and other time-sensitive operations. While external verification exists, it cannot be relied upon within the scope of this audit.\n",
+            "severity": "medium",
+            "location": [
+                "programs/gmsol-store/src/states/oracle/feed.rs#L77"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/oracle/feed.rs"
+            ]
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "GLV shifts could be blocked by a high spread",
+            "description": "When executing a GLV shift, the destination market value is calculated using the minimum price instead of the maximum price. This causes the price impact check to fail unnecessarily under high spread conditions, even if the actual value movement would justify the shift. The check should be based purely on price impact, independent of bid-ask spread. By using the maximized price for both source and destination markets, the decision logic aligns with the intended economic model and prevents false reverts during valid GLV rebalancing operations.\n",
+            "severity": "medium",
+            "location": [
+                "gmsol-store/src/ops/glv.rs#L1302"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/ops/glv.rs"
+            ]
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "GLV max market value can be exceeded",
+            "description": "During a GLV deposit, the `market_pool_value` is calculated with `maximize=false`, meaning it uses the minimum price. This value is used to enforce the maximum market cap limit. However, when validating token balances later, the system should use `maximize=true` to reflect worst-case valuation. Due to this inconsistency, an attacker can deposit assets when the minimum price is low and later benefit from a higher maximum price, effectively exceeding the intended market cap limit if the spread is large enough. This undermines risk controls and exposes the system to overexposure.\n",
+            "severity": "medium",
+            "location": [
+                "gmsol-store/src/ops/glv.rs#L413"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/ops/glv.rs"
+            ]
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ]
+            },
+            "title": "ADL can be DoS by spamming update_adl_state()",
+            "description": "The `update_adl_state` function sets `latest_adl_time()` to the current timestamp whenever called, regardless of whether the ADL state changes. Since `auto_deleverage` requires the oracle timestamp to be newer than `latest_adl_time()`, a malicious keeper can spam this function to reset the time, delaying ADL execution due to the `timestamp_adjustment` offset. This creates a denial-of-service vector where honest keepers cannot perform ADLs even when needed, increasing insolvency risk. The attack cost is low compared to potential protocol losses.\n",
+            "severity": "medium",
+            "location": [
+                "programs/gmsol-store/src/states/market/utils.rs#L203-L226"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/market/utils.rs"
+            ]
+        },
+        {
+            "id": 30,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "initialize_referral_code() can be griefed using transfer_referral_code()",
+            "description": "The `initialize_referral_code` function only allows setting a referral code if none exists. However, an attacker can preemptively set a victim’s referral code by transferring one via `transfer_referral_code` immediately after the victim creates their account. Once set, the victim cannot initialize their preferred code, leading to loss of referral benefits. This is a form of griefing attack enabled by the lack of opt-in enforcement for receiving referral codes, allowing unwanted assignment without user consent.\n",
+            "severity": "medium",
+            "location": [
+                "programs/gmsol-store/src/states/user.rs#L151-L157"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/user.rs"
+            ]
+        },
+        {
+            "id": 31,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "forPositiveImpact Neglects To Incentivize Markets Without Price Impact Configuration",
+            "description": "The system incentivizes actions that improve market balance by checking for positive price impact. However, for markets where price impact is configured to zero, this check fails to recognize beneficial rebalancing actions. As a result, keepers have no incentive to correct imbalances in such markets, potentially leading to unfair fee distribution and reduced market efficiency. The issue arises because the logic relies solely on price impact rather than a direct measure of balance improvement.\n",
+            "severity": "medium",
+            "location": [
+                "gmsol-store/src/instructions/market.rs#L734-L747"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/constants/market.rs",
+                "gmx-solana/programs/gmsol-store/src/states/market/config.rs"
+            ]
+        },
+        {
+            "id": 32,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "final_short_token doesn't have any constraints on a close withdrawal request",
+            "description": "In the `CloseWithdrawal` instruction, the `final_short_token` account is not properly constrained—it incorrectly checks against the long token mint instead of the short one. While the `final_short_token_escrow` indirectly ensures correctness during withdrawal creation, this missing constraint opens a potential validation gap. If logic changes in the future or escrow assumptions break, spoofing the short token could become possible, leading to incorrect asset handling or loss of funds.\n",
+            "severity": "low",
+            "location": [
+                "gmsol-store/src/instructions/exchange/withdrawal.rs#L198-L199"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/exchange/withdrawal.rs"
+            ]
+        },
+        {
+            "id": 33,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "TIMELOCK_KEEPER can steal rent from others by calling execute_instruction",
+            "description": "When `execute_instruction` is called, the instruction account is closed and its rent is refunded to the calling TIMELOCK_KEEPER. However, there is no tracking of which keeper originally paid the rent to create the instruction. This allows any keeper to front-run execution and steal the rent from the creator. Although the amount is small (rent only), this represents a fairness and incentive misalignment issue, especially in multi-keeper setups where trust assumptions should not be required for basic resource compensation.\n",
+            "severity": "low",
+            "location": [
+                "instruction_bufer.rs#L369f"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-timelock/src/instructions/instruction_buffer.rs"
+            ]
+        },
+        {
+            "id": 34,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Wrong INIT_SPACE of SwapExecuted",
+            "description": "The `INIT_SPACE` constant for the `SwapExecuted` event struct accounts for only 1 byte for the `market_token` field, which is a `Pubkey` and requires 32 bytes. This under-allocation could lead to runtime errors or memory corruption during event emission. While the impact is likely mitigated by Solana's event serialization mechanisms, incorrect space allocation violates best practices and risks undefined behavior if the event data layout is ever directly accessed or deserialized.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/events/swap.rs#L11-L23"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/events/swap.rs"
+            ]
+        },
+        {
+            "id": 35,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Unexpected transfer of treasury fees",
+            "description": "The `claim_fees_from_market` instruction documentation states that claimed fees remain in the market balance and require a separate transfer. However, the actual implementation immediately transfers the fees to the receiver via `MarketTransferOutOperation`. This discrepancy between documentation and behavior can mislead developers and integrators, potentially leading to incorrect assumptions about fund flow and accounting. It increases the risk of bugs in external systems relying on the documented two-step process.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/lib.rs#L1542-L1544l",
+                "programs/gmsol-store/src/instructions/market.rs#L734-L747"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/lib.rs"
+            ]
+        },
+        {
+            "id": 36,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "Insufficient authority segregation on Store initialization",
+            "description": "The Store initialization function assigns the same authority account for three distinct roles: store authority, treasury authority (fee receiver), and address authority (holding key). This lack of segregation means a single compromised key could control all three critical functions, increasing the risk of misuse or unintended consequences. The cause is the direct assignment of the same Pubkey input to multiple internal authorities during initialization. An attacker who gains control of the authority key could potentially manipulate fee distribution, modify store settings, or lock critical functionality due to the immutable nature of the address authority. While the impact is limited to the specific store instance, it violates the security principle of least privilege and could lead to governance or financial risks if exploited.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/states/store.rs#93-103"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/store.rs"
+            ]
+        },
+        {
+            "id": 37,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ]
+            },
+            "title": "Order keeper can DoS GLV Shift by executing dust amount shift",
+            "description": "The GLV shift mechanism includes an interval check to prevent frequent shifts, but it does not enforce a minimum shift value. This allows a malicious order keeper to perform repeated shifts with negligible (dust) amounts, thereby continuously extending the shift interval and preventing legitimate, larger rebalancing operations. The root cause is the absence of a minimum USD value threshold for GLV shifts. An attacker could exploit this by submitting multiple dust shifts, effectively blocking valid GLV rebalancing actions. Although the attacker must pay execution fees, the low cost makes this a feasible denial-of-service vector, potentially impacting system liquidity and market efficiency.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/instructions/glv/shift.rs#112-121"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/glv/shift.rs"
+            ]
+        },
+        {
+            "id": 38,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-668"
+                ]
+            },
+            "title": "CreateGlvShift can be DoS by another order keeper",
+            "description": "The CreateGlvShift instruction uses a user-provided nonce as part of the PDA seed, but does not bind the order keeper's account to the PDA. This allows a malicious order keeper to front-run a legitimate GLV shift by using the same nonce, causing the victim's transaction to fail when the PDA creation is attempted. The cause is the insufficient uniqueness of the PDA derivation, which relies solely on the nonce without incorporating the order keeper's identity. An attacker can repeatedly submit shifts with known nonces to block others, leading to a denial-of-service condition. While the attacker incurs execution costs, the ability to disrupt rebalancing operations poses a reliability risk to the system.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/instructions/glv/shift.rs#57-64"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/glv/shift.rs"
+            ]
+        },
+        {
+            "id": 39,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing constraining of final_short_token mint in ExecuteWithdrawal context",
+            "description": "In the ExecuteWithdrawal instruction context, the constraint intended to validate the final_short_token mint is incorrectly applied to final_long_token instead, leaving the final_short_token unconstrained. This error stems from a copy-paste or naming mistake in the account validation macro. As a result, an attacker could potentially pass an incorrect or malicious mint account for final_short_token, which might lead to token misdirection or validation bypass in withdrawal logic. The impact is mitigated by other checks, but the missing constraint represents a flaw in input validation that could be exploited in edge cases involving short token handling.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/instructions/exchange/execute_withdrawal.rs#66-67"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/exchange/execute_withdrawal.rs"
+            ]
+        },
+        {
+            "id": 40,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-573"
+                ],
+                "3": [
+                    "CWE-695"
+                ]
+            },
+            "title": "Incorrect use of the require_eq macro for Pubkey values",
+            "description": "The require_eq macro, which is explicitly not designed for Pubkey comparisons according to Anchor documentation, is used in multiple locations across the codebase to compare Pubkey values. The correct macro, require_keys_eq, should be used instead to ensure proper key comparison. This misuse may lead to incorrect validation logic or potential bypasses in security checks, although in practice the behavior might be similar due to underlying implementation. The root cause is a misunderstanding or oversight in macro usage. The impact is low, but it represents a deviation from best practices and could introduce subtle bugs during future refactoring or upgrades.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/events/trade.rs#415",
+                "programs/gmsol-store/src/instructions/gt.rs#187-191",
+                "programs/gmsol-store/src/instructions/gt.rs#293-297",
+                "programs/gmsol-store/src/instructions/gt.rs#298-302",
+                "programs/gmsol-store/src/instructions/user.rs#54",
+                "programs/gmsol-store/src/instructions/user.rs#55",
+                "programs/gmsol-store/src/instructions/exchange/execute_order.rs#58",
+                "programs/gmsol-store/src/instructions/exchange/execute_order.rs#72-76",
+                "programs/gmsol-store/src/instructions/exchange/execute_order.rs#77-81",
+                "programs/gmsol-store/src/instructions/exchange/order.rs#154",
+                "programs/gmsol-store/src/instructions/exchange/order.rs#155-159",
+                "programs/gmsol-store/src/instructions/exchange/order.rs#160-164",
+                "programs/gmsol-store/src/instructions/exchange/order.rs#165",
+                "programs/gmsol-store/src/instructions/exchange/order.rs#805-809",
+                "programs/gmsol-store/src/ops/order.rs#320-324",
+                "programs/gmsol-store/src/ops/order.rs#325-329",
+                "programs/gmsol-store/src/ops/order.rs#399-402",
+                "programs/gmsol-store/src/ops/order.rs#404-408",
+                "programs/gmsol-store/src/ops/shift.rs#119-123",
+                "programs/gmsol-store/src/ops/shift.rs#125-129",
+                "programs/gmsol-store/src/states/deposit.rs#93-96",
+                "programs/gmsol-store/src/states/glv.rs#133",
+                "programs/gmsol-store/src/states/glv.rs#173-177",
+                "programs/gmsol-store/src/states/glv.rs#178-182",
+                "programs/gmsol-store/src/states/glv.rs#266-270",
+                "programs/gmsol-store/src/states/glv.rs#272-276",
+                "programs/gmsol-store/src/states/glv.rs#406-410",
+                "programs/gmsol-store/src/states/glv.rs#424-428",
+                "programs/gmsol-store/src/states/glv.rs#731-735",
+                "programs/gmsol-store/src/states/glv.rs#769-773",
+                "programs/gmsol-store/src/states/user.rs#107-111",
+                "programs/gmsol-store/src/states/user.rs#152",
+                "programs/gmsol-store/src/states/user.rs#160",
+                "programs/gmsol-store/src/states/common/swap.rs#255",
+                "programs/gmsol-store/src/states/common/swap.rs#296",
+                "programs/gmsol-store/src/states/common/swap.rs#358",
+                "programs/gmsol-store/src/states/market/mod.rs#296",
+                "programs/gmsol-store/src/states/market/mod.rs#399-404",
+                "programs/gmsol-store/src/states/market/mod.rs#406-410",
+                "programs/gmsol-store/src/states/market/revertible/revertible_position.rs#32-37",
+                "programs/gmsol-store/src/states/market/revertible/swap_market.rs#367",
+                "programs/gmsol-store/src/states/oracle/feed.rs#119",
+                "programs/gmsol-store/src/states/oracle/mod.rs#373",
+                "programs/gmsol-store/src/utils/token.rs#58-61",
+                "programs/gmsol-store/src/utils/token.rs#83",
+                "programs/gmsol-store/src/utils/token.rs#86",
+                "programs/gmsol-store/src/utils/token.rs#251",
+                "programs/gmsol-store/src/utils/token.rs#252-255",
+                "programs/gmsol-timelock/src/instructions/instruction_buffer.rs#214-218",
+                "programs/gmsol-timelock/src/instructions/instruction_buffer.rs#316-320",
+                "programs/gmsol-treasury/src/instructions/gt_bank.rs#97-101",
+                "programs/gmsol-treasury/src/instructions/gt_bank.rs#102-106",
+                "programs/gmsol-treasury/src/instructions/gt_bank.rs#360",
+                "programs/gmsol-treasury/src/instructions/gt_bank.rs#378-381",
+                "programs/gmsol-treasury/src/instructions/treasury.rs#673",
+                "programs/gmsol-treasury/src/instructions/treasury.rs#675",
+                "programs/gmsol-treasury/src/instructions/treasury.rs#682",
+                "programs/gmsol-treasury/src/instructions/treasury.rs#683-687"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/oracle/custom.rs",
+                "gmx-solana/programs/gmsol-store/src/states/gt.rs",
+                "gmx-solana/programs/gmsol-store/src/instructions/gt.rs",
+                "gmx-solana/programs/gmsol-store/src/instructions/user.rs"
+            ]
+        },
+        {
+            "id": 41,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Unsorted Referral Reward Factors Validation",
+            "description": "The set_referral_reward_factors function does not validate that the input slice of referral reward factors is sorted in ascending order. Since the referral system likely relies on a hierarchical ranking structure where higher tiers should have equal or greater rewards, unsorted input could disrupt the intended logic and lead to inconsistent or incorrect reward distributions. The cause is the missing validation check before storing or processing the factors. An attacker or erroneous frontend could submit a deliberately unsorted array to manipulate the reward hierarchy, potentially claiming higher rewards than entitled. While the impact is limited to referral incentives, it undermines the integrity of the ranking system.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/states/gt.rs#151"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/gt.rs"
+            ]
+        },
+        {
+            "id": 42,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Limit orders can't specify an execution time",
+            "description": "The current implementation of limit orders in GMX-sol does not allow users to specify a desired execution time or time frame, a standard feature in traditional finance (TradFi). This limitation reduces the flexibility and utility of limit orders, as users cannot control when their orders are eligible for execution. The cause is the absence of a time-based condition field in the order structure. Traders are unable to implement time-based strategies, such as delaying execution to a specific market condition or avoiding volatility during certain periods. This impacts user experience and trading functionality, though it does not pose a direct security risk.\n",
+            "severity": "low",
+            "location": [
+                "gmsol-store/src/states/oracle/mod.rs#227"
+            ],
+            "files": []
+        },
+        {
+            "id": 43,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "ADL cannot be triggered when min_pnl_factor is reached",
+            "description": "The ADL (Auto-Deleveraging) execution logic fails when the new_pnl_factor is equal to the min_pnl_factor, due to the use of a strict greater-than check. However, the intended behavior should allow ADL execution when the pnl factor is equal to or greater than the minimum (inclusive). The cause is the use of require_gt! instead of require_gte! in the validation logic. This leads to a situation where ADL cannot be triggered at the exact threshold, potentially delaying necessary deleveraging actions and increasing systemic risk during volatile market conditions. The impact is a deviation from expected risk management behavior, which could affect the protocol's ability to manage undercollateralized positions effectively.\n",
+            "severity": "low",
+            "location": [
+                "gmsol-store/src/ops/order.rs#1474"
+            ],
+            "files": []
+        },
+        {
+            "id": 44,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Limit orders don't have a deadline",
+            "description": "Limit orders currently lack an optional deadline, meaning they can be executed at any time after creation, even after extended network outages. If a Solana cluster outage occurs between order creation and execution, the order may be executed at unexpected or unfavorable prices when the network recovers. The cause is the absence of a timestamp-based expiration mechanism in the order structure. This exposes users to execution risk during network instability. While price validation provides some protection, the lack of a time-bound execution window reduces user control and increases vulnerability to stale order execution.\n",
+            "severity": "low",
+            "location": [
+                "gmsol-store/src/ops/order.rs#1758"
+            ],
+            "files": []
+        },
+        {
+            "id": 45,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-240"
+                ],
+                "3": [
+                    "CWE-130"
+                ]
+            },
+            "title": "Missed validation for Account Length in load_instruction",
+            "description": "The load_instruction function fails to validate that the account length specified in the instruction header matches the actual length of the accounts section in the data. This inconsistency could lead to malformed or unexpected instructions being processed, potentially causing runtime errors or undefined behavior. The cause is the missing check between header.num_accounts and the actual accounts slice length. An attacker could craft a malicious instruction with a mismatched account count, leading to parsing errors or potential memory access issues. The impact is primarily on instruction integrity and system stability, with a high likelihood due to the direct data parsing involved.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-timelock/src/states/instruction.rs"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-timelock/src/states/instruction.rs"
+            ]
+        },
+        {
+            "id": 46,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-684"
+                ],
+                "3": [
+                    "CWE-440"
+                ]
+            },
+            "title": "Misleading core error UnknownOrDisabledToken",
+            "description": "The system returns the error \"UnknownOrDisabledToken\" when a token is not found in the TokenMap. However, this error is misleading because the TokenConfig for a disabled token can still be retrieved, meaning the error only occurs when the token is unknown, not when it is disabled.\n\nThe root cause is the inaccurate naming of the error, which implies two possible conditions (unknown or disabled) when only one (unknown) is actually possible.\n\nAn attacker or user could be misled by the error message into believing a token is disabled when it is actually not recognized by the system, leading to confusion or incorrect assumptions about token status.\n\nThe impact is low, as this is purely a naming issue that does not affect functionality or security, but it may affect debugging and user experience.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/states/token_config.rs#L568",
+                "programs/gmsol-store/src/states/common/swap.rs#L108",
+                "programs/gmsol-store/src/states/common/token.rs#L100",
+                "programs/gmsol-treasury/src/states/gt_bank.rs#L125"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/token_config.rs"
+            ]
+        },
+        {
+            "id": 47,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Invalid future oracle price timestamps pass verification",
+            "description": "The check_and_get_price function in multiple oracle implementations (Chainlink, internal feed, Pyth, Switchboard) validates that the price timestamp is not stale by checking its age, but it does not reject timestamps that are in the future.\n\nThe cause is the lack of a plausibility check ensuring that the price timestamp is not greater than the current UNIX time.\n\nAn attacker could potentially manipulate oracle data with a future timestamp, which would bypass the age check and be accepted as valid, even if it is not yet time for that price to be effective.\n\nThe impact is low, as this could lead to the use of premature price data, potentially affecting trade execution fairness, but it does not directly enable fund loss.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/states/oracle/chainlink.rs#L43-L45",
+                "programs/gmsol-store/src/states/oracle/feed.rs#L124-L126",
+                "programs/gmsol-store/src/states/oracle/pyth.rs#L30-L41",
+                "programs/gmsol-store/src/states/oracle/switchboard.rs#L34-L38"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/oracle/chainlink.rs"
+            ]
+        },
+        {
+            "id": 48,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-563"
+                ]
+            },
+            "title": "Missing implementation of GT reserve",
+            "description": "The GtState struct contains a reserve_factor field that is initialized with a default value but is never used anywhere in the codebase.\n\nThe root cause is an incomplete or abandoned feature implementation where the reserve functionality was planned but never implemented.\n\nThere is no direct exploitation path, but the presence of unused code can lead to confusion and increase maintenance burden.\n\nThe impact is low, as it does not affect security or functionality, but it represents technical debt and potential confusion for developers.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/states/gt.rs#L62",
+                "programs/gmsol-store/src/states/gt.rs#L122",
+                "programs/gmsol-store/src/constants/mod.rs#L68-L69"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/gt.rs"
+            ]
+        },
+        {
+            "id": 49,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Overrestrictive treasury_vault_config check on treasury withdrawals can leave old vaults inaccessible",
+            "description": "Treasury withdrawals are restricted to vaults owned by the current treasury_vault_config. When the config is updated, old vaults are not migrated, and funds in those vaults become inaccessible because withdrawals are blocked.\n\nThe cause is the lack of support for legacy vaults in the withdrawal logic, which strictly enforces the current config.\n\nAn attacker cannot exploit this directly, but the protocol itself could lose access to funds if a config update occurs while funds remain in old vaults.\n\nThe impact is low, as it affects fund accessibility rather than fund security, but it could lead to permanent loss of funds if not addressed.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-treasury/src/instructions/treasury.rs#L480-L500"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-treasury/src/instructions/treasury.rs"
+            ]
+        },
+        {
+            "id": 50,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing validation for min_output in Order/:update()",
+            "description": "The Order/:update() function allows users to set min_output to zero for limit swaps, even though init_swap() requires min_output to be non-zero.\n\nThe cause is the absence of a validation check in the update function to enforce the same constraint as init_swap().\n\nAn order keeper could execute a swap that results in zero output, potentially leading to a bad trade for the user.\n\nThe impact is low, as it affects trade quality rather than fund safety, but it undermines the purpose of a limit order.\n",
+            "severity": "low",
+            "location": [
+                "order.rs#L642-L644"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/order.rs"
+            ]
+        },
+        {
+            "id": 51,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-410"
+                ]
+            },
+            "title": "Account seeds based on index of type u8 might limit long-term protocol operation",
+            "description": "Several account seeds use an index of type u8, which limits the number of possible instances to 256.\n\nThe cause is the use of a single-byte integer for indexing, which is insufficient for long-term scalability.\n\nAs the protocol grows, it may exhaust the available indices, preventing the creation of new GLV tokens, vault configs, etc.\n\nThe impact is low in the short term but could become significant over time, potentially halting protocol expansion.\n",
+            "severity": "low",
+            "location": [
+                "programs/gmsol-store/src/instructions/oracle/custom.rs#L29",
+                "programs/gmsol-store/src/instructions/exchange/execute_order.rs#L44",
+                "programs/gmsol-store/src/instructions/glv/management.rs#L47",
+                "programs/gmsol-treasury/src/instructions/treasury.rs#L48"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/oracle/custom.rs"
+            ]
+        },
+        {
+            "id": 52,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "There is no feature flag to disable deposits and withdrawals",
+            "description": "Unlike order processing, the protocol lacks a feature flag to pause deposits and withdrawals.\n\nThe cause is the absence of a configurable pause mechanism for these critical functions.\n\nIn the event of an attack or emergency, the protocol cannot quickly mitigate risk by halting deposits or withdrawals.\n\nThe impact is low, as other mitigations may exist, but it reduces operational flexibility and emergency response capability.\n",
+            "severity": "low",
+            "location": [
+                "gmsol-store/src/utils/internal/action.rs#L52"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/utils/internal/action.rs"
+            ]
+        },
+        {
+            "id": 53,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing rent exempt check on withdrawal creation",
+            "description": "When creating a withdrawal, there is no check to ensure the remaining balance is rent-exempt after deducting execution fees.\n\nThe cause is the omission of a rent-exempt validation that exists for other similar actions.\n\nA user could create a withdrawal that leaves their account balance below the rent-exempt threshold, potentially causing the account to be reclaimed by the system.\n\nThe impact is low, as it affects account survivability rather than fund loss, but it could lead to user fund inaccessibility.\n",
+            "severity": "low",
+            "location": [
+                "gmsol-store/src/ops/withdrawal.rs#L124"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/ops/withdrawal.rs"
+            ]
+        },
+        {
+            "id": 54,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Order keepers are wrongfully charged for GLV shifts",
+            "description": "Order keepers are required to pay execution fees when creating GLV shifts, even though this action should be free, as in the original GMX implementation.\n\nThe cause is the non-zero MIN_EXECUTION_LAMPORTS constant for the GlvShift action.\n\nOther order keepers can exploit this by sniping the fees, leading to unnecessary costs for the keeper performing the shift.\n\nThe impact is low, as it results in economic inefficiency rather than fund loss or system failure.\n",
+            "severity": "low",
+            "location": [
+                "gmsol-store/src/instructions/glv/shift.rs#L145"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/glv.rs"
+            ]
+        },
+        {
+            "id": 55,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Users overpay a position's rent on pure markets",
+            "description": "Users are charged rent for two token accounts when opening a position, even on pure markets where both sides use the same token account.\n\nThe cause is the rent calculation always assuming two separate token accounts, regardless of market type.\n\nUsers pay twice the necessary rent in pure market scenarios, leading to higher costs.\n\nThe impact is low, as it results in overpayment but not loss of funds or functionality.\n",
+            "severity": "low",
+            "location": [
+                "gmsol-store/src/states/order.rs#L404"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/order.rs"
+            ]
+        },
+        {
+            "id": 56,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "The project relies on vulnerable crate dependencies",
+            "description": "The project uses outdated Rust crates with known vulnerabilities, including curve25519-dalek, ed25519-dalek, and hashbrown.\n\nThe cause is the failure to update dependencies to patched versions that fix security issues such as timing variability and non-canonical serialization.\n\nAn attacker could potentially exploit these vulnerabilities to perform side-channel attacks or manipulate serialized data.\n\nThe impact is informational, as the vulnerabilities may not be directly exploitable in this context, but they represent a risk to system integrity.\n",
+            "severity": "informational",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 57,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Inconsistency of market vault token account seeds",
+            "description": "The seed generation for market vault token accounts is inconsistent: some use a trailing &[] while the initialization code does not.\n\nThe cause is a discrepancy in how seeds are constructed across different parts of the codebase.\n\nThis could lead to errors when deriving PDAs, potentially causing account mismatches or failed transactions.\n\nThe impact is low, as it may cause operational issues but not direct fund loss.\n",
+            "severity": "informational",
+            "location": [
+                "programs/gmsol-store/src/instructions/token.rs#L33-L37"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/token.rs"
+            ]
+        },
+        {
+            "id": 58,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-563"
+                ]
+            },
+            "title": "Unused discount when minting GT",
+            "description": "The discount parameter in the get_mint_amount function is hardcoded to zero and never used.\n\nThe cause is an incomplete or abandoned feature where discount functionality was planned but not implemented.\n\nThis leads to code bloat and potential confusion for developers.\n\nThe impact is informational, as it does not affect functionality or security.\n",
+            "severity": "informational",
+            "location": [
+                "programs/gmsol-store/src/states/order.rs#L577"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/states/order.rs"
+            ]
+        },
+        {
+            "id": 59,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unused accounts in swap.rs",
+            "description": "The CreateSwap and CancelSwap instruction structs include unused accounts (swap_out_token_receiver_vault, swap_in_token_vault, swap_out_token_vault).\n\nThe cause is leftover code from previous implementations that are no longer needed.\n\nUnused accounts increase transaction size and cost without providing value.\n\nThe impact is informational, as it affects efficiency but not security.\n",
+            "severity": "informational",
+            "location": [
+                "/programs/gmsol-treasury/src/instructions/swap.rs#L58-L64",
+                "/programs/gmsol-treasury/src/instructions/swap.rs#L265",
+                "/programs/gmsol-treasury/src/instructions/swap.rs#L269"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-treasury/src/instructions/swap.rs"
+            ]
+        },
+        {
+            "id": 60,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Use of outdated Pyth Solana Receiver Rust SDK",
+            "description": "The project depends on version 0.3.2 of the Pyth Solana Receiver Rust SDK, which is outdated compared to the latest version (0.5.0) that includes audit fixes and improvements.\n\nThe cause is the lack of dependency updates to incorporate security and stability enhancements.\n\nThis could expose the protocol to known issues fixed in newer versions.\n\nThe impact is informational, as no active exploit is known, but it represents a maintenance and security risk.\n",
+            "severity": "informational",
+            "location": [
+                "Cargo.toml#L44"
+            ],
+            "files": [
+                "gmx-solana/Cargo.toml"
+            ]
+        },
+        {
+            "id": 61,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ]
+            },
+            "title": "Incorrect error used for event_loader failure",
+            "description": "The error message for event_loader.as_ref() failure uses CoreError/:PositionIsRequired, which is intended for position loading, not event loading.\n\nThe cause is a copy-paste error or incorrect error selection in the code.\n\nThis could mislead developers during debugging by indicating the wrong failure reason.\n\nThe impact is informational, as it affects debug clarity but not runtime behavior.\n",
+            "severity": "informational",
+            "location": [
+                "/programs/gmsol-store/src/instructions/exchange/execute_order.rs#L334-L337",
+                "/programs/gmsol-store/src/ops/order.rs#L941-L944"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/exchange/execute_order.rs"
+            ]
+        },
+        {
+            "id": 62,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "unchecked_insert_factor is callable by both CONFIG_KEEPER and MARKET_KEEPER",
+            "description": "The documentation states that unchecked_insert_factor is only callable by CONFIG_KEEPER, but it can also be called by MARKET_KEEPER through another function.\n\nThe cause is outdated or incorrect documentation that does not reflect the actual access control.\n\nThis could mislead developers about permission boundaries.\n\nThe impact is informational, as it affects understanding of access control but not actual security.\n",
+            "severity": "informational",
+            "location": [
+                "gmsol-store/src/instructions/config.rs#L37-L38"
+            ],
+            "files": [
+                "gmx-solana/programs/gmsol-store/src/instructions/config.rs"
+            ]
+        },
+        {
+            "id": 63,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Use of outdated Switchboard On-Demand libraries",
+            "description": "The project uses outdated versions of the switchboard-on-demand and switchboard-on-demand-client libraries (v0.2.2 and v0.2.9), while newer versions (v0.3.4 and v0.2.12) are available.\n\nThe cause is the lack of dependency updates.\n\nThis could expose the protocol to known bugs or security issues fixed in newer versions.\n\nThe impact is informational, as no active exploit is known, but it represents a maintenance risk.\n",
+            "severity": "informational",
+            "location": [
+                "Cargo.toml#L81",
+                "Cargo.toml#L82"
+            ],
+            "files": [
+                "gmx-solana/Cargo.toml"
+            ]
+        }
+    ]
+}

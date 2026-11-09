@@ -1,0 +1,83 @@
+{
+    "path": "reports-without-source/N1 Bridge - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/n1xyz/nord"
+        ],
+        "commit_id": [
+            "ed12f5dadaa555f401e7122085b8fecef90eddec"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-03-20",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Insufficient block validation",
+            "description": "The propose_block instruction in the bridge program accepts a BlockFacts struct without fully validating critical fields such as app_state_commitment, last_action_id, last_deposit_index, deposit_root, and withdrawal_root. Although the operator is meant to be untrusted, the contract does not enforce on-chain validation for these fields, allowing potentially invalid values to be proposed. The root cause is the lack of on-chain validation logic for state-transition-critical fields, relying instead on off-chain mechanisms. An attacker who compromises the operator could propose a malicious block with invalid state commitments or an incorrect withdrawal root. While finalization requires a challenge period, the absence of on-chain validation increases trust assumptions. The impact includes potential corruption of off-chain bridge infrastructure that relies on these values and, in the worst case, the possibility of an attacker draining funds via a forged withdrawal proof if a malicious block is finalized. However, finalization is protected by a challenge mechanism and economic incentives, which mitigate the risk.\n",
+            "severity": "medium",
+            "location": [
+                "bridge::propose_block",
+                "bridge::finalize_block"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Associated Token Account check not enforced on withdrawal account",
+            "description": "In the Withdraw instruction, the to_account is not enforced to be an Associated Token Account (ATA), even though it is intended to receive SPL tokens. The account is only checked for ownership by the claim.user, but not for being a canonical ATA. The cause is the missing constraint in the Anchor account validation. This allows a caller to withdraw funds to a non-ATA token account, which, while still controlled by the user, deviates from standard Solana practices and could lead to user confusion or compatibility issues with wallets and interfaces that expect ATA. However, since the account is still owned by the user and no funds are at risk, this is not a direct security vulnerability. The impact is limited to potential UX issues or integration problems, not loss of funds or unauthorized access.\n",
+            "severity": "informational",
+            "location": [
+                "bridge::withdraw"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Usage of Pubkey rather than Mint",
+            "description": "The whitelist_asset and set_min_deposit instructions accept the asset parameter as a raw Pubkey instead of enforcing it to be a valid SPL token mint account. The cause is the lack of type safety in the instruction arguments, which allows the operator to specify any public key as an asset. This could lead to the whitelisting of non-token accounts, which, while not immediately exploitable due to the deposit_spl instruction deriving the mint from a TokenAccount, introduces a risk of future security regressions if other parts of the codebase assume the asset is a valid mint. The impact is primarily long-term maintainability and type safety, as it opens the door for logic errors if the assumption is violated in future updates. This could result in unexpected behavior or vulnerabilities if new functionality is added that relies on the asset being a valid mint without additional checks.\n",
+            "severity": "informational",
+            "location": [
+                "bridge::whitelist_asset",
+                "bridge::set_min_deposit"
+            ],
+            "files": []
+        }
+    ]
+}

@@ -1,0 +1,65 @@
+{
+    "path": "reports/Succinct SP1 - Zellic Design Review.pdf",
+    "project_info": {
+        "url": "https://github.com/succinctlabs/sp1",
+        "commit_id": "15be73d3acae3718a0acc529ed566f6a448b1c0e",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-12-03",
+        "project_path": "contracts/Succinct SP1 - Zellic Design Review.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1285"
+                ]
+            },
+            "title": "Register-Memory Aliasing in Reserved Region (0x0\u20130x1F)",
+            "description": "The SP1 zkVM implementation maps low memory addresses (0x0\u20130x1F) to RISC-V registers, allowing memory writes to these addresses to directly modify register values, including x0, which is supposed to be hardwired to zero per the RISC-V specification. This behavior is considered undefined by Succinct and arises from an implementation detail rather than a specification requirement. The root cause is the lack of validation in load/store instructions to prevent access to this reserved memory range. An attacker could exploit this by using it as a gadget to escalate memory corruption vulnerabilities\u2014such as null pointer dereferences\u2014into register manipulation, potentially altering program execution in already-vulnerable applications. While this does not introduce a vulnerability in SP1 itself, it lowers the barrier for exploiting memory-unsafe programs, increasing the attack surface. The impact is limited to programs with pre-existing memory safety flaws, but the platform could mitigate this risk by rejecting such accesses.\n",
+            "severity": "medium",
+            "files": [
+                "crates/core/machine/src/air/memory.rs",
+                "crates/core/machine/src/cpu/air/register.rs"
+            ],
+            "location": [
+                "SP1.load_store_handler",
+                "SP1.memory_access_control"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-684"
+                ],
+                "3": [
+                    "CWE-440"
+                ]
+            },
+            "title": "Unimplemented RISC-V Control and Status Instructions",
+            "description": "Several RISC-V standard instructions, including FENCE, WFI, MRET, and CSR-related instructions, are not implemented in SP1 and trigger a 'not implemented' fault instead of being treated as NOPs or properly handled. This deviation from the RV32IM specification stems from SP1's focus on a minimal subset of instructions optimized for proving efficiency. While these omissions do not introduce direct security risks in the current use case, they may affect compatibility with software expecting standard RISC-V behavior. The lack of proper handling could lead to unexpected program termination or side-channel leakage in edge cases. This finding is marked as (Part) because the document cuts off after listing the issues without fully detailing impact or mitigation.\n",
+            "severity": "low",
+            "files": [
+                "crates/core/executor/src/opcode.rs"
+            ],
+            "location": [
+                "SP1.FENCE#not_implemented",
+                "SP1.WFI#not_implemented",
+                "SP1.MRET#not_implemented",
+                "SP1.CSR_instructions"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,49 @@
+{
+    "project": "07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json",
+    "files": [
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/fund_account.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-1288",
+        "CWE-664",
+        "CWE-1329",
+        "CWE-20"
+    ],
+    "cwe_detected": [],
+    "vuln_ground_truth": [
+        {
+            "title": "Missing validation allows same token swap strategy registration leading to DoS",
+            "description": "The add_token_swap_strategy function in fund_account.rs does not validate that from_token_mint and to_token_mint are different. The root cause is the absence of a require_keys_neq! check or equivalent. An attacker could register a swap strategy with identical source and destination tokens. When the system attempts to execute this swap, it will fail at the system program level, causing the entire transaction to revert. This creates a denial-of-service vector where a malicious fund manager or compromised account could disrupt fund operations by registering invalid strategies. The impact is operational disruption and potential blocking of automated fund management workflows.\n"
+        },
+        {
+            "title": "Token swap strategies cannot be updated or removed",
+            "description": "The fund_manager_add_token_swap_strategy function allows adding strategies but provides no mechanism to update or remove them. The root cause is incomplete administrative functionality. This creates operational inflexibility: incorrect or outdated strategies cannot be corrected, and deprecated DEX pools cannot be removed. The impact is reduced protocol adaptability and potential long-term inefficiencies or risks from obsolete configurations. Although the maximum of 30 strategies limits exposure, the lack of lifecycle management remains a limitation.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code is a Solana program using Anchor framework for managing a fund account. After analyzing the code with respect to the given CWEs, no critical security vulnerabilities were found that stem directly from the listed CWE root causes. The code appears to implement proper access control checks using Anchor's constraint system (not fully visible but implied by usage patterns), validates inputs (e.g., bounds checking on fee rates), and handles errors appropriately using custom error codes.\n\nSpecifically:\n- Access control is managed via program-owned accounts and PDA derivations, though specific authorization checks for privileged operations (like `set_withdrawal_fee_rate_bps`) are not shown in this file.\n- Arithmetic operations use safe math helpers (`require_gte!`, `require_gt!`), reducing risk of integer overflows.\n- The `migrate` function ensures data version compatibility.\n- Token state management includes validation before modification (e.g., checking if a token is already supported).\n\nHowever, one potential issue arises in the `remove_supported_token` function: it checks whether a token is used by restaking vaults or pegged tokens, but does **not** verify whether the token is currently being used in active withdrawal requests or has pending operations that could lead to inconsistent state if removed. This could result in incorrect handling of exceptional conditions when removing a token that is still in use.\n\nAdditionally, the `get_total_unstaking_obligated_amount_as_sol` function performs a calculation involving negation and subtraction that could underflow if not handled properly, although it uses `saturating_sub`. Still, the use of `i128` to `u64` conversion via `try_from` is safe but could fail silently in some contexts.\n\nDespite these edge cases, no definitive CWE violations were identified based solely on the provided code and constraints.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

@@ -1,0 +1,446 @@
+use anchor_lang::prelude::*;
+
+use crate::modules::pricing::TokenPricingSource;
+use crate::modules::restaking::JitoRestakingVaultService;
+use crate::{errors, modules::pricing};
+
+use super::{
+    DelegateVSTCommand, FundService, OperationCommandContext, OperationCommandEntry,
+    OperationCommandResult, SelfExecutable, WeightedAllocationParticipant,
+    WeightedAllocationStrategy, FUND_ACCOUNT_MAX_RESTAKING_VAULTS,
+};
+
+#[derive(Clone, InitSpace, AnchorSerialize, AnchorDeserialize, Debug, Default)]
+pub struct RestakeVSTCommand {
+    state: RestakeVSTCommandState,
+}
+
+#[derive(Clone, InitSpace, AnchorSerialize, AnchorDeserialize, Debug, Copy)]
+pub struct RestakeVSTCommandItem {
+    vault: Pubkey,
+    supported_token_mint: Pubkey,
+    allocated_token_amount: u64,
+}
+
+#[derive(Clone, InitSpace, AnchorSerialize, AnchorDeserialize, Debug, Default)]
+pub enum RestakeVSTCommandState {
+    /// Initializes a command with items based on the fund state and strategy.
+    #[default]
+    New,
+    /// Prepares to execute restaking for the first item in the list.
+    Prepare {
+        #[max_len(FUND_ACCOUNT_MAX_RESTAKING_VAULTS)]
+        items: Vec<RestakeVSTCommandItem>,
+    },
+    /// Executes restaking for the first item and transitions to the next command,
+    /// either preparing the next item or performing a delegation operation.
+    Execute {
+        #[max_len(FUND_ACCOUNT_MAX_RESTAKING_VAULTS)]
+        items: Vec<RestakeVSTCommandItem>,
+    },
+}
+
+#[derive(Clone, InitSpace, AnchorSerialize, AnchorDeserialize, Debug)]
+pub struct RestakeVSTCommandResult {
+    pub supported_token_mint: Pubkey,
+    pub deposited_supported_token_amount: u64,
+    pub deducted_supported_token_fee_amount: u64,
+    pub minted_token_amount: u64,
+    pub operation_reserved_token_amount: u64,
+}
+
+impl SelfExecutable for RestakeVSTCommand {
+    fn execute<'a, 'info>(
+        &self,
+        ctx: &mut OperationCommandContext<'info, 'a>,
+        accounts: &[&'info AccountInfo<'info>],
+    ) -> Result<(
+        Option<OperationCommandResult>,
+        Option<OperationCommandEntry>,
+    )> {
+        let mut remaining_items: Option<Vec<RestakeVSTCommandItem>> = None;
+        let mut result: Option<OperationCommandResult> = None;
+
+        match &self.state {
+            RestakeVSTCommandState::New => {
+                let mut pricing_service =
+                    FundService::new(ctx.receipt_token_mint, ctx.fund_account)?
+                        .new_pricing_service(accounts.into_iter().copied(), false)?;
+                let fund_account = ctx.fund_account.load()?;
+
+                // find restakable tokens with their restakable amount among ST and NT
+                let mut restakable_token_and_amounts = fund_account
+                    .get_supported_tokens_iter()
+                    .map(|supported_token| {
+                        let supported_token_net_operation_reserved_amount = fund_account
+                            .get_asset_net_operation_reserved_amount(
+                                Some(supported_token.mint),
+                                true,
+                                &pricing_service,
+                            )?;
+                        Ok((
+                            supported_token.mint,
+                            if supported_token_net_operation_reserved_amount > 0 {
+                                let supported_token_restaking_reserved_amount =
+                                    u64::try_from(supported_token_net_operation_reserved_amount)?;
+                                supported_token_restaking_reserved_amount
+                            } else {
+                                0
+                            },
+                        ))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                if let Some(normalized_token) = fund_account.get_normalized_token() {
+                    restakable_token_and_amounts.push((
+                        normalized_token.mint,
+                        normalized_token.operation_reserved_amount,
+                    ))
+                }
+
+                // calculate allocation of tokens for each restaking vaults
+                let mut items =
+                    Vec::<RestakeVSTCommandItem>::with_capacity(FUND_ACCOUNT_MAX_RESTAKING_VAULTS);
+                for (token_mint, token_amount) in restakable_token_and_amounts {
+                    let restakable_vaults = fund_account
+                        .get_restaking_vaults_iter()
+                        .filter(|restaking_vault| {
+                            restaking_vault.supported_token_mint == token_mint
+                        })
+                        .collect::<Vec<_>>();
+                    if restakable_vaults.is_empty() {
+                        continue;
+                    }
+
+                    let mut strategy =
+                        WeightedAllocationStrategy::<FUND_ACCOUNT_MAX_RESTAKING_VAULTS>::new(
+                            restakable_vaults
+                                .iter()
+                                .map(|restaking_vault| {
+                                    Ok(WeightedAllocationParticipant::new(
+                                        restaking_vault.sol_allocation_weight,
+                                        pricing_service.get_token_amount_as_sol(
+                                            &restaking_vault.receipt_token_mint,
+                                            restaking_vault.receipt_token_operation_reserved_amount,
+                                        )?,
+                                        restaking_vault.sol_allocation_capacity_amount,
+                                    ))
+                                })
+                                .collect::<Result<Vec<_>>>()?,
+                        );
+
+                    strategy
+                        .put(pricing_service.get_token_amount_as_sol(&token_mint, token_amount)?)?;
+
+                    for (index, strategy_participant) in
+                        strategy.get_participants_iter().enumerate()
+                    {
+                        let allocated_token_amount = pricing_service.get_sol_amount_as_token(
+                            &token_mint,
+                            strategy_participant.get_last_put_amount()?,
+                        )?;
+                        if allocated_token_amount >= 1_000_000 {
+                            let restaking_vault = restakable_vaults.get(index).unwrap();
+                            match items
+                                .iter_mut()
+                                .find(|item| item.vault == restaking_vault.vault)
+                            {
+                                None => items.push(RestakeVSTCommandItem {
+                                    vault: restaking_vault.vault,
+                                    supported_token_mint: restaking_vault.supported_token_mint,
+                                    allocated_token_amount,
+                                }),
+                                Some(item) => item.allocated_token_amount += allocated_token_amount,
+                            };
+                        }
+                    }
+                }
+
+                if items.len() > 0 {
+                    remaining_items = Some(items);
+                }
+
+                drop(fund_account);
+                FundService::new(ctx.receipt_token_mint, ctx.fund_account)?
+                    .update_asset_values(&mut pricing_service, true)?;
+            }
+            RestakeVSTCommandState::Prepare { items } => {
+                if let Some(item) = items.first() {
+                    let fund_account = ctx.fund_account.load()?;
+                    let restaking_vault = fund_account.get_restaking_vault(&item.vault)?;
+
+                    match restaking_vault
+                        .receipt_token_pricing_source
+                        .try_deserialize()?
+                    {
+                        Some(TokenPricingSource::JitoRestakingVault { address }) => {
+                            let [vault_program, vault_config, vault_account, _remaining_accounts @ ..] =
+                                accounts
+                            else {
+                                err!(ErrorCode::AccountNotEnoughKeys)?
+                            };
+                            require_keys_eq!(address, vault_account.key());
+
+                            let required_accounts = JitoRestakingVaultService::new(
+                                vault_program,
+                                vault_config,
+                                vault_account,
+                            )?
+                            .find_accounts_to_deposit()?
+                            .chain([
+                                // from_supported_token_account,
+                                (
+                                    match fund_account.get_normalized_token() {
+                                        Some(normalized_token)
+                                            if normalized_token.mint
+                                                == item.supported_token_mint =>
+                                        {
+                                            fund_account
+                                                .find_normalized_token_reserve_account_address()?
+                                        }
+                                        _ => fund_account
+                                            .find_supported_token_reserve_account_address(
+                                                &item.supported_token_mint,
+                                            )?,
+                                    },
+                                    true,
+                                ),
+                                (
+                                    fund_account.find_vault_receipt_token_reserve_account_address(
+                                        &restaking_vault.vault,
+                                    )?,
+                                    true,
+                                ),
+                                // Jito requires signer to be writable lol
+                                (fund_account.get_reserve_account_address()?, true),
+                            ]);
+
+                            return Ok((
+                                None,
+                                Some(
+                                    RestakeVSTCommand {
+                                        state: RestakeVSTCommandState::Execute {
+                                            items: items.clone(),
+                                        },
+                                    }
+                                    .with_required_accounts(required_accounts),
+                                ),
+                            ));
+                        }
+                        Some(TokenPricingSource::VirtualVault { .. }) => {
+                            remaining_items =
+                                Some(items.into_iter().skip(1).copied().collect::<Vec<_>>());
+                        }
+                        Some(TokenPricingSource::SolvBTCVault { .. }) => {
+                            // TODO/v0.7.0: deal with solv vault if needed
+                            remaining_items =
+                                Some(items.into_iter().skip(1).copied().collect::<Vec<_>>());
+                        }
+                        // otherwise fails
+                        Some(TokenPricingSource::SPLStakePool { .. })
+                        | Some(TokenPricingSource::MarinadeStakePool { .. })
+                        | Some(TokenPricingSource::SanctumSingleValidatorSPLStakePool { .. })
+                        | Some(TokenPricingSource::SanctumMultiValidatorSPLStakePool { .. })
+                        | Some(TokenPricingSource::FragmetricNormalizedTokenPool { .. })
+                        | Some(TokenPricingSource::FragmetricRestakingFund { .. })
+                        | Some(TokenPricingSource::OrcaDEXLiquidityPool { .. })
+                        | Some(TokenPricingSource::PeggedToken { .. })
+                        | None => {
+                            err!(errors::ErrorCode::FundOperationCommandExecutionFailedException)?
+                        }
+                        #[cfg(all(test, not(feature = "idl-build")))]
+                        Some(TokenPricingSource::Mock { .. }) => {
+                            err!(errors::ErrorCode::FundOperationCommandExecutionFailedException)?
+                        }
+                    }
+                }
+            }
+            RestakeVSTCommandState::Execute { items } => {
+                if let Some(item) = items.first() {
+                    let fund_account = ctx.fund_account.load()?;
+                    let restaking_vault = fund_account.get_restaking_vault(&item.vault)?;
+
+                    match restaking_vault
+                        .receipt_token_pricing_source
+                        .try_deserialize()?
+                    {
+                        Some(TokenPricingSource::JitoRestakingVault { address }) => {
+                            let [vault_program, vault_config, vault_account, token_program, vault_receipt_token_mint, vault_receipt_token_fee_wallet_account, vault_supported_token_reserve_account, from_vault_supported_token_account, to_vault_receipt_token_account, fund_reserve_account, _remaining_accounts @ ..] =
+                                accounts
+                            else {
+                                err!(ErrorCode::AccountNotEnoughKeys)?
+                            };
+                            require_keys_eq!(address, vault_account.key());
+
+                            let vault_service = JitoRestakingVaultService::new(
+                                vault_program,
+                                vault_config,
+                                vault_account,
+                            )?;
+
+                            let (
+                                to_vault_receipt_token_account_amount,
+                                minted_vault_receipt_token_amount,
+                                deposited_supported_token_amount,
+                                deducted_supported_token_fee_amount,
+                            ) = vault_service.deposit(
+                                token_program,
+                                vault_receipt_token_mint,
+                                vault_receipt_token_fee_wallet_account,
+                                vault_supported_token_reserve_account,
+                                // variant
+                                from_vault_supported_token_account,
+                                to_vault_receipt_token_account,
+                                fund_reserve_account,
+                                &[&fund_account.get_reserve_account_seeds()],
+                                item.allocated_token_amount,
+                            )?;
+
+                            drop(fund_account);
+
+                            let mut pricing_service =
+                                FundService::new(ctx.receipt_token_mint, ctx.fund_account)?
+                                    .new_pricing_service(accounts.into_iter().copied(), false)?;
+                            let mut fund_account = ctx.fund_account.load_mut()?;
+                            match fund_account.get_normalized_token_mut() {
+                                Some(normalized_token)
+                                    if normalized_token.mint == item.supported_token_mint =>
+                                {
+                                    normalized_token.operation_reserved_amount -=
+                                        deposited_supported_token_amount;
+                                    // accounting receivable of normalized token as SOL
+                                    fund_account.sol.operation_receivable_amount += pricing_service
+                                        .get_token_amount_as_sol(
+                                            &normalized_token.mint,
+                                            deducted_supported_token_fee_amount,
+                                        )?;
+                                }
+                                _ => {
+                                    let supported_token = fund_account
+                                        .get_supported_token_mut(&item.supported_token_mint)?;
+                                    supported_token.token.operation_reserved_amount -=
+                                        deposited_supported_token_amount;
+                                    supported_token.token.operation_receivable_amount +=
+                                        deducted_supported_token_fee_amount;
+                                }
+                            }
+
+                            let restaking_vault =
+                                fund_account.get_restaking_vault_mut(&item.vault)?;
+                            restaking_vault.receipt_token_operation_reserved_amount +=
+                                minted_vault_receipt_token_amount;
+
+                            require_gte!(
+                                to_vault_receipt_token_account_amount,
+                                restaking_vault.receipt_token_operation_reserved_amount,
+                            );
+
+                            result = Some(
+                                RestakeVSTCommandResult {
+                                    supported_token_mint: item.supported_token_mint,
+                                    deposited_supported_token_amount,
+                                    deducted_supported_token_fee_amount,
+                                    minted_token_amount: minted_vault_receipt_token_amount,
+                                    operation_reserved_token_amount: restaking_vault
+                                        .receipt_token_operation_reserved_amount,
+                                }
+                                .into(),
+                            );
+
+                            remaining_items =
+                                Some(items.into_iter().skip(1).copied().collect::<Vec<_>>());
+
+                            drop(fund_account);
+                            FundService::new(ctx.receipt_token_mint, ctx.fund_account)?
+                                .update_asset_values(&mut pricing_service, true)?;
+                        }
+                        Some(TokenPricingSource::VirtualVault { .. }) => {
+                            remaining_items =
+                                Some(items.into_iter().skip(1).copied().collect::<Vec<_>>());
+                        }
+                        Some(TokenPricingSource::SolvBTCVault { .. }) => {
+                            // TODO/v0.7.0: deal with solv vault if needed
+                            remaining_items =
+                                Some(items.into_iter().skip(1).copied().collect::<Vec<_>>());
+                        }
+                        // otherwise fails
+                        Some(TokenPricingSource::SPLStakePool { .. })
+                        | Some(TokenPricingSource::MarinadeStakePool { .. })
+                        | Some(TokenPricingSource::SanctumSingleValidatorSPLStakePool { .. })
+                        | Some(TokenPricingSource::SanctumMultiValidatorSPLStakePool { .. })
+                        | Some(TokenPricingSource::FragmetricNormalizedTokenPool { .. })
+                        | Some(TokenPricingSource::FragmetricRestakingFund { .. })
+                        | Some(TokenPricingSource::OrcaDEXLiquidityPool { .. })
+                        | Some(TokenPricingSource::PeggedToken { .. })
+                        | None => {
+                            err!(errors::ErrorCode::FundOperationCommandExecutionFailedException)?
+                        }
+                        #[cfg(all(test, not(feature = "idl-build")))]
+                        Some(TokenPricingSource::Mock { .. }) => {
+                            err!(errors::ErrorCode::FundOperationCommandExecutionFailedException)?
+                        }
+                    }
+                }
+            }
+        }
+
+        // transition to next command
+        Ok((
+            result,
+            Some(match remaining_items {
+                Some(remaining_items) if remaining_items.len() > 0 => {
+                    let pricing_source = ctx
+                        .fund_account
+                        .load()?
+                        .get_restaking_vault(&remaining_items.first().unwrap().vault)?
+                        .receipt_token_pricing_source
+                        .try_deserialize()?;
+
+                    match pricing_source {
+                        Some(TokenPricingSource::JitoRestakingVault { address }) => {
+                            RestakeVSTCommand {
+                                state: RestakeVSTCommandState::Prepare {
+                                    items: remaining_items,
+                                },
+                            }
+                            .with_required_accounts(
+                                JitoRestakingVaultService::find_accounts_to_new(address)?,
+                            )
+                        }
+                        Some(TokenPricingSource::VirtualVault { .. }) => RestakeVSTCommand {
+                            state: RestakeVSTCommandState::Prepare {
+                                items: remaining_items,
+                            },
+                        }
+                        .without_required_accounts(),
+                        Some(TokenPricingSource::SolvBTCVault { .. }) => {
+                            // TODO/v0.7.0: deal with solv vault if needed
+                            RestakeVSTCommand {
+                                state: RestakeVSTCommandState::Prepare {
+                                    items: remaining_items,
+                                },
+                            }
+                            .without_required_accounts()
+                        }
+                        // otherwise fails
+                        Some(TokenPricingSource::SPLStakePool { .. })
+                        | Some(TokenPricingSource::MarinadeStakePool { .. })
+                        | Some(TokenPricingSource::SanctumSingleValidatorSPLStakePool { .. })
+                        | Some(TokenPricingSource::SanctumMultiValidatorSPLStakePool { .. })
+                        | Some(TokenPricingSource::FragmetricNormalizedTokenPool { .. })
+                        | Some(TokenPricingSource::FragmetricRestakingFund { .. })
+                        | Some(TokenPricingSource::OrcaDEXLiquidityPool { .. })
+                        | Some(TokenPricingSource::PeggedToken { .. })
+                        | None => {
+                            err!(errors::ErrorCode::FundOperationCommandExecutionFailedException)?
+                        }
+                        #[cfg(all(test, not(feature = "idl-build")))]
+                        Some(TokenPricingSource::Mock { .. }) => {
+                            err!(errors::ErrorCode::FundOperationCommandExecutionFailedException)?
+                        }
+                    }
+                }
+                _ => DelegateVSTCommand::default().without_required_accounts(),
+            }),
+        ))
+    }
+}

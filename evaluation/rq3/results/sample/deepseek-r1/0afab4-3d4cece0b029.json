@@ -1,0 +1,59 @@
+{
+    "project": "blocksec_ref_token-locker-v2.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_token-locker-v2.0-signed.pdf.json/contracts/contract/src/account.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-664",
+        "CWE-666",
+        "CWE-405",
+        "CWE-400",
+        "CWE-408"
+    ],
+    "cwe_detected": [
+        "CWE-682"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Lack of charging NEAR in function withdraw",
+            "description": "The `withdraw()` function initiates token transfers via `transfer_token()`, which requires attaching 1 yocto NEAR. However, the contract—not the user—bears this cost because no NEAR is required from the caller. The `withdraw()` function does not enforce the user to attach a minimal amount of NEAR, leaving the contract to cover transaction fees for token transfers. An attacker could repeatedly call `withdraw()` to drain the contract’s NEAR balance, especially in scenarios with high gas costs or frequent withdrawals. The contract may deplete its NEAR balance, preventing future token transfers and disrupting service for all users.\n"
+        },
+        {
+            "title": "Incorrect update on unlock_time_sec in function after_token_burn()",
+            "description": "In the `after_token_burn()` callback function, when a token transfer fails and the system rolls back the state, the `unlock_time_sec` is incorrectly set to the current timestamp if all tokens were burned. The rollback logic fails to preserve the original `unlock_time_sec` value, instead overwriting it with the current time, which breaks the intended lock-up duration. An attacker could trigger a failed burn transaction (e.g., by making the recipient reject funds), causing the unlock time to reset to the present, thereby bypassing the time lock. Users could prematurely withdraw locked assets by exploiting the incorrect state rollback, undermining the core time-locking functionality of the contract.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The analysis of the provided code identified one main security issue. The function `after_token_transfer` adds an amount to the locked balance without checking for overflow. This can cause a panic and lead to a denial of service. Additionally, the code does not include overflow checks in the `append_lock` method of `LockInfo`, but that method is not called in the provided code. Therefore, only the callback function is vulnerable.\n",
+            "findings": [
+                {
+                    "title": "Arithmetic Overflow in Lock Balance Update",
+                    "description": "In the function `after_token_transfer`, when handling a failed token transfer, the contract updates the locked balance by adding the amount back. However, the addition is performed without an overflow check, which can cause the contract to panic if the locked_balance is close to the maximum value of u128. This could lead to a denial of service condition and loss of funds because the tokens are not properly returned to the locked state.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.95
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

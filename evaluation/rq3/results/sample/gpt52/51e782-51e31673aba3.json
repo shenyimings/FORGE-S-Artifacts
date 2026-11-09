@@ -1,0 +1,129 @@
+{
+    "project": "light_protocol_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/light_protocol_audit_final.pdf.json/utils/src/fee.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.125,
+        "recall": 1.0,
+        "f1": 0.2222222222222222
+    },
+    "cwe_ground_truth": [
+        "CWE-682"
+    ],
+    "cwe_detected": [
+        "CWE-1339",
+        "CWE-697",
+        "CWE-190",
+        "CWE-682",
+        "CWE-1335",
+        "CWE-703",
+        "CWE-369",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Inclusion of Lamports as Rent for Rollover Fee Calculation",
+            "description": "The rollover fee calculation incorrectly includes lamports as rent, leading to excessive fee collection. This is due to a flawed fee calculation logic that does not distinguish between rent and actual lamport balances. An attacker could exploit this by triggering fee calculations on accounts with high lamport balances, resulting in disproportionately high fees. The impact includes financial loss for users and potential unauthorized closure of accounts by the authority due to excessive deductions. Specifically, the `compute_rollover_fee` function includes all lamports in the Merkle tree and queue accounts as rent for fee calculations, using ceiling division to determine the per-insertion fee. For example, 10 lamports of rent over 3 insertions would result in 4 lamports charged per insertion (12 total), with the extra 2 lamports becoming locked and inaccessible. Furthermore, by allocating extra lamports to new accounts, the authority can withdraw all lamports from old tree accounts, bypassing the default behavior of preserving old trees, and prematurely delete them. This leads to loss of funds and manipulation of account lifecycle.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The `compute_rollover_fee` function performs fee computation using unchecked arithmetic and incomplete input validation. Because all three inputs can plausibly be attacker-controlled (directly or indirectly via instruction data/config), several edge cases can lead to panics (DoS) or incorrect fee results (e.g., undercharging/overcharging) due to overflow or invalid shifts/divisions. The function only checks `rollover_threshold > 100` but does not reject `0` or bound `tree_height`, and it uses `1 << tree_height`, `rent * 100`, and `number_of_transactions * rollover_threshold` without checked arithmetic. On Solana, panics abort the instruction (DoS), and release-mode overflow/shift behavior can yield unintended results, impacting security-critical accounting.\n",
+            "findings": [
+                {
+                    "title": "Division-by-zero when rollover_threshold == 0",
+                    "description": "`compute_rollover_fee` rejects `rollover_threshold > 100` but allows `rollover_threshold == 0`. This makes the denominator `number_of_transactions * rollover_threshold` equal to zero, causing a division-by-zero inside `div_ceil`, which will panic/abort the instruction (DoS).\n\nCode path:\n- `Ok((rent * 100).div_ceil(number_of_transactions * rollover_threshold))`\n- if `rollover_threshold == 0` => divisor is 0.\n\nImpact: attacker can submit a transaction with threshold 0 (if not otherwise constrained) to reliably fail the instruction, potentially griefing users/protocol flows that depend on this calculation.\n\nRecommendation: enforce `1 <= rollover_threshold && rollover_threshold <= 100` and return an explicit error for 0.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unchecked shift can panic or produce unintended number_of_transactions for large tree_height",
+                    "description": "`let number_of_transactions = 1 << tree_height;` is an unchecked left shift. If `tree_height >= 64` (for a `u64`-inferred literal), the shift is out of range. Depending on build/target semantics, this can:\n- panic/abort (leading to DoS), or\n- produce masked/undefined/unintended results in optimized builds, yielding an incorrect `number_of_transactions` and thus incorrect fees.\n\nImpact: incorrect fee calculation (under/overcharging) or instruction abort.\n\nRecommendation: validate `tree_height` against a safe maximum (e.g., `tree_height < 63/64` as appropriate) and use `checked_shl` (or `1u64.checked_shl(tree_height)`) returning an error on overflow.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Fee computation uses unchecked multiplication leading to overflow and incorrect fees",
+                    "description": "The function performs two potentially overflowing multiplications:\n- `rent * 100` (numerator)\n- `number_of_transactions * rollover_threshold` (denominator)\n\nFor sufficiently large `rent`, `tree_height`, or `rollover_threshold`, these can overflow `u64`. In release builds, Rust arithmetic overflow wraps, producing a smaller (or otherwise wrong) numerator/denominator and therefore an incorrect fee. This can result in systematic undercharging (loss of funds) or overcharging (economic harm/DoS via excessive required fees).\n\nRecommendation: use `checked_mul` (and `checked_add` where applicable) and return an explicit error on overflow; consider reordering to reduce overflow risk (e.g., divide first when possible) and/or use wider intermediates (`u128`) with bounds checks.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Incomplete input validation for rollover_threshold bounds (missing lower bound) affects security-critical comparison",
+                    "description": "The only validation is `if rollover_threshold > 100 { ... }`. This comparison is insufficient for enforcing the intended domain (percentage threshold), because it fails to reject `0`, which is nonsensical for a percentage and leads directly to division-by-zero and/or unintended fee behavior.\n\nRecommendation: validate the full domain (`1..=100`) and consider documenting/encoding units (basis points) to avoid ambiguous thresholds.\n",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The core fee computation performs unchecked arithmetic and an unchecked bit-shift derived from user-controlled inputs (`tree_height`, `rollover_threshold`, `rent`). This creates multiple failure modes: (1) division by zero when `rollover_threshold == 0`, (2) u64 overflow in intermediate products (`rent * 100` and `number_of_transactions * rollover_threshold`), and (3) undefined/erroneous behavior or panics when shifting by an amount >= 64 bits. Additionally, the test code demonstrates patterns that can cause integer underflow and precision loss via float conversions; while in tests here, they are root-cause examples that would be dangerous if mirrored in production logic.\n",
+            "findings": [
+                {
+                    "title": "Divide-by-zero in compute_rollover_fee when rollover_threshold == 0",
+                    "description": "`compute_rollover_fee` only rejects `rollover_threshold > 100`, but allows `rollover_threshold == 0`.\nThe denominator `number_of_transactions * rollover_threshold` becomes 0, and `div_ceil(0)` will panic,\ncausing a denial-of-service if reachable in on-chain instruction processing.\nCode path:\n  - `Ok((rent * 100).div_ceil(number_of_transactions * rollover_threshold))`\n",
+                    "category": "CWE-369",
+                    "severity": "high",
+                    "confidence": 0.97
+                },
+                {
+                    "title": "Unchecked u64 multiplication overflow in fee numerator and denominator",
+                    "description": "The computation uses plain `*` on `u64` without `checked_*`/`saturating_*`/widening intermediates.\nTwo overflow points exist:\n  1) `rent * 100` can overflow u64 for large `rent` values.\n  2) `number_of_transactions * rollover_threshold` can overflow u64 for large `tree_height`\n     (large `number_of_transactions`) even when `rollover_threshold <= 100`.\nIn release builds, overflows wrap, producing incorrect (often much smaller) fees; in debug they may panic.\nEither outcome can be exploitable (fee undercharging) or cause DoS (panic), depending on build/runtime.\n",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unchecked left shift allows invalid tree_height leading to panic or incorrect number_of_transactions",
+                    "description": "`let number_of_transactions = 1 << tree_height;` does not validate `tree_height`.\nFor a u64 context, shifting by >= 64 is invalid. Depending on compilation/runtime, this can:\n  - panic (DoS), or\n  - yield an unexpected value due to shift masking/undefined lowering behavior, leading to incorrect fees.\nThis is a shift-amount validation issue; use `checked_shl` and bound `tree_height` to <= 63 (or the intended max).\n",
+                    "category": "CWE-1335",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Floating-point precision loss when computing lifetime_lamports (test code pattern)",
+                    "description": "The tests compute:\n  `rollover_fee * ((2u64.pow(height)) as f64 * 0.95) as u64`\nThis converts large integers to `f64` and back to `u64`, which can lose precision once values exceed 2^53,\ncausing silent truncation/rounding and incorrect accounting. If similar logic exists in production code,\nit can misprice fees or thresholds.\n",
+                    "category": "CWE-1339",
+                    "severity": "low",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Potential u64 underflow in subtraction used for printing (test code pattern)",
+                    "description": "The tests perform:\n  `lifetime_lamports - (merkle_tree_lamports + queue_lamports + cpi_context_lamports)`\nIf `lifetime_lamports` is less than the total, this subtraction underflows (wraps in release, panics in debug),\nwhich is a dangerous pattern if replicated in on-chain code.\n",
+                    "category": "CWE-191",
+                    "severity": "info",
+                    "confidence": 0.72
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-190",
+            "CWE-193",
+            "CWE-369",
+            "CWE-135",
+            "CWE-191",
+            "CWE-1335",
+            "CWE-128",
+            "CWE-1339"
+        ]
+    ]
+}

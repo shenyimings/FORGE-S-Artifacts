@@ -1,0 +1,210 @@
+{
+    "path": "reports/Parity Finance - Report.pdf",
+    "project_info": {
+        "url": "https://github.com/Parity-Finance/parity-contracts",
+        "commit_id": "9eee7b5f08dfde09693467fa2facf55fe4c623c1",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-09-10",
+        "project_path": "contracts/Parity Finance - Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "State-Account Balance Discrepancies in Token Management",
+            "description": "The parity-issuance and parity-staking programs track token-related changes locally in state variables such as total_collateral and base_balance. While this is acceptable for program logic, these values are used as the authoritative source of truth for actual token balances in vault accounts, which is incorrect. The root cause is the reliance on local state instead of querying the actual vault account balance from the token program. An attacker could exploit this by directly transferring tokens to the vault, causing the local state to diverge from the real balance. This could lead to incorrect withdrawal validations or mints, potentially allowing excess withdrawals or incorrect accounting, resulting in financial loss.\n",
+            "severity": "medium",
+            "files": [
+                "programs/parity-issuance/src/instructions/deposit_funds.rs",
+                "programs/parity-issuance/src/instructions/withdraw_funds.rs",
+                "programs/parity-staking/src/instructions/unstake.rs",
+                "programs/parity-issuance/src/instructions/initialize_withdraw_funds.rs"
+            ],
+            "location": [
+                "deposit_funds.rs#total_collateral",
+                "withdraw_funds.rs#total_collateral",
+                "unstake.rs#base_balance",
+                "initialize_withdraw_funds.rs#total_collateral"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Missing Validation of Mint Address",
+            "description": "The mint account in the WithdrawFunds instruction lacks validation of its address. This means an admin could pass in a different mint account with an inflated supply, potentially bypassing withdrawal limits. The root cause is the absence of a check ensuring the mint account matches the expected one stored in the token_manager. An attacker with admin privileges (or a compromised admin) could exploit this to withdraw more funds than allowed by using a fake mint with a manipulated supply. The impact includes potential loss of funds due to incorrect withdrawal limits enforcement.\n",
+            "severity": "low",
+            "files": [
+                "programs/parity-issuance/src/instructions/withdraw_funds.rs"
+            ],
+            "location": [
+                "withdraw_funds.rs#WithdrawFunds"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Overwriting Pending Withdrawal Amount",
+            "description": "If a user initiates a withdrawal twice before the first one is processed, the second call overwrites the pending withdrawal amount from the first. The root cause is the lack of a check to prevent multiple pending withdrawals. An attacker could exploit this by initiating a large withdrawal, then quickly initiating a second small one, effectively canceling the first. This could disrupt user operations and lead to loss of expected funds if not handled properly. The impact is primarily on user experience and fund availability, though not catastrophic.\n",
+            "severity": "low",
+            "files": [
+                "programs/parity-issuance/src/instructions/initialize_withdraw_funds.rs"
+            ],
+            "location": [
+                "initialize_withdraw_funds.rs#pending_withdrawal"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Double Accounting in Current Slot Volume",
+            "description": "The current_slot_volume is updated twice during a transaction: once in the check_block_limit function and again at the end of the handler function. This double update could lead to incorrect accounting of the volume minted or redeemed in a slot. The root cause is redundant state updates without proper sequencing. While it may not be exploitable in every case, it introduces logic inconsistency that could be leveraged in edge cases involving multiple transactions in the same slot. The impact is inaccurate tracking of slot volume, which could affect rate limiting or analytics.\n",
+            "severity": "low",
+            "files": [
+                "programs/parity-issuance/src/instructions/mint.rs",
+                "programs/parity-issuance/src/instructions/redeem.rs"
+            ],
+            "location": [
+                "mint.rs#current_slot_volume",
+                "redeem.rs#current_slot_volume"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Insufficient Input Validation Across Multiple Contract Functions",
+            "description": "Several functions across the codebase lack proper input validation for critical parameters, such as checking for zero values, bounds on numerical inputs, and authority verification. The root cause is the absence of defensive programming practices in user-facing functions. An attacker could pass zero amounts in staking or minting functions, potentially leading to edge-case bugs or DoS conditions. The impact includes potential logic errors, wasted gas, and in some cases, unintended state changes. This affects multiple functions across staking, issuance, and configuration modules.\n",
+            "severity": "low",
+            "files": [
+                "programs/pt-staking/src/lib.rs",
+                "programs/pt-staking/src/instructions/initialize_global_config.rs",
+                "programs/parity-staking/src/instructions/initialize_pool_manager.rs",
+                "programs/parity-staking/src/instructions/unstake.rs",
+                "programs/parity-issuance/src/instructions/initialize_withdraw_funds.rs"
+            ],
+            "location": [
+                "pt_stake.rs#quantity",
+                "initialize_global_config.rs",
+                "update_global_config.rs",
+                "update_pool_manager.rs",
+                "initialize_pool_manager.rs",
+                "unstake.rs#quantity",
+                "pt_unstake.rs#quantity",
+                "initialize_token_manager.rs",
+                "mint.rs#quantity",
+                "update_token_manager_owner.rs",
+                "update_annual_yield.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Missing Validation for base_mint account",
+            "description": "The base_mint account in the InitializeGlobalConfig instruction is not validated, meaning the contract could be initialized with an incorrect or malicious mint account. The root cause is the lack of constraints on the base_mint field. If exploited, this could allow an attacker to set a fake mint, disrupting the entire staking mechanism or enabling fake token deposits. While the impact is mitigated by admin control, it remains a security gap in defense-in-depth.\n",
+            "severity": "informational",
+            "files": [
+                "programs/pt-staking/src/instructions/initialize_global_config.rs"
+            ],
+            "location": [
+                "initialize_global_config.rs#base_mint"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Potential Inconsistency in Deposit Cap Update",
+            "description": "The new_deposit_cap can be set to a value lower than the current total deposits in the vault. The root cause is the absence of a validation check during the update process. This could lead to a state where new deposits are blocked even though existing deposits exceed the cap, creating operational inconsistency. While not directly exploitable for financial gain, it could cause service disruption or confusion in protocol behavior.\n",
+            "severity": "informational",
+            "files": [
+                "programs/pt-staking/src/instructions/update_global_config.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Inconsistent Admin Authority Checks in Token Management Functions",
+            "description": "Functions like add_gatekeeper, remove_gatekeeper, and update_token_manager_admin use token_manager.owner for authorization, but the documentation states that token_manager.admin should be used. This inconsistency between code and documentation creates ambiguity in access control. The root cause is a mismatch in role implementation. If an attacker gains access to the owner key, they could perform admin operations not intended for them, or legitimate admins may be unable to act. The impact is potential privilege escalation or operational failure due to incorrect assumptions.\n",
+            "severity": "informational",
+            "files": [
+                "programs/parity-issuance/src/instructions/add_gatekeeper.rs",
+                "programs/parity-issuance/src/instructions/remove_gatekeeper.rs",
+                "programs/parity-issuance/src/instructions/update_token_manager_admin.rs"
+            ],
+            "location": [
+                "add_gatekeeper.rs#auth_check",
+                "remove_gatekeeper.rs#auth_check",
+                "update_token_manager_admin.rs#auth_check"
+            ]
+        }
+    ]
+}

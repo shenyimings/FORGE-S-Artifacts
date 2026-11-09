@@ -1,0 +1,140 @@
+{
+    "path": "reports/code_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/code-payments/code-vm",
+        "commit_id": "c49f95d92095eb5955955f1bc888e25957b2f64d",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-02-10",
+        "project_path": "contracts/code_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Inaccurate In-Memory Balance Updates",
+            "description": "1. **Description:** The `transfer` and `withdraw` functions in the code-vm program may perform incorrect balance updates when the source and destination accounts are the same. Due to in-memory caching, intermediate values are overwritten, leading to inaccurate accounting.\n2. **Cause:** The program does not distinguish between source and destination when they refer to the same account, processing both operations in memory without proper sequencing.\n3. **Exploitation:** An attacker could initiate a transfer or withdraw operation where the source and destination are identical, causing the final balance to reflect only the addition without subtracting the sent amount, effectively duplicating funds.\n4. **Impact:** This could result in an inflation of account balances and a loss of funds from the system due to incorrect accounting, qualifying it as a critical vulnerability.\n",
+            "severity": "critical",
+            "files": [
+                "program/src/opcode/transfer.rs",
+                "program/src/instruction/withdraw.rs"
+            ],
+            "location": [
+                "code-vm.transfer",
+                "code-vm.withdraw"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Missing Canonical Bump Validation",
+            "description": "1. **Description:** The `process_init_timelock` function does not validate that the provided bump seeds are canonical, allowing multiple valid PDAs to be generated for the same account.\n2. **Cause:** Bump values are taken directly from the caller without verifying they match the canonical bump derived programmatically by Solana's PDA derivation rules.\n3. **Exploitation:** A malicious user could provide a non-canonical bump that still produces a valid PDA, potentially leading to account confusion or spoofing, where the program interacts with an unintended account.\n4. **Impact:** This could compromise access control mechanisms and lead to unauthorized state modifications, posing a high risk to system integrity.\n",
+            "severity": "high",
+            "files": [
+                "program/src/instruction/init_timelock.rs"
+            ],
+            "location": [
+                "process_init_timelock"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Improper Handling of Empty Items In Circular Buffer",
+            "description": "1. **Description:** The `CircularBuffer::contains` function may return true for empty buffer slots because it does not exclude default-initialized items (e.g., [0; M]) during lookup.\n2. **Cause:** The implementation uses `iter().position()` directly on raw data without filtering out slots marked as empty, leading to false positives.\n3. **Exploitation:** An attacker could insert or leave behind zeroed data that mimics a valid entry, tricking the system into believing a value exists in the buffer when it does not.\n4. **Impact:** This could result in incorrect state validation or logic errors, especially if zero arrays are used as placeholders, leading to high-severity inconsistencies in data integrity.\n",
+            "severity": "high",
+            "files": [
+                "api/src/types/circular_buffer.rs"
+            ],
+            "location": [
+                "CircularBuffer.contains#",
+                "CircularBuffer.find_index#"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-188"
+                ]
+            },
+            "title": "Misaligned Memory Access",
+            "description": "1. **Description:** Several functions use `#[repr(C, packed)]` structs for instruction deserialization, which disables compiler-inserted padding and leads to misaligned memory references.\n2. **Cause:** The use of packed representations without manual alignment handling results in undefined behavior when accessing multi-byte fields (e.g., u64) at unaligned offsets.\n3. **Exploitation:** On architectures sensitive to alignment, this could cause program crashes or unpredictable behavior during instruction parsing.\n4. **Impact:** This poses a medium risk by potentially causing denial of service or inconsistent execution across different hardware, undermining reliability and security.\n",
+            "severity": "medium",
+            "files": [
+                "program/src/instruction/deposit.rs"
+            ],
+            "location": [
+                "DepositIx"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ],
+                "3": [
+                    "CWE-680"
+                ]
+            },
+            "title": "Risk of Integer Overflow",
+            "description": "1. **Description:** Integer overflow checks are disabled in release mode, making arithmetic operations vulnerable to overflow, particularly in `SliceAllocator` during `MemoryAccount` initialization.\n2. **Cause:** The multiplication of `account_size` (u16::MAX) and `num_accounts` (u32::MAX) can exceed the maximum value representable by u64, and no runtime checks are enforced in release builds.\n3. **Exploitation:** An attacker could initialize a `MemoryAccount` with large parameters to trigger an overflow, potentially allocating less memory than required and enabling buffer overflows or other memory corruption.\n4. **Impact:** This could lead to memory safety issues and denial of service, classified as medium severity due to specific preconditions needed for exploitation.\n",
+            "severity": "medium",
+            "files": [
+                "api/src/types/slice_allocator.rs"
+            ],
+            "location": [
+                "SliceAllocator"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Failure to Verify Proof Vector Length",
+            "description": "1. **Description:** The Merkle proof verification function does not check whether the provided proof vector length matches the expected tree depth.\n2. **Cause:** The absence of a length validation allows potentially invalid proofs, such as those proving intermediate nodes instead of leaves, to pass verification.\n3. **Exploitation:** An attacker could craft a shortened proof for an intermediate node and bypass validation if the hash matches a leaf due to compression logic.\n4. **Impact:** Although mitigated by current compression design, this flaw presents a low-risk vulnerability that could undermine the integrity of Merkle proofs under modified conditions.\n",
+            "severity": "low",
+            "files": [
+                "api/src/types/merkle_tree.rs"
+            ],
+            "location": [
+                "Merkle proof verification function"
+            ]
+        }
+    ]
+}

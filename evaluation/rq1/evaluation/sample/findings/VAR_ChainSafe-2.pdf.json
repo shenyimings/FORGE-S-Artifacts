@@ -1,0 +1,355 @@
+{
+    "path": "reports/VAR_ChainSafe-2.pdf",
+    "project_info": {
+        "url": "https://github.com/axiom-crypto/halo2-lib",
+        "commit_id": "321f00b75780ca1dabd31c687481b721f908f32c",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-04-18",
+        "project_path": "contracts/VAR_ChainSafe-2.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Errors in bls_signature_verify",
+            "description": "The bls_signature_verify function fails to validate that its inputs (signature, pubkey, msghash) are on the correct elliptic curve or within the appropriate subgroup. This is due to the use of unchecked loading functions (load_private_g2_unchecked and load_private_g1_unchecked), which create unconstrained witness cells. As a result, the inputs are not properly constrained in the circuit, allowing potentially invalid points to be processed.\n\nThe root cause is the lack of input validation and reliance on unconstrained witness values. An attacker could exploit this by providing maliciously crafted points that lie outside the expected subgroup, potentially triggering small subgroup attacks or other cryptographic inconsistencies.\n\nThe impact includes compromised security guarantees of the BLS signature scheme, such as existential unforgeability. Since the validation is performed on unconstrained signals that are not returned, users cannot easily add missing checks externally, increasing the risk of misuse.\n",
+            "severity": "high",
+            "files": [
+                "halo2-ecc/src/bn254/bls_signature.rs"
+            ],
+            "location": [
+                "bls_signature_verify",
+                "bls_signature_verify#1-13"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Unconstrained constant",
+            "description": "The cyclotomic_pow function uses load_private to initialize the res variable to Fq12::one(), but this does not constrain the value in the circuit. Although the value is initialized correctly during witness generation, it remains unconstrained, meaning a prover could assign any value of the correct size without violating constraints.\n\nThe root cause is the misuse of load_private instead of load_constant. The API accepts a big integer input for witness assignment, but this does not enforce the value in the proof system. Since all subsequent computations depend on this initial value, the entire result becomes under-constrained.\n\nAn attacker could manipulate the initial value to produce incorrect or inconsistent results in cryptographic operations relying on this function. The impact includes potential soundness violations in proofs that use this function, especially in contexts where correctness of exponentiation is critical.\n",
+            "severity": "high",
+            "files": [
+                "halo2-ecc/src/bn254/final_exp.rs"
+            ],
+            "location": [
+                "cyclomic_pow",
+                "cyclotomic_pow#1-19"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Error in conversion from Bytes to BigInt",
+            "description": "The decode_into_bn function attempts to optimize by directly using input bytes as big integer limbs when limb_bytes == 8 (i.e., 64-bit limbs). However, each byte is only 8 bits, so treating 8 bytes as a single 64-bit limb without proper aggregation leads to incorrect limb construction.\n\nThe root cause is a logic error in the condition: limb_bytes == 8 is used instead of checking whether limb_bits == 64 and properly assembling the limb from multiple bytes. This results in misinterpretation of the byte array, producing an invalid big integer.\n\nAn attacker could craft input bytes that trigger this path, leading to incorrect arithmetic in cryptographic operations. The impact includes incorrect computations in circuits relying on this conversion, potentially breaking correctness or enabling invalid witness constructions.\n",
+            "severity": "medium",
+            "files": [
+                "halo2-ecc/src/bn254/mod.rs"
+            ],
+            "location": [
+                "Bytes to BigInt conversion",
+                "decode_into_bn#1-21"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Deviating representation order for FP12 elements",
+            "description": "The functions sparse_line_function_unequal and sparse_line_function_equal return 6-tuples representing elements in \ud53dp12, but the output order does not match the documented representation (b0 + b1\u00b7w + ... + b5\u00b7w^5). Specifically, coefficients are placed in incorrect positions (e.g., w^5 coefficient in index 1 instead of index 5).\n\nThe root cause is a mismatch between the implementation and the assumed memory layout. Although the code behavior was deemed \"intended\", the incorrect ordering contradicts the expected mathematical representation and could mislead developers.\n\nThe impact is potential confusion and incorrect usage by developers relying on the documented order. While the internal logic may be consistent, the deviation increases the risk of integration errors and undermines code maintainability and auditability.\n",
+            "severity": "medium",
+            "files": [
+                "halo2-ecc/src/bn254/pairing.rs"
+            ],
+            "location": [
+                "FP12 representation",
+                "sparse_line_function_unequal",
+                "sparse_line_function_equal"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Wrong implementation of line equation formula",
+            "description": "In sparse_line_function_equal, the line equation for the tangent case omits the (u + 1) factor that should result from w^6 = u + 1. The mathematical expression includes a w^6 term, but the implementation fails to multiply by (u + 1), leading to an incorrect value.\n\nThe root cause is a missing call to mul_no_carry_w6, which applies the necessary field extension transformation. This results in an algebraically incorrect line function evaluation.\n\nThe impact is incorrect pairing computation, which could break the cryptographic soundness of the protocol. Although the behavior was marked as \"intended\" due to outdated comments, the deviation from standard formulas increases the risk of undetected errors in security-critical operations.\n",
+            "severity": "medium",
+            "files": [
+                "halo2-ecc/src/bn254/pairing.rs"
+            ],
+            "location": [
+                "line equation formula",
+                "sparse_line_function_equal"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-369"
+                ]
+            },
+            "title": "Unsafe division by zero",
+            "description": "The isogeny_map function uses divide_unsafe without checking that denominators (x_den and y_den) are non-zero. This leads to potentially unconstrained outputs when division by zero occurs, as no constraints are added to prevent zero denominators.\n\nThe root cause is the absence of non-zero checks before unsafe division. While the probability of zero denominators is low when inputs come from hash functions, the function is public and can be called with arbitrary inputs.\n\nAn attacker could provide a point that results in zero denominators, causing under-constrained outputs. The impact includes potential soundness violations in proofs and incorrect curve point mappings, especially in adversarial usage scenarios.\n",
+            "severity": "medium",
+            "files": [
+                "halo2-ecc/src/ecc/mod.rs"
+            ],
+            "location": [
+                "division operation",
+                "isogeny_map#1-30"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "No API to check membership in sub-group",
+            "description": "The library lacks a function to verify that a G1 or G2 point belongs to the correct cryptographic subgroup. This is important to prevent small subgroup attacks, where invalid points in low-order subgroups can leak information or break security assumptions.\n\nThe root cause is a missing feature in the API surface. While points can be created, there is no mechanism to validate their subgroup membership, leaving this responsibility to the user.\n\nThe impact is increased risk of cryptographic vulnerabilities when the library is used in protocols that assume subgroup correctness. Developers may unknowingly accept invalid points, leading to weakened security guarantees.\n",
+            "severity": "low",
+            "files": [
+                "halo2-ecc/src/ecc/mod.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Under-constrained is_square flag in sqrt_ratio",
+            "description": "The sqrt_ratio function does not constrain the is_square flag when the input num is zero. In this case, both ratio and ratio_z become zero, making both potentially \"square\", so is_square can be set to 0 or 1 arbitrarily.\n\nThe root cause is the lack of a non-zero check on num. While is_square is asserted to be a bit, it is not properly tied to the mathematical condition when num is zero.\n\nThe impact is that is_square may be incorrectly set, leading to wrong branch selections in higher-level logic. Although num is typically derived from hash outputs (making zero unlikely), the under-constrained signal could be exploited in adversarial contexts.\n",
+            "severity": "low",
+            "files": [
+                "halo2-ecc/src/bn254/final_exp.rs"
+            ],
+            "location": [
+                "sqrt_ratio.is_square",
+                "sqrt_ratio#1-25"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "hash_to_field msg could be unconstrained",
+            "description": "The expand_message function accepts QuantumCell inputs, including Witness cells, which are not constrained by default. If a user passes unconstrained witnesses, the entire message input becomes unconstrained, propagating to the output.\n\nThe root cause is the lack of input validation on the msg parameter. The function processes Witness cells without adding constraints or requiring them to be made public.\n\nAn attacker could provide unconstrained witnesses, leading to fully unconstrained hash outputs. The impact includes broken soundness in protocols relying on deterministic or committed inputs, especially in proof systems where input integrity is essential.\n",
+            "severity": "low",
+            "files": [
+                "halo2-ecc/src/ecc/hash_to_curve.rs"
+            ],
+            "location": [
+                "hash_to_field.msg",
+                "expand_message#1-18"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Unchecked hash length assumption",
+            "description": "The expand_message function assumes the hash digest contains at least len_in_bytes of data but does not verify this. According to the reference specification, at least 32 bytes are required for security, but no length check is performed.\n\nThe root cause is missing input validation on the digest length. The function blindly takes len_in_bytes from the digest without ensuring sufficient data is available.\n\nThe impact is potential truncation of insufficient digests, leading to weaker security guarantees or unexpected behavior. This violates the expected security properties of hash-to-curve constructions.\n",
+            "severity": "low",
+            "files": [
+                "halo2-ecc/src/ecc/hash_to_curve.rs"
+            ],
+            "location": [
+                "hash length check",
+                "expand_message"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Missing check for expand_message",
+            "description": "The expand_message function does not validate critical parameters: ell (number of blocks), len_in_bytes, and DST length. According to the reference, it should abort if ell > 255, len_in_bytes > 65535, or DST length > 255.\n\nThe root cause is the omission of bounds checks that are required by the standard. This allows potentially unsafe or undefined behavior when extreme values are used.\n\nThe impact includes undefined behavior, buffer overflows, or infinite loops in edge cases. This undermines the robustness and correctness of the hash-to-curve functionality.\n",
+            "severity": "low",
+            "files": [
+                "halo2-ecc/src/ecc/hash_to_curve.rs"
+            ],
+            "location": [
+                "expand_message"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Missing equality check",
+            "description": "The map_to_curve function uses add_unequal with the last argument set to false, skipping the check for equal x-coordinates. If p1 and p2 are the same point, the function will produce an under-constrained result.\n\nThe root cause is the failure to enable the equality check despite the possibility (however unlikely) of p1 == p2. The add_unequal function requires this flag to safely handle equal points.\n\nAn attacker could manipulate inputs to make p1 == p2, resulting in an invalid addition and under-constrained output. The impact includes incorrect curve arithmetic and potential soundness issues in proofs.\n",
+            "severity": "low",
+            "files": [
+                "halo2-ecc/src/ecc/hash_to_curve.rs"
+            ],
+            "location": [
+                "equality check",
+                "map_to_curve#1-16"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1127"
+                ]
+            },
+            "title": "Consider adding must_use macro",
+            "description": "Functions like is_valid_signature return an AssignedValue that must be used to enforce constraints, but the return value can be ignored without compiler warning. If the result is unused, the constraints are effectively dead code.\n\nThe root cause is the lack of #[must_use] annotation on functions whose return values are security-critical. This increases the risk of API misuse.\n\nThe impact is silent failure of constraint enforcement, leading to incomplete or unsound circuits. Developers may mistakenly believe constraints are active when they are not, resulting in critical vulnerabilities.\n",
+            "severity": "informational",
+            "files": [
+                "halo2-ecc/src/bn254/bls_signature.rs"
+            ],
+            "location": [
+                "API return values",
+                "is_valid_signature#1-18"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "User must determine sign of ratio root",
+            "description": "The sqrt_ratio function returns a square root value (y_assigned) that is only constrained in magnitude (via y_sqr == y_check), but not in sign. Both y and -y satisfy the same square, so the sign is unconstrained.\n\nThe root cause is the absence of a sign constraint. While current callers do constrain the sign, this is not enforced or documented.\n\nThe impact is that future users may fail to constrain the sign, leading to under-constrained values. This could result in inconsistent witness generation and potential soundness issues in dependent logic.\n",
+            "severity": "informational",
+            "files": [
+                "halo2-ecc/src/bn254/final_exp.rs"
+            ],
+            "location": [
+                "ratio root sign determination",
+                "sqrt_ratio#1-17"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Misleading, outdated, missing or wrong comments",
+            "description": "Multiple functions contain incorrect or outdated comments. Examples include wrong pairing verification formulas, incorrect variable naming in comments, swapped P/Q roles, and misleading function names (e.g., mul_by_bls_x actually multiplies by -x).\n\nThe root cause is failure to update comments after code changes and copying comments from external sources without adaptation.\n\nThe impact is developer confusion, increased risk of misuse, and potential introduction of bugs during maintenance. Misleading documentation undermines code reliability and auditability, especially in security-critical cryptographic code.\n",
+            "severity": "informational",
+            "files": [
+                "halo2-ecc/src/bn254/final_exp.rs",
+                "halo2-ecc/src/bn254/pairing.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Undocumented non-zero input assumption",
+            "description": "The functions `cyclotomic_decompress` and `final_exp` assume that certain inputs are non-zero but do not explicitly document this requirement. This creates a risk when these functions are used with untrusted or invalid inputs.\n\nThe root cause is the lack of explicit input validation and absence of documentation stating the non-zero input assumptions, relying instead on callers to ensure correctness.\n\nAn attacker could provide zero-valued inputs where they are not expected (e.g., via an invalid curve point), the `divide_unsafe` function could operate on undefined behavior, leading to under-constrained outputs.\n\nThe impact is that the output of the affected functions may become under-constrained, potentially compromising the correctness and security of cryptographic operations that depend on them.\n",
+            "severity": "informational",
+            "files": [
+                "halo2-ecc/src/bn254/final_exp.rs"
+            ],
+            "location": [
+                "non-zero input assumption",
+                "bls12_381/final_exp.rs.cyclotomic_decompress",
+                "bls12_381/final_exp.rs.final_exp"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Unnecessary clones",
+            "description": "The code performs redundant cloning of data structures, increasing memory usage and proof size.\n\nThe root cause is inefficient use of Rust ownership semantics leads to avoidable deep copies.\n\nAlthough not directly exploitable, this degrades performance and increases costs for users.\n\nThe impact is reduced efficiency of the implementation, particularly in resource-constrained environments. Specific instances include functions such as `batched_pairing`, `psi`, and `psi2`.\n",
+            "severity": "informational",
+            "files": [
+                "halo2-ecc/src/bls12_381/pairing.rs",
+                "halo2-ecc/src/ecc/hash_to_curve.rs"
+            ],
+            "location": [
+                "data cloning",
+                "bls12_381/pairing.rs.batched_pairing#432",
+                "ecc/hash_to_curve.rs.psi#165-166",
+                "ecc/hash_to_curve.rs.psi2#180"
+            ]
+        }
+    ]
+}

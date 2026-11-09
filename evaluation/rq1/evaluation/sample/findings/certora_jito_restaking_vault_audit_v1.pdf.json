@@ -1,0 +1,460 @@
+{
+    "path": "reports/certora_jito_restaking_vault_audit_v1.pdf",
+    "project_info": {
+        "url": "https://github.com/jito-foundation/restaking",
+        "commit_id": "108571a68d9fc0fb9dfeaf463f572bd5aacf4375",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-08-08",
+        "project_path": "contracts/certora_jito_restaking_vault_audit_v1.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Token Denomination Mismatch in VRT Reserve Calculation",
+            "description": "The calculate_vrt_reserve_amount function in the Vault implementation incorrectly uses token amounts in the wrong denomination. Specifically, it calculates a reserve amount in terms of the supported token (ST) but passes this value to a function expecting VRT amounts, leading to severe miscalculations. This flaw arises from inconsistent unit handling in critical financial logic. An attacker could exploit this by initiating large delegations during state updates, taking advantage of the underestimated reserve, which allows more delegation than should be possible. This results in over-delegation, leaving insufficient ST to cover VRT holders' withdrawals, thereby disrupting the vault's token economics and potentially preventing VRT holders from withdrawing their entitled funds.\n",
+            "severity": "High",
+            "location": [
+                "vault.rs#process_initialize_vault_update_state_tracker",
+                "vault.rs#process_add_delegation"
+            ],
+            "files": [
+                "vault_core/src/vault.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Delayed Vault Updates do not Properly Account for Multiple Epochs",
+            "description": "The vault update process fails to account for multiple epochs passing between updates. When closing the VaultUpdateStateTracker, the system only advances VRTs one step in the cooldown process, regardless of how many epochs have elapsed. This is caused by a lack of epoch delta calculation in the state transition logic. An attacker or malicious operator could delay vault updates across multiple epochs and then trigger a single update, causing VRTs to move only one stage forward instead of progressing proportionally to the elapsed time. As a result, VRT holders experience extended lock-up periods beyond the intended cooldown duration, reducing liquidity and artificially slowing the rate at which VRTs become claimable, which disrupts the protocol's economic balance.\n",
+            "severity": "High",
+            "location": [
+                "vault.rs#close_update_state_tracker",
+                "close_update_state_tracker.rs"
+            ],
+            "files": [
+                "vault_program/src/close_update_state_tracker.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Fee Collection Inaccuracies and Inconsistencies in Vault Reward System",
+            "description": "The vault's fee collection mechanism exhibits significant inconsistencies depending on the size and frequency of rewards. The root cause lies in integer arithmetic and rounding behavior during fee calculation, where small or infrequent large rewards result in disproportionately low or high effective fee rates. For example, a single large reward of 0.000000001 tokens incurs a 100% effective fee, while splitting larger rewards into smaller ones can reduce total fees. An attacker could exploit this by strategically batching or splitting reward updates to minimize fees paid to the protocol. This leads to unfair advantages for large depositors, reduced protocol revenue, and misaligned economic incentives, undermining the long-term sustainability and fairness of the system.\n",
+            "severity": "High",
+            "location": [
+                "vault.rs#update_vault_balance",
+                "update_vault_balance.rs"
+            ],
+            "files": [
+                "vault_core/src/vault.rs",
+                "vault_program/src/update_vault_balance.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Premature State Transition in SlotToggle Deactivation Process",
+            "description": "The state method in the SlotToggle implementation allows a premature transition from Cooldown to Inactive state one epoch earlier than intended during deactivation. This occurs in the Ordering::Less case, where the logic does not enforce a full epoch delay before transitioning. An attacker could exploit this by deactivating a critical feature near the end of an epoch, causing it to become inactive at the start of the next epoch instead of the intended one after that. This breaks the expected symmetry between activation and deactivation timing, potentially disrupting dependent systems that rely on precise feature state transitions, leading to unexpected behavior, security vulnerabilities, or inconsistent system states.\n",
+            "severity": "High",
+            "location": [
+                "slot_toggle.rs#state"
+            ],
+            "files": [
+                "core/src/slot_toggle.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Fee Calculation is not in Favor of the Protocol",
+            "description": "The calculate_deposit_fee and calculate_withdraw_fee functions use floor division (rounding down), which allows users to avoid fees by splitting transactions. For instance, a single deposit of 10,000 tokens incurs a fee, but splitting it into 1 and 9,999 tokens results in zero fees due to rounding down to zero on small amounts. This is caused by improper rounding arithmetic that does not ensure minimum fee collection. Attackers can exploit this by fragmenting deposits or withdrawals into sub-threshold amounts, systematically avoiding fees. This results in reduced protocol revenue and creates an unfair advantage for users who exploit the rounding behavior, undermining the economic model.\n",
+            "severity": "Medium",
+            "location": [
+                "vault.rs#calculate_deposit_fee",
+                "vault.rs#calculate_withdraw_fee"
+            ],
+            "files": [
+                "vault_core/src/vault.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "No Upper Bounds in Vault Capacity",
+            "description": "The Vault::capacity field is not enforced as a strict upper bound, allowing the vault to accept deposits that exceed its defined capacity. This is due to the absence of a validation check in the deposit path that compares the new total against the capacity limit. As a result, the vault can enter an inconsistent state where tokens_deposited exceeds capacity, potentially leading to overflow conditions or mismanagement of funds. This undermines the intended economic model and could affect downstream operations that rely on capacity as a hard limit, increasing the risk of fund mismanagement and state corruption.\n",
+            "severity": "Medium",
+            "location": [
+                "vault.rs#set_capacity",
+                "vault.rs"
+            ],
+            "files": [
+                "vault_program/src/set_capacity.rs",
+                "vault_core/src/vault.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Inconsistent and Unchecked Basis Points (BPS) Values",
+            "description": "The codebase inconsistently validates basis points (BPS) values, which should always be in the range 0–10,000. Some functions lack range checks, and the maximum BPS value is hardcoded as 10,000 in multiple places instead of using a defined constant. This increases the risk of invalid BPS values being used in fee or reward calculations, leading to incorrect financial outcomes. The lack of centralized validation and hardcoded values reduce code maintainability and increase the likelihood of errors during future updates. Attackers could potentially set extreme BPS values if input validation is bypassed, distorting fee distributions and economic incentives.\n",
+            "severity": "Medium",
+            "location": [
+                "vault.rs"
+            ],
+            "files": [
+                "vault_core/src/vault.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Inconsistent Zero-Value Handling",
+            "description": "The vault functions handle zero-value inputs inconsistently: burn_with_fee explicitly checks for zero input and rejects it, while mint_with_fee does not. This discrepancy can lead to unintended behavior, such as allowing zero-value mints that may bypass fee logic or event emissions. The root cause is the lack of uniform zero-value validation across financial operations. An attacker could exploit this inconsistency to perform zero-value transactions that may interfere with accounting, trigger edge-case bugs, or be used in conjunction with other vulnerabilities. This undermines the reliability of financial logic and introduces potential attack vectors.\n",
+            "severity": "Medium",
+            "location": [
+                "vault.rs#burn_with_fee",
+                "vault.rs#mint_with_fee"
+            ],
+            "files": [
+                "vault_core/src/vault.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Overflow Risk in 64-bit Calculations",
+            "description": "Several financial calculation functions, including calculate_assets_returned_amount, calculate_vrt_mint_amount, calculate_deposit_fee, and calculate_withdraw_fee, use 64-bit integers for intermediate arithmetic, particularly multiplication before division, which can result in integer overflow for large inputs. This is caused by insufficient use of larger integer types during computation. An attacker could supply large values to trigger overflows, leading to incorrect calculations, such as underpayment of fees or incorrect mint amounts. This could result in financial loss, incorrect state updates, and potential exploitation of the vault’s economic model, especially as asset volumes grow.\n",
+            "severity": "Medium",
+            "location": [
+                "vault.rs#calculate_assets_returned_amount",
+                "vault.rs#calculate_vrt_mint_amount",
+                "vault.rs#calculate_deposit_fee",
+                "vault.rs#calculate_withdraw_fee"
+            ],
+            "files": [
+                "vault_core/src/vault.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Inconsistent Slasher States Between Restaking and Vault Programs",
+            "description": "The VaultNcnSlasherTicket operates independently of the NcnVaultSlasherTicket in the Restaking program, and state changes (e.g., deactivation) in the latter do not propagate to the former. This creates a risk of conflicting slashing states, where the Restaking program disables slashing but the Vault program continues to enforce it. The root cause is the lack of synchronization between the two programs. This inconsistency could lead to unexpected slashing behavior, such as legitimate operators being slashed despite deactivation in the main system, or security gaps if one program is compromised. While this allows continued operation during Restaking program issues, it introduces state divergence risks.\n",
+            "severity": "Medium",
+            "location": [
+                "vault_ncn_slasher_ticket.rs",
+                "ncn_vault_slasher_ticket.rs"
+            ],
+            "files": [
+                "vault_core/src/vault_ncn_slasher_ticket.rs",
+                "restaking_core/src/ncn_vault_slasher_ticket.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Vault Capacity Limit not Enforced for Reward Minting",
+            "description": "The vault's capacity limit is not enforced during reward minting in the UpdateVaultBalance instruction. Even if the vault has reached its TKN capacity, new VRT can still be minted, potentially increasing the total supply beyond what the capacity allows. This is due to missing capacity checks in the reward minting path. This violates the vault’s economic model, which relies on capacity as a hard upper bound for risk management. An attacker could exploit this by triggering large reward updates when the vault is full, diluting existing holders or creating an over-collateralized state. This undermines the integrity of the vault’s supply mechanics and could lead to fund mismanagement.\n",
+            "severity": "Medium",
+            "location": [
+                "update_vault_balance.rs#UpdateVaultBalance",
+                "vault.rs#increment_vrt_supply"
+            ],
+            "files": [
+                "vault_program/src/update_vault_balance.rs",
+                "vault_core/src/vault.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-188"
+                ]
+            },
+            "title": "Alignment Issues in Structures used with Bytemuck",
+            "description": "The structures used in restaking_core/src/config.rs exhibit alignment issues when utilized with the Bytemuck library. Specifically, the original Config structure uses standard Rust types such as u64, which can cause alignment problems in memory. This misalignment may lead to undefined behavior or performance degradation during deserialization or memory access.\n\nThe root cause is the use of non-Pod (Plain Old Data) types that do not guarantee proper memory alignment when interfacing with low-level serialization libraries like Bytemuck. When these structures are cast or transmuted, incorrect alignment can trigger undefined behavior.\n\nAn attacker could potentially exploit this by crafting malicious inputs that trigger memory access violations or cause silent data corruption, especially in contexts where memory layout is critical.\n\nThe impact includes potential undefined behavior, data corruption, or denial of service. However, the severity is low because the issue typically manifests only under specific memory layout conditions and does not directly enable fund loss or privilege escalation.\n",
+            "severity": "Low",
+            "location": [
+                "config.rs"
+            ],
+            "files": [
+                "restaking_core/src/config.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Unsafe Handling of Mint in WithdrawAssets Instruction",
+            "description": "The WithdrawAssets instruction accepts the mint as a Pubkey in the instruction data rather than as a validated account in the accounts vector. This design bypasses standard Solana account validation mechanisms, allowing a caller to pass a non-existent or invalid mint.\n\nThe root cause is the failure to validate the mint account via the runtime, which allows unverified data to influence program logic. Without account validation, the program cannot ensure the mint is a real, initialized token mint.\n\nAn attacker could exploit this by passing a fake or invalid mint Pubkey, potentially causing the program to miscalculate withdrawal amounts or interact with non-existent accounts, leading to errors or inconsistent state.\n\nThe impact includes potential loss of funds or incorrect asset handling due to reliance on unverified mint data. While the risk is mitigated by other checks, the flaw introduces unnecessary attack surface and logic vulnerabilities.\n",
+            "severity": "Low",
+            "location": [
+                "restaking_program/src/lib.rs"
+            ],
+            "files": [
+                "restaking_program/src/lib.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-657"
+                ]
+            },
+            "title": "Faulty VRT Mint Parameters in Vault Initialization",
+            "description": "The InitializeVault instruction incorrectly requires the vrt_mint to be both a signer and an empty account, which is poor design and leads to initialization failures. Additionally, the number of decimals for the VRT mint is hardcoded to 9, limiting flexibility.\n\nThe root cause is the imposition of unnecessary constraints (signer and empty) on the vrt_mint account and the lack of parameterization for decimal precision. These design choices reduce the adaptability of the vault system.\n\nWhile not directly exploitable for fund theft, an attacker could potentially cause denial of service by triggering initialization failures. More broadly, the hardcoded decimals prevent deployment in environments requiring different precision.\n\nThe impact includes reduced system flexibility, initialization failures, and limited usability across different token standards. The issue does not lead to fund loss but hampers protocol extensibility.\n",
+            "severity": "Low",
+            "location": [
+                "initialize_vault.rs"
+            ],
+            "files": [
+                "vault_program/src/initialize_vault.rs"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Incomplete Admin Reset in SetAdmin Function",
+            "description": "The SetAdmin function updates only the primary admin field but fails to clear or update secondary admin fields that may still reference the old admin's key.\n\nThe root cause is incomplete state management during admin rotation. The function does not perform a comprehensive search and replace across all admin-related fields in the configuration.\n\nAn attacker who previously held admin privileges could retain access through secondary admin roles if those fields are not updated, allowing unauthorized actions post-rotation.\n\nThe impact is a privilege escalation risk where a former admin retains partial control, potentially leading to unauthorized configuration changes or fund access.\n",
+            "severity": "Low",
+            "location": [
+                "set_admin.rs"
+            ],
+            "files": [
+                "vault_program/src/set_admin.rs"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-544"
+                ]
+            },
+            "title": "Unrecoverable Error Handling Across the Code",
+            "description": "The codebase uses generic or unrecoverable error handling patterns that do not allow for graceful recovery or precise diagnostics.\n\nThe root cause is the lack of structured error handling mechanisms that differentiate between recoverable and unrecoverable states, leading to abrupt halts or ambiguous error reporting.\n\nAn attacker could exploit this by triggering edge cases that result in unhandled errors, potentially causing service disruption or inconsistent state.\n\nThe impact includes reduced system resilience, difficulty in debugging, and potential for denial of service under exceptional conditions.\n",
+            "severity": "Low",
+            "location": [
+                "vault_sdk/src/sdk.rs"
+            ],
+            "files": [
+                "vault_sdk/src/sdk.rs"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Unnecessary call in MintTo Instruction",
+            "description": "The MintTo instruction redundantly calls Vault::find_program_address to derive the vault's PDA, even though the seeds are already known and can be used directly.\n\nThe root cause is inefficient code design that performs unnecessary cryptographic computations, increasing compute unit usage.\n\nWhile not directly exploitable, an attacker could leverage this inefficiency in a resource exhaustion attack by repeatedly calling the instruction to increase transaction costs.\n\nThe impact is increased computational overhead and higher transaction fees, degrading performance without affecting security.\n",
+            "severity": "Low",
+            "location": [
+                "mint_to.rs"
+            ],
+            "files": [
+                "vault_program/src/mint_to.rs"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Excessive Lamports and Tokens not Properly Harvested",
+            "description": "The program lacks an instruction to harvest excessive lamports or tokens from accounts, leading to potential fund lockup or inefficiency.\n\nThe root cause is the absence of a cleanup mechanism to reclaim unused funds above rent-exemption thresholds.\n\nAn attacker could potentially force accumulation of unused funds in accounts, leading to capital inefficiency or denial of service via resource exhaustion.\n\nThe impact is economic inefficiency and potential loss of funds due to inability to reclaim excess resources. No direct exploit is evident, but operational costs may increase.\n",
+            "severity": "Informational",
+            "location": [],
+            "files": [
+                "vault_program/src/"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant Accounts and Inconsistent Coding Patterns",
+            "description": "The restaking_core module defines two nearly identical accounts—NcnOperatorTicket and OperatorNcnTicket—with the same fields and purpose, creating redundancy. Additionally, their seeds() functions use inconsistent coding patterns.\n\nThe root cause is poor code organization and lack of abstraction, increasing maintenance burden and risk of inconsistent logic application.\n\nThis redundancy increases the attack surface by duplicating logic and makes audits more difficult. Inconsistent patterns may lead to bugs during updates.\n\nThe impact includes increased complexity, higher risk of logic errors, and reduced code maintainability. No direct security exploit is identified, but long-term reliability is compromised.\n",
+            "severity": "Informational",
+            "location": [],
+            "files": [
+                "restaking_core/src/operator.rs"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-397"
+                ]
+            },
+            "title": "Non-Specific Error Handling",
+            "description": "The vault codebase uses a generic VaultOverflow error for multiple distinct error conditions, reducing debuggability.\n\nThe root cause is insufficient error type granularity, making it difficult to determine the exact cause of failures.\n\nThis complicates incident response and may allow attackers to obscure exploit attempts within generic errors.\n\nThe impact is degraded observability and slower response to real issues, though no direct exploit path is created.\n",
+            "severity": "Informational",
+            "location": [
+                "vault_sdk/src/error.rs"
+            ],
+            "files": [
+                "vault_sdk/src/error.rs"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Missing Self-Deposit Check in Vault Mint Process",
+            "description": "The mint_to function includes a codepath for when the depositor and vault have the same public key, avoiding a token transfer. While unlikely due to PDA usage, this introduces unnecessary complexity.\n\nThe root cause is handling a theoretical edge case that is practically impossible under current assumptions, adding code bloat.\n\nThis could confuse auditors or developers, potentially leading to incorrect assumptions about token transfer guarantees.\n\nThe impact is reduced code clarity and potential for misunderstanding, though no immediate exploit exists.\n",
+            "severity": "Informational",
+            "location": [
+                "mint_to.rs"
+            ],
+            "files": [
+                "vault_program/src/mint_to.rs"
+            ]
+        }
+    ]
+}

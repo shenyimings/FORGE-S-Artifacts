@@ -1,0 +1,43 @@
+{
+    "project": "blocksec_burrow_v2.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrow_v2.0_signed.pdf.json/contract/src/config.rs",
+        "dataset/contracts/blocksec_burrow_v2.0_signed.pdf.json/contract/src/asset_config.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-20",
+        "CWE-707"
+    ],
+    "cwe_detected": [],
+    "vuln_ground_truth": [
+        {
+            "title": "Incomplete asset configuration check",
+            "description": "The assert_valid function in AssetConfig performs only partial validation of the configuration. It checks reserve_ratio, target_utilization, and rate bounds, but fails to validate critical fields such as extra_decimal and volatility_ratio. The extra_decimal field must remain unchanged to prevent inconsistencies in token decimal handling, and volatility_ratio should be constrained between 0 and 10000 (basis points). The root cause is an incomplete validation routine. An attacker with owner privileges could update an asset with an altered extra_decimal, causing miscalculations in value conversion, or set an out-of-bounds volatility_ratio, affecting risk parameters. This could lead to incorrect collateral valuations, unfair liquidations, or insolvency of the protocol.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The provided code does not contain any direct vulnerabilities related to fund loss, access control bypass, or incorrect calculations that lead to security compromises. However, upon analyzing the code with respect to the given CWEs, one issue stands out.\n\nIn the `add_asset_farm_reward` function, when updating or adding a reward, the function checks that the reserved balance is sufficient (`reward_asset.reserved >= reward_amount.0`) and that the available amount is also sufficient (`reward_asset.available_amount() >= reward_amount.0`). However, after subtracting from `reserved`, the updated asset is saved back via `internal_set_asset`. \n\nThe issue arises in the control flow: if the `internal_set_asset` call fails (e.g., due to a storage issue or panic in serialization), the state change to `reserved` has already occurred in memory but may not be persisted. However, this is mitigated by the fact that NEAR SDK uses a key-value store with explicit commits, and panics will roll back execution. Still, there's a subtle risk in the order of operations: modifying state before ensuring all side effects are safe.\n\nMore importantly, the function allows the owner to transfer reward tokens from the reserved pool into a farm's rewards. While access is restricted to the owner (via `assert_owner()`), the logic does not validate whether `new_reward_per_day` or `new_booster_log_base` are reasonable. This could lead to economic abuse if misconfigured, but it's assumed the owner is trusted.\n\nAfter careful review, no critical security flaws were found in access control, arithmetic, or state management that violate the listed CWEs in a way that leads to exploitable vulnerabilities.\n\nHowever, one minor issue exists in control flow management: the function performs state mutation (deducting reserved balance) before the final persistence step. Although this is within a single transaction and would roll back on panic, it still represents a pattern where exceptional conditions (e.g., out-of-gas or storage limit) could leave the system in an inconsistent state temporarily — though NEAR's runtime ensures atomicity.\n\nNo other CWEs from the list are triggered based on the current code.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

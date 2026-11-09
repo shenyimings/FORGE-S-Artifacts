@@ -1,0 +1,78 @@
+{
+    "path": "reports/wormhole_solana_ntt_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/wormholelabs-xyz/native-token-transfers",
+        "commit_id": "5f2882e",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-05-09",
+        "project_path": "contracts/wormhole_solana_ntt_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Serialization Size Mismatch",
+            "description": "1. **Description:** The `written_size` method underestimates the actual serialized size for several structs, including `TransceiverMessage`, `WormholeTransceiverInfo`, and `WormholeTransceiverRegistration`. This leads to incorrect size calculations during serialization.\n2. **Cause:** The method fails to account for all serialized components\u2014for example, it omits the size of `recipient_ntt_manager` and the length-prefixed `transceiver_payload` in `TransceiverMessage`, and it does not include the 4-byte PREFIXPREFIX in the other structs.\n3. **Exploitation:** This could lead to vector reallocations or buffer-related inefficiencies during serialization, potentially increasing compute costs or leading to unexpected behavior under memory pressure.\n4. **Impact:** While not directly leading to fund loss, this can degrade performance and increase transaction costs, and may open the door to denial-of-service scenarios under certain conditions if exploited in a resource-constrained environment.\n",
+            "severity": "informational",
+            "files": [
+                "solana/programs/wormhole-governance/src/instructions/governance.rs"
+            ],
+            "location": [
+                "TransceiverMessage.written_size",
+                "WormholeTransceiverInfo.written_size",
+                "WormholeTransceiverRegistration.written_size"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing Validation Logic",
+            "description": "1. **Description:** Multiple functions lack proper validation checks, which could lead to security issues. Specifically, `set_token_authority` updates the `rent_payer` field even after initialization, allowing an attacker to redirect SOL refunds to an unauthorized account. Additionally, `set_peerset_peer` does not prevent a chain from registering itself as a peer, `initialize_lut` adds the `fee_collector` to the LUT without validation, and `AcceptTokenAuthorityBase` does not enforce the pause flag against external SPL token program calls.\n2. **Cause:** Absence of explicit validation logic in critical functions, such as checking account initialization state, validating chain IDs, or verifying account correctness before inclusion in critical structures.\n3. **Exploitation:** An attacker could exploit the `rent_payer` update to receive unintended SOL refunds. Misconfiguration in peer registration could disrupt system assumptions. An incorrect `fee_collector` could break fee collection logic. The pause mechanism could be bypassed by direct SPL token authority transfer.\n4. **Impact:** These issues could lead to loss of funds (via refund redirection), misconfiguration, or circumvention of security controls like the pause mechanism, undermining trust and safety.\n",
+            "severity": "medium",
+            "files": [
+                "solana/programs/wormhole-governance/src/instructions/governance.rs"
+            ],
+            "location": [
+                "set_token_authority#src/instructions/admin/transfer_token_authority.rs",
+                "set_peerset_peer",
+                "initialize_lut",
+                "AcceptTokenAuthorityBase"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Code Maturity",
+            "description": "1. **Description:** The codebase contains several anti-patterns and maintainability issues. For example, mutually exclusive feature flags are checked with redundant `#[cfg(all(...))]` blocks instead of a single `#[cfg(any(...))]` block. The `transfer_ownership` function makes unnecessary CPI calls, and the `transceiver` account in `DeregisterTransceiver` is redundant.\n2. **Cause:** Lack of code consolidation and optimization, leading to reduced readability, increased maintenance burden, and potential for logic errors.\n3. **Exploitation:** While not directly exploitable, these issues increase the risk of future bugs or vulnerabilities due to code complexity and redundancy.\n4. **Impact:** Reduced code quality and maintainability, which may indirectly lead to security vulnerabilities in future updates or modifications.\n",
+            "severity": "informational",
+            "files": [
+                "solana/programs/ntt-transceiver/src/lib.rs"
+            ],
+            "location": [
+                "src/lib.rs#cfg checks",
+                "transfer_owenership",
+                "DeregisterTransceiver"
+            ]
+        }
+    ]
+}

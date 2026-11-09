@@ -1,0 +1,58 @@
+{
+    "project": "blocksec_burrow_v2.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrow_v2.0_signed.pdf.json/contract/src/prices.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-693"
+    ],
+    "cwe_detected": [
+        "CWE-703"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "The freshness of PriceData should be checked",
+            "description": "The contract does not validate the timestamp of PriceData received from the oracle when converting it to Prices. The PriceData struct contains a timestamp and recency_duration_sec field, but these are not used in the From<PriceData> for Prices implementation. This means stale or outdated price data could be accepted without verification. The root cause is missing freshness validation logic. An attacker could manipulate or delay oracle updates to use outdated prices, then perform actions like borrowing or liquidating at favorable rates. This could allow over-borrowing against depreciated collateral or unfair liquidation of positions, leading to significant financial losses for the protocol and users.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code contains two instances of CWE-703: Improper Check or Handling of Exceptional Conditions.\nFirst, in the conversion from `PriceData` to `Prices`, the code uses `expect` when converting `asset_id` to `AccountId`. If the conversion fails (i.e., the `asset_id` is not a valid token ID), the program will panic. This can be triggered by an attacker if they can provide a malformed `asset_id` in the `PriceData` input, leading to a denial of service.\nSecond, the method `get_unwrap` uses `expect` to retrieve the price for a token. If the token is not in the map (which could happen if the token was not included in the `PriceData` because it had no price, or if it had an invalid asset_id and was skipped in conversion), the program will panic. This can be exploited by an attacker to cause a denial of service if they can make the contract look up a token that is missing.\n\nBoth issues are related to improper handling of exceptional conditions because they cause the program to panic in scenarios that might be recoverable or should be handled without aborting the entire transaction.\n",
+            "findings": [
+                {
+                    "title": "Panic on Invalid Asset ID in Conversion",
+                    "description": "The conversion from `PriceData` to `Prices` uses `expect` when converting `asset_id` to `AccountId`. If `asset_id` is not a valid token ID, the program will panic. This can be exploited by an attacker to cause a denial of service by providing an invalid `asset_id` in the `PriceData`.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Panic on Missing Price in `get_unwrap`",
+                    "description": "The method `get_unwrap` panics if the token_id is not found in the prices map. An attacker can cause a transaction to fail by inducing the contract to look up a token_id that is not present in the map (for example, because the token had no price in the `PriceData` or because the token was skipped due to an invalid asset_id).",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

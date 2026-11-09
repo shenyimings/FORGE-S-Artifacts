@@ -1,0 +1,185 @@
+{
+    "path": "reports/2021-08-03-neodyme.pdf",
+    "project_info": {
+        "url": "https://github.com/ChorusOne/solido",
+        "commit_id": "8dc658ea6913b63bc3e15e381c91c08ed61e2838",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2021-08-31",
+        "project_path": "contracts/2021-08-03-neodyme.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Attackers Can Mint Unlimited stSOL due to Missing Reserve Account Check",
+            "description": "1. **Description:** The process_deposit function allows an attacker to mint unlimited stSOL tokens by supplying a maliciously controlled reserve account.\n2. **Cause:** The function fails to validate that the reserve account passed into it matches the legitimate reserve account stored in the contract state (lido.reserve_account). This missing check enables substitution with an attacker-owned account.\n3. **Exploitation:** An attacker can call process_deposit with their own reserve account, deposit SOL, have it transferred to their reserve, and receive stSOL tokens in return. Since they control the reserve, they can withdraw the SOL and repeat the process indefinitely.\n4. **Impact:** The attacker can mint arbitrary amounts of stSOL and use them to withdraw real SOL from the contract, potentially draining all staked funds and causing catastrophic financial loss.\n",
+            "severity": "critical",
+            "files": [
+                "program/src/processor.rs"
+            ],
+            "location": [
+                "Solido.process_deposit"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "SPL Account Closing May Cause Problems",
+            "description": "1. **Description:** The CollectValidatorFee function assumes the existence of developer and treasury token accounts without verifying they are still active.\n2. **Cause:** If these accounts are closed via the SPL Token program's CloseAccount instruction, future calls to CollectValidatorFee will fail because they attempt to mint tokens to non-existent accounts.\n3. **Exploitation:** An attacker could close one of these accounts (if they have access) or the DAO could accidentally close them, leading to a denial of service for fee collection.\n4. **Impact:** Disruption of fee distribution mechanism, potentially halting critical operations dependent on fee collection.\n",
+            "severity": "low",
+            "files": [
+                "program/src/processor.rs"
+            ],
+            "location": [
+                "CollectValidatorFee"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "RemoveValidator Instruction has Incomplete Manager Verification",
+            "description": "1. **Description:** The RemoveValidator instruction does not fully validate the manager authority.\n2. **Cause:** The check only verifies that the provided manager matches lido.manager, but does not confirm that the signer is actually authorized or that the account is valid.\n3. **Exploitation:** While currently not exploitable due to limited validator removal impact, a future extension could make this a vector for unauthorized validator removal if not corrected.\n4. **Impact:** Potential for unauthorized changes to validator set if the protocol evolves without fixing this check, leading to governance bypass or stake mismanagement.\n",
+            "severity": "low",
+            "files": [
+                "program/src/process_management.rs"
+            ],
+            "location": [
+                "RemoveValidator"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ]
+            },
+            "title": "Deletion of Rewards with Possible Economic Attack",
+            "description": "1. **Description:** An attacker can exploit the timing of exchange rate updates at epoch boundaries to manipulate the stSOL value and profit from shorting.\n2. **Cause:** The exchange rate is updated only once after each epoch begins, creating a window where deposits use outdated rates.\n3. **Exploitation:** The attacker accumulates stSOL before an epoch boundary, withdraws stake just before the boundary, re-deposits immediately after using the old rate, and effectively doubles their stSOL exposure. By shorting stSOL beforehand, they profit when the market price drops post-attack.\n4. **Impact:** Economic loss to the protocol and stSOL holders due to artificial inflation and subsequent devaluation, enabling profit via market manipulation.\n",
+            "severity": "low",
+            "files": [
+                "program/src/processor.rs"
+            ],
+            "location": [
+                "Solido.deposit",
+                "Solido.withdraw"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Late Implementation of Unstake Accounts and Denial of Withdrawal",
+            "description": "1. **Description:** The process_withdraw function incorrectly calculates total stake by including unstake accounts, leading to a potential denial of withdrawal.\n2. **Cause:** A bug in the validation logic compares total stake (including unstaked) against a threshold without proper filtering.\n3. **Exploitation:** Users may be unable to withdraw funds if the unstaked amount distorts the calculation, especially during active unstaking periods.\n4. **Impact:** Temporary denial of service for withdrawals, reducing user trust and liquidity.\n",
+            "severity": "low",
+            "files": [
+                "program/src/processor.rs"
+            ],
+            "location": [
+                "process_withdraw"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Missing Owner Checks in Account Validation",
+            "description": "1. **Description:** Functions like PartialVoteState::deserialize and check_is_st_sol_account do not verify the owner of the accounts being validated.\n2. **Cause:** Lack of owner checks could allow spoofed accounts from unauthorized programs to be accepted.\n3. **Exploitation:** An attacker could craft fake stSOL or vote accounts from a different mint/program and pass them to functions expecting legitimate ones.\n4. **Impact:** Potential for account impersonation or incorrect state processing, though mitigated by other checks; thus rated informational.\n",
+            "severity": "informational",
+            "files": [
+                "program/src/vote_state.rs"
+            ],
+            "location": [
+                "PartialVoteState.deserialize",
+                "check_is_st_sol_account"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Missing Checks on Mint",
+            "description": "1. **Description:** The contract does not validate the freeze_authority of the stSOL mint.\n2. **Cause:** No runtime or initialization check ensures the freeze_authority is set to a trusted entity or is disabled.\n3. **Exploitation:** A malicious manager could deploy a fake Lido instance with a controlled mint and freeze user tokens after deposits.\n4. **Impact:** Users could lose access to their stSOL and be unable to withdraw, leading to total loss of deposited funds.\n",
+            "severity": "informational",
+            "files": [
+                "program/src/processor.rs"
+            ],
+            "location": [
+                "Solido.initialize"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Config Accounts are not Program Derived Accounts",
+            "description": "1. **Description:** Configuration accounts are not implemented as Program Derived Accounts (PDAs), which are the standard for singleton, program-owned config accounts.\n2. **Cause:** Using regular accounts instead of PDAs makes it harder to securely derive and validate the canonical config account.\n3. **Exploitation:** An attacker might trick users or frontends into interacting with a fake config account, leading to incorrect behavior.\n4. **Impact:** Increased risk of misconfiguration or spoofing, reducing system integrity and auditability.\n",
+            "severity": "informational",
+            "files": [
+                "program/src/processor.rs"
+            ],
+            "location": [
+                "Solido.initialize"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,57 @@
+{
+    "path": "reports/Pyth Lazer Solana - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": "https://github.com/pyth-network/pyth-crosschain",
+        "commit_id": "2faddf96bc22e1aedc1f72f929cb1a64b520db6a",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-12-12",
+        "project_path": "contracts/Pyth Lazer Solana - Zellic Audit Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-347"
+                ]
+            },
+            "title": "Signature bypass",
+            "description": "1. **Description:** The `verify_message` function in the Lazer program incorrectly assumes a fixed layout of calldata passed to the `VerifyMessage` instruction, particularly relying on the `message_offset` value to be 12. However, an attacker can manipulate the calldata layout to decouple the data being checked by `verify_message` from the data actually verified by the ed25519 system program.\n\n2. **Cause:** The vulnerability arises because the function performs validation based on assumed offsets within `message_data`, but the ed25519 program uses a separately provided `message_offset`. This allows an attacker to make `verify_message` validate one payload and public key (PK1), while the ed25519 program verifies a different signature over a different payload and public key (PK2).\n\n3. **Exploitation:** An attacker who controls the `message_offset` argument can construct a transaction where the signature and public key checked by the program appear valid (by pointing to a trusted signer), but the actual signature verification by the ed25519 program applies to arbitrary attacker-controlled data. This effectively bypasses signature validation.\n\n4. **Impact:** This allows an attacker to forge price feed updates with arbitrary payloads that appear to originate from any trusted signer, completely undermining the oracle's integrity. The impact is critical, though exploitability is conditional on the attacker controlling the `message_offset` parameter in a Lazer integration.\n",
+            "severity": "critical",
+            "files": [
+                "lazer/contracts/solana/programs/pyth-lazer-solana-contract/src/lib.rs"
+            ],
+            "location": [
+                "verify_message#verify_message"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Migration applicable to already migrated storage account",
+            "description": "1. **Description:** The `migrate_from_0_1_0` function allows the `top_authority` to migrate a legacy `StorageV010` account to the new `Storage` layout. However, the function does not prevent re-execution on an already-migrated account, as the preliminary checks (e.g., anchor signature match) remain valid post-migration.\n\n2. **Cause:** The migration logic does not change the account's discriminant (as the type name remains the same), and no state flag or size check is used to prevent repeated migration. This allows the `top_authority` to re-run the migration, reallocating and reinitializing the account.\n\n3. **Exploitation:** The `top_authority` could re-migrate the account, resetting the `treasury` field and potentially corrupting the `trusted_signers` list by setting `num_trusted_signers` to an invalid value, which could break signature validation logic.\n\n4. **Impact:** This could lead to governance-level misuse or accidental corruption of critical state, such as redirecting fees to a new treasury or breaking oracle functionality. While the impact is limited to misuse by the `top_authority`, it represents a critical state integrity flaw, rated as Low due to the required privileged access.\n",
+            "severity": "low",
+            "files": [
+                "lazer/contracts/solana/programs/pyth-lazer-solana-contract/src/lib.rs"
+            ],
+            "location": [
+                "migrate_from_0_1_0#migrate_from_0_1_0"
+            ]
+        }
+    ]
+}

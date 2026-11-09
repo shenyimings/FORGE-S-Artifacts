@@ -1,0 +1,158 @@
+{
+    "project": "07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json",
+    "files": [
+        "dataset/contracts/07_18_2025_Fragmetric_Restaking_v0.6.3.pdf.json/programs/restaking/src/modules/fund/fund_account.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.125,
+        "recall": 0.14285714285714285,
+        "f1": 0.13333333333333333
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-1288",
+        "CWE-664",
+        "CWE-1329",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-190",
+        "CWE-682",
+        "CWE-118",
+        "CWE-284",
+        "CWE-346"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Missing validation allows same token swap strategy registration leading to DoS",
+            "description": "The add_token_swap_strategy function in fund_account.rs does not validate that from_token_mint and to_token_mint are different. The root cause is the absence of a require_keys_neq! check or equivalent. An attacker could register a swap strategy with identical source and destination tokens. When the system attempts to execute this swap, it will fail at the system program level, causing the entire transaction to revert. This creates a denial-of-service vector where a malicious fund manager or compromised account could disrupt fund operations by registering invalid strategies. The impact is operational disruption and potential blocking of automated fund management workflows.\n"
+        },
+        {
+            "title": "Token swap strategies cannot be updated or removed",
+            "description": "The fund_manager_add_token_swap_strategy function allows adding strategies but provides no mechanism to update or remove them. The root cause is incomplete administrative functionality. This creates operational inflexibility: incorrect or outdated strategies cannot be corrected, and deprecated DEX pools cannot be removed. The impact is reduced protocol adaptability and potential long-term inefficiencies or risks from obsolete configurations. Although the maximum of 30 strategies limits exposure, the lack of lifecycle management remains a limitation.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The reviewed file primarily defines the FundAccount zero-copy state and a set of internal helpers/mutators. Even though most methods are `pub(super)` (not directly callable by arbitrary users), they represent the core security-relevant state transitions (enabling deposits/withdrawals, adding/removing supported tokens, setting pricing sources, etc.). From the provided CWE root causes, the main concerns are:\n1) Access control is not expressed in this state object at all (no stored admin/authority), and none of the state-mutating methods enforce any signer/authority constraints. If instruction handlers elsewhere forget or mis-apply checks, these helpers provide no second line of defense.\n2) Multiple security-relevant aggregations use unchecked `u64` addition (`sum::<u64>()`), which can wrap in Solana BPF release builds. If these totals feed into obligation/reserve calculations, wrapping can understate obligations/caps and lead to incorrect issuance/withdrawal decisions.\n3) Migration logic assumes newly-added bytes/fields are safely initialized. If account resizing during upgrades was not performed with zero-initialization, newly introduced fields/arrays can contain stale bytes, leading to corrupted operational parameters (e.g., swap strategy arrays, wrapped token fields) and potentially unsafe downstream behavior.\n",
+            "findings": [
+                {
+                    "title": "Unchecked u64 aggregation can overflow/wrap in obligation and receivable totals",
+                    "description": "Several functions compute security-relevant totals using `Iterator::sum::<u64>()` (unchecked addition). In Solana BPF release builds, integer overflow wraps (no panic), which can silently produce a much smaller value than the true total.\n\nExamples:\n- `get_total_receipt_token_withdrawal_obligated_amount()`:\n  sums `asset.get_receipt_token_withdrawal_obligated_amount()` across assets into a `u64`.\n- `get_total_operation_receivable_amount_as_asset()`:\n  computes `total_operation_receivable_amount_as_sol` by summing per-asset receivables as SOL into a `u64`.\n- `get_total_unstaking_obligated_amount_as_sol()`:\n  sums `pending_unstaking_amount_as_sol` across supported tokens into a `u64`, then subtracts it from a derived shortage value.\n\nIf an attacker can drive many large values (e.g., via repeated deposits/requests across assets) such that intermediate totals exceed `u64::MAX`, the wrapped total may understate obligations/receivables and could influence downstream reserve checks, withdrawal batching, or accounting decisions.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "No authority field or local access-control enforcement for critical configuration mutations",
+                    "description": "The `FundAccount` state does not contain an owner/admin/authority pubkey, and critical mutators do not enforce any signer/authority constraints (they only check internal flags/limits). Examples include:\n- `set_withdrawal_fee_rate_bps`\n- `set_deposit_enabled`, `set_withdrawal_enabled`, `set_transfer_enabled`, `set_donation_enabled`\n- `add_supported_token`, `remove_supported_token`\n- `set_normalized_token`, `add_restaking_vault`, `add_token_swap_strategy`\n- `set_address_lookup_table_account`, `set_wrapped_token`\n\nWhile these are `pub(super)` and likely intended to be called only from instruction handlers that perform authorization checks, the absence of (a) an explicit authority in the state and (b) any internal enforcement means the protection is entirely dependent on external callers getting access control correct everywhere. Any missed/incorrect check in an instruction becomes a full compromise of fund configuration.\n",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Migration/upgrade relies on implicit zero-initialization of newly added account data",
+                    "description": "The `migrate()` routine updates versions by conditionally initializing only some newly introduced fields (e.g., in v16 it sets wrap PDA; in v18 it sets `num_token_swap_strategies = 0`; in v19 it sets `wrapped_token.retained_amount = wrapped_token.supply`), but it does not comprehensively clear/initialize newly added arrays/fields.\n\nIf the on-chain account was resized during an upgrade without guaranteed zero-initialization of the extended region (e.g., `realloc` without zeroing), then fields like:\n- `token_swap_strategies` array (v18)\n- any newly added reserved regions / wrapped token subfields\nmay contain stale bytes. That can result in inconsistent or attacker-influenced configuration when later logic trusts `num_*` counters and/or deserializes embedded POD structures.\n\nThis is particularly risky for any later logic that might iterate strategies or rely on wrapped token accounting fields (v19 sets `retained_amount` based on `supply`, which itself could be garbage if not initialized).\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The code is largely internal state-management logic, but it relies heavily on length/counter fields stored inside the on-chain `FundAccount` (e.g., `num_supported_tokens`) to slice fixed-size arrays. Those counters are not validated/clamped before slicing, so any corrupted or attacker-supplied account data can trigger out-of-bounds panics (program abort / DoS). Additionally, multiple accounting-style aggregations use unchecked `u64` addition (`sum::<u64>()`) and some `i128` negation/conversion patterns that can overflow or wrap in release builds, potentially producing incorrect totals or halting execution.\n",
+            "findings": [
+                {
+                    "title": "Out-of-bounds slicing via unvalidated on-chain counters (panic/DoS)",
+                    "description": "Multiple methods slice fixed-size arrays using counter fields stored in the account without validating that the counters are within the array bounds. Examples:\n  - `get_supported_tokens_iter()` / `get_supported_tokens_iter_mut()` slice `self.supported_tokens[..self.num_supported_tokens as usize]`\n  - `get_restaking_vaults_iter()` / `_mut()` slice `self.restaking_vaults[..self.num_restaking_vaults as usize]`\n  - `get_token_swap_strategies_iter()` slices `self.token_swap_strategies[..self.num_token_swap_strategies as usize]`\n  - `update_pricing_source_addresses()` slices by `num_supported_tokens` and `num_restaking_vaults`\nIf any of these `num_*` fields become larger than their respective MAX constants (due to corrupted state, migration bugs, or a fake program-owned account passed into an instruction that lacks strict PDA/address constraints), the slice will panic, aborting the program and creating a denial-of-service condition for any instruction that touches these helpers.\nMitigation: before any slicing, enforce `num_* <= MAX` (return an error instead of panicking), and ensure all instructions constrain `FundAccount` to the expected PDA (seeds+bump) to prevent attacker-supplied program-owned accounts.\n",
+                    "category": "CWE-118",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unchecked u64 aggregation can overflow/wrap causing incorrect accounting",
+                    "description": "The code performs several `u64` aggregations via `.sum::<u64>()` over potentially user-influenced or state-influenced values, without checked arithmetic. Examples:\n  - `get_total_receipt_token_withdrawal_obligated_amount()`: sums obligated amounts across all assets\n  - `get_total_operation_receivable_amount_as_asset()`: sums per-asset converted receivables into `total_operation_receivable_amount_as_sol`\n  - `get_total_unstaking_obligated_amount_as_sol()`: sums `pending_unstaking_amount_as_sol` across supported tokens\nIn Rust release builds (typical for Solana), overflowing `u64` arithmetic wraps modulo 2^64, potentially turning a very large total into a small number. If any upstream logic uses these totals for limits, solvency checks, withdrawal gating, or fee calculations, a wraparound can lead to incorrect decisions.\nMitigation: replace aggregations with `checked_add` (returning an error on overflow) or `u128` intermediate sums with explicit bounds checks before casting back to `u64`.\n",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Potential i128 negation overflow and unsafe narrowing in unstaking obligation computation",
+                    "description": "`get_total_unstaking_obligated_amount_as_sol()` computes:\n  - `sol_net_operation_reserved_amount.min(0).neg()`\n  - then `u64::try_from(...)`\nIf `sol_net_operation_reserved_amount` were ever `i128::MIN`, `neg()` overflows (in release, this can wrap and remain negative). This would then fail the `u64::try_from` conversion, potentially turning a computable obligation into an unexpected program error (DoS) or producing incorrect behavior if upstream code mishandles the error.\nWhile reaching `i128::MIN` may be unlikely depending on `get_net_operation_reserved_amount` implementation, the pattern is fragile.\nMitigation: use checked negation (`checked_neg`) and/or clamp to a safe range before conversion; prefer explicit `i128` bounds checks.\n",
+                    "category": "CWE-190",
+                    "severity": "medium",
+                    "confidence": 0.55
+                },
+                {
+                    "title": "Unvalidated external reference stored for address lookup table (potential origin/sphere issues)",
+                    "description": "`set_address_lookup_table_account()` stores an arbitrary `Pubkey` and flips `address_lookup_table_enabled` without validating that:\n  - the referenced account is actually an Address Lookup Table account,\n  - it is owned by the expected program,\n  - it corresponds to an expected authority or whitelist.\nThis is a latent risk: if later logic uses `address_lookup_table_account` to influence which accounts are considered/loaded/used for privileged operations, an attacker who can trigger this setter (directly or indirectly) could point it at an unintended endpoint, causing origin validation or control-sphere issues.\nMitigation: when setting, validate the ALT account type/owner and bind it to an authorized admin/config; consider whitelisting or deriving it from deterministic seeds.\n",
+                    "category": "CWE-346",
+                    "severity": "low",
+                    "confidence": 0.35
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-221",
+            "CWE-1267",
+            "CWE-287",
+            "CWE-911",
+            "CWE-1339",
+            "CWE-495",
+            "CWE-369",
+            "CWE-749",
+            "CWE-118",
+            "CWE-1280",
+            "CWE-1229",
+            "CWE-285",
+            "CWE-404",
+            "CWE-191",
+            "CWE-286",
+            "CWE-269",
+            "CWE-673",
+            "CWE-704",
+            "CWE-1270",
+            "CWE-346",
+            "CWE-282",
+            "CWE-1335",
+            "CWE-913",
+            "CWE-669",
+            "CWE-410",
+            "CWE-580",
+            "CWE-501",
+            "CWE-190",
+            "CWE-665",
+            "CWE-662",
+            "CWE-496",
+            "CWE-666",
+            "CWE-1283",
+            "CWE-706",
+            "CWE-922",
+            "CWE-193",
+            "CWE-923",
+            "CWE-1329",
+            "CWE-668",
+            "CWE-128",
+            "CWE-400",
+            "CWE-487",
+            "CWE-610",
+            "CWE-135",
+            "CWE-372"
+        ]
+    ]
+}

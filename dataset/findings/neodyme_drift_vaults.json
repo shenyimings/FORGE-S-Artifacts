@@ -1,0 +1,138 @@
+{
+    "path": "reports/neodyme_drift_vaults.pdf",
+    "project_info": {
+        "url": "https://github.com/drift-labs/drift-vaults",
+        "commit_id": "e203036f416c5f2a72106910be9868b735acbe0f",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-11-20",
+        "project_path": "contracts/neodyme_drift_vaults.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Drift’s delegate functionality is insufficiently constrained",
+            "description": "The Drift Vaults contract assumes that the delegate functionality in Drift Protocol v2 restricts delegates from withdrawing funds, allowing only trading on behalf of the user. However, this assumption is incorrect, as delegates can circumvent withdrawal restrictions through methods such as flash loans or executing unfavorable trades to attacker-controlled accounts. The root cause lies in the insufficient constraints within Drift Protocol v2's delegate logic, which does not fully prevent fund siphoning despite blocking direct withdrawals. An attacker, such as a malicious manager or a user during liquidation, could exploit this by using flash loan swaps to extract a percentage of swapped assets into their private accounts or by placing reduce-only trades at a loss to transfer value out of the vault. This leads to a full loss of funds for the vault, especially during liquidation events where any user could be assigned as delegate and drain the vault's assets.\n",
+            "severity": "high",
+            "location": [
+                "liquidate.rs#60"
+            ],
+            "files": [
+                "programs/drift_vaults/src/instructions/liquidate.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect accounting in withdraw request cancellation instructions",
+            "description": "The accounting logic in the withdraw request cancellation instructions is flawed, leading to incorrect distribution of shares upon cancellation. Specifically, when a withdrawal request is canceled, the lost shares are incorrectly deducted from vault.user_shares and vault_protocol.protocol_profit_and_fee_shares, even though only the requesting party should bear the loss. This error results in an inflation of manager shares, as the difference between total shares and user/protocol shares increases artificially. The root cause is the improper handling of share deductions across multiple account types during cancellation in the CancelWithdrawRequest, ManagerCancelWithdrawRequest, and ProtocolCancelWithdrawRequest instructions. An attacker, such as a manager or protocol authority, could repeatedly cancel withdrawal requests after the vault has appreciated in value, thereby gaining excess shares at the expense of users and the protocol. The impact is an economic loss due to unfair dilution of user and protocol shares, leading to incorrect profit distribution and potential governance manipulation.\n",
+            "severity": "medium",
+            "location": [
+                "vault_depositor.rs#L469-L481",
+                "vault.rs#L607-L619",
+                "vault.rs#L896-L909"
+            ],
+            "files": [
+                "programs/drift_vaults/src/instructions/cancel_withdraw_request.rs",
+                "programs/drift_vaults/src/instructions/manager_cancel_withdraw_request.rs",
+                "programs/drift_vaults/src/instructions/protocol_cancel_withdraw_request.rs",
+                "programs/drift_vaults/src/state/vault.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Incorrect account check comments",
+            "description": "The codebase contains multiple instances of \"CHECK: checked in drift cpi\" comments that inaccurately describe how certain accounts are validated. These comments suggest that a Cross-Program Invocation (CPI) to Drift checks the account, but no such CPI occurs in the listed instructions. Although the accounts are correctly constrained via custom constraints (e.g., `is_user_for_vault`), the misleading comments could lead to incorrect assumptions during future code reviews or modifications. This does not introduce a direct security risk, as the actual validation logic is sound, but it reduces code clarity and maintainability. An attacker could potentially exploit confusion caused by these comments to introduce vulnerabilities during future development if incorrect assumptions are made about account validation.\n",
+            "severity": "informational",
+            "location": [
+                "ProtocolCancelWithdrawRequest#17",
+                "ProtocolCancelWithdrawRequest#22",
+                "ProtocolCancelWithdrawRequest#25",
+                "RequestWithdraw#20",
+                "RequestWithdraw#25",
+                "RequestWithdraw#27"
+            ],
+            "files": [
+                "programs/drift_vaults/src/instructions/protocol_cancel_withdraw_request.rs",
+                "programs/drift_vaults/src/instructions/request_withdraw.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Unnecessary unconstrained accounts in Request-Withdraw",
+            "description": "The `RequestWithdraw` instruction includes two accounts, `drift_user_stats` and `drift_state`, that are not used within the instruction logic. While `drift_user_stats` is constrained and checked via a custom constraint, `drift_state` is completely unconstrained and can be any arbitrary account. This allows callers to pass a fake or irrelevant `drift_state` account, which could confuse off-chain parsers or monitoring tools. Although there is no direct security impact, this design choice increases the attack surface slightly and reduces instruction clarity. If a future update introduces a CPI that uses these accounts without proper validation, it could lead to vulnerabilities. The resolution removed `drift_state` and retained `drift_user_stats` for future-proofing with updated documentation.\n",
+            "severity": "informational",
+            "location": [
+                "RequestWithdraw#27"
+            ],
+            "files": [
+                "programs/drift_vaults/src/instructions/request_withdraw.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1099"
+                ]
+            },
+            "title": "Vault Token Accounts: Naming and Seeds",
+            "description": "Three types of token accounts are referred to as \"vault token accounts\", with the first two using similar seed prefixes: `[b\"vault_token_account\", vault.key()]` and `[b\"vault_token_account\", vault.key(), market_index.to_le_bytes()]`. Although the probability of a PDA collision is negligible due to the uniqueness of the full seeds, the reuse of the same prefix increases the risk of confusion and potential future bugs if new account types are added with similar patterns. This could lead to incorrect assumptions in client code or during audits. Additionally, the naming is ambiguous, making it harder to distinguish between different account purposes. While no immediate security impact exists, this could lead to unsafe design decisions in future updates. The team acknowledged the finding but chose not to change the seeds due to the breaking changes it would require, which Neodyme agreed was acceptable given the low severity.\n",
+            "severity": "informational",
+            "location": [
+                "initialize_vault.rs#95",
+                "initialize_insurance_fund_stake.rs#50",
+                "redeem_tokens.rs#165"
+            ],
+            "files": [
+                "programs/drift_vaults/src/instructions/initialize_vault.rs",
+                "programs/drift_vaults/src/instructions/initialize_insurance_fund_stake.rs",
+                "programs/drift_vaults/src/instructions/redeem_tokens.rs"
+            ]
+        }
+    ]
+}

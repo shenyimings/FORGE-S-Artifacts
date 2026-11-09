@@ -1,0 +1,187 @@
+{
+    "path": "reports/zenith/Meteora DBC - Zenith Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/MeteoraAg/dynamic-bonding-curve"
+        ],
+        "commit_id": [
+            "186922825468d079018edddb4ff00323ee1e02e6"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-04-23",
+        "project_path": "contracts/Meteora DBC - Zenith Audit Report.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Migration can be DoS as the curve completion check in swap() fails to account for locked vesting amount",
+            "description": "This vulnerability allows an attacker to prevent the migration of a completed curve by depleting the base token reserves needed for locked vesting. The root cause is that the swap() function checks if the base vault balance is sufficient for migration and fees, but does not include the total locked vesting amount in this calculation. An attacker can exploit this by performing a final large swap to drain the base tokens meant for vesting. As a result, when migration is triggered, the required base tokens will be insufficient, causing the migration to fail and leaving all tokens stuck in the virtual pool, leading to a denial-of-service condition.\n",
+            "severity": "high",
+            "location": [
+                "ix_swap.rs#L216-L223"
+            ],
+            "files": [
+                "dynamic-bonding-curve/programs/virtual-curve/src/instructions/ix_swap.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Config allows a high sqrt_start_price that leaves no buffer for swap_base_amount",
+            "description": "The create_config() function allows sqrt_start_price to be set very close to MAX_SQRT_PRICE, which can eliminate the swap amount buffer. This occurs because the validation only requires sqrt_start_price to be less than MAX_SQRT_PRICE, without enforcing a safe lower bound. As a result, the swap_base_amount buffer may be effectively zero, requiring the final buyer to swap out an exact amount of base tokens for curve completion. An attacker could grief the last buyer by making small swaps, depleting the buffer and causing the final swap to fail temporarily. Although the curve will eventually complete, this could delay migration and degrade user experience. The likelihood is low as such configurations are not expected in practice.\n",
+            "severity": "low",
+            "location": [
+                "ix_create_config.rs#L185-L189"
+            ],
+            "files": [
+                "dynamic-bonding-curve/programs/virtual-curve/src/instructions/partner/ix_create_config.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "get_initial_liquidity_from_delta_base() could overflow and prevent migration",
+            "description": "The function get_initial_liquidity_from_delta_base() computes base_amount * sqrt_price * sqrt_max_price / price_delta and casts the result to u128. If migration_sqrt_price is extremely high and base_amount is large, this computation can exceed u128's maximum value (~3.4e38), causing an arithmetic overflow. This would cause migrate_damm_v2() to fail during liquidity calculation, thereby preventing migration from succeeding. The impact is limited to migration failure, and the likelihood is low because such extreme values are unlikely for standard tokens like SOL or USDC. However, the potential for failure under edge cases constitutes a valid low-risk issue.\n",
+            "severity": "low",
+            "location": [
+                "curve.rs#L28-L42"
+            ],
+            "files": [
+                "dynamic-bonding-curve/programs/virtual-curve/src/curve.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Missing rent refund on DAMM creation",
+            "description": "During DAMM pool and locker creation, the payer is charged a fixed amount of lamports (50 million and 10 million respectively) to cover rent, but any unused lamports are not refunded. This overpayment is intentional to ensure sufficient funds for account creation, but the lack of a refund mechanism results in permanent loss of excess lamports for the payer. The root cause is the absence of a rent reclaim step after account initialization. While this does not compromise security, it leads to unnecessary cost for users. The impact is financial inefficiency, and the issue is classified as low risk due to minimal impact and low likelihood of significant loss.\n",
+            "severity": "low",
+            "location": [
+                "/migration/dynamic_amm_v2/migrate_damm_v2_initialize_pool.rs#L185-L190",
+                "/migration/create_locker.rs#L97"
+            ],
+            "files": [
+                "dynamic-bonding-curve/programs/virtual-curve/src/instructions/migration/dynamic_amm_v2/migrate_damm_v2_initialize_pool.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "get_migration_base_token() should round up for MigrationOption::DammV2",
+            "description": "The get_migration_base_token() function rounds up the base token amount for MigrationOption::MeteoraDamm but rounds down for MigrationOption::DammV2 due to using get_initial_liquidity_from_delta_quote(), which truncates the result. This causes a slightly lower base token amount to be used, resulting in a marginally higher migration price. The inconsistency in rounding behavior could lead to suboptimal liquidity distribution. While Meteora acknowledged the finding, Zenith noted that rounding down is intentional to prevent exceeding the migration_quote_threshold during pool initialization. Thus, the impact is minimal, and the issue is low risk.\n",
+            "severity": "low",
+            "location": [
+                "liquidity_distribution.rs#L92-L97"
+            ],
+            "files": [
+                "dynamic-bonding-curve/programs/virtual-curve/src/params/liquidity_distribution.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ],
+                "3": [
+                    "CWE-1111"
+                ]
+            },
+            "title": "escrow_token is missing documentation",
+            "description": "The create_locker instruction creates an escrow PDA and expects an associated token account (ATA) for the escrow, but it does not create the ATA itself. The current implementation requires the caller to pre-create the escrow_token ATA, but this prerequisite is not documented anywhere in the code or external documentation. As a result, users may encounter transaction failures if they do not pre-initialize the ATA. This lack of clarity can lead to user errors and failed transactions. The issue was resolved by improving documentation or using init_if_needed, but it was initially a valid informational finding.\n",
+            "severity": "informational",
+            "location": [
+                "programs/dynamic-bonding-curve/src/instructions/migration/create_locker.rs#L52-L54"
+            ],
+            "files": [
+                "dynamic-bonding-curve/programs/virtual-curve/src/instructions/migration/create_locker.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ]
+            },
+            "title": "Consider adding explanation of post_migration_token_supply for fixed token supply pool",
+            "description": "The post_migration_token_supply field is intended to define the target supply after migration in fixed-supply pools. However, the actual final supply is not strictly capped at this value because the burn amount is the minimum of leftover base tokens and the difference between pre and post migration supplies. Therefore, if leftover tokens are less than the difference, the final supply will be higher than post_migration_token_supply. This behavior contradicts the intuitive assumption that post_migration_token_supply is a hard cap. Without proper documentation, developers may misunderstand the supply mechanics. Adding explanatory comments resolves this confusion.\n",
+            "severity": "informational",
+            "location": [
+                "config.rs#L538-L552"
+            ],
+            "files": [
+                "dynamic-bonding-curve/programs/virtual-curve/src/state/config.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Dust quote tokens could remain after migration_damm_v2()",
+            "description": "During migration to DAMM v2, the initial liquidity is calculated using get_initial_liquidity_from_delta_base() and get_initial_liquidity_from_delta_quote(), both of which round down. This results in slightly less liquidity being used than the migration_quote_threshold, leaving behind a small amount of dust quote tokens in the vault. These tokens are effectively locked and inaccessible. While the amount is negligible, the accumulation across multiple pools could become non-trivial. The issue is purely economic inefficiency with no security impact, hence classified as informational. A potential mitigation is to allow withdrawal of such dust via surplus mechanisms.\n",
+            "severity": "informational",
+            "location": [
+                "migrate_damm_v2_initialize_pool.rs#L434-L439"
+            ],
+            "files": [
+                "dynamic-bonding-curve/programs/virtual-curve/src/instructions/migration/dynamic_amm_v2/migrate_damm_v2_initialize_pool.rs"
+            ]
+        }
+    ]
+}

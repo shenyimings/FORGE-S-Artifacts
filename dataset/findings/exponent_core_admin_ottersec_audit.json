@@ -1,0 +1,293 @@
+{
+    "path": "reports/exponent_core_admin_ottersec_audit.pdf",
+    "project_info": {
+        "url": "https://github.com/exponent-finance/exponent-core",
+        "commit_id": "a9d3a6b",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-08-24",
+        "project_path": "contracts/exponent_core_admin_ottersec_audit.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Lack of SY Program Verification",
+            "description": "The CollectInterest and CollectTreasuryInterest instructions do not verify that the provided sy_program matches the expected program in the vault. This lack of validation allows an attacker to supply a malicious SY program during CPI calls, potentially redirecting SY tokens to an unauthorized account. The root cause is the use of an UncheckedAccount for sy_program without subsequent validation against the vault's expected program. An attacker could exploit this by invoking these instructions with a fake SY program to steal SY tokens. The impact includes loss of funds for YT holders and administrators who rely on correct interest collection.\n",
+            "severity": "critical",
+            "location": [
+                "CollectInterest#sy_program",
+                "CollectTreasuryInterest#sy_program"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ]
+            },
+            "title": "SY Balance Fee Accounting Error",
+            "description": "In the TradePt instruction, when a user sells Principal Tokens (PT), a treasury fee is transferred from the escrow to the treasury account. However, the market's internal sy_balance is not decremented by the same amount, leading to a discrepancy between the actual SY token balance and the protocol's accounting. The cause is the omission of a balance update after the token transfer. An attacker could exploit this by repeatedly selling PT to inflate the perceived SY reserves, potentially leading to incorrect financial calculations or insolvency during withdrawals. The impact is inaccurate state accounting and potential loss of funds.\n",
+            "severity": "high",
+            "location": [
+                "TradePt#sy_balance"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Escrow Balance Mismanagement",
+            "description": "In the WithdrawLp instruction, the function do_transfer_lp_out transfers LP tokens from the market's escrow to the user but fails to decrement market.lp_escrow_amount. This results in the protocol overestimating the amount of LP tokens held in escrow, which affects emission calculations and reward distributions. The root cause is the missing update to the accounting variable after the token transfer. An attacker could exploit this by withdrawing LP tokens and then manipulating emission calculations due to inflated escrow balances. The impact includes incorrect reward distribution and potential manipulation of protocol incentives.\n",
+            "severity": "high",
+            "location": [
+                "WithdrawLp.do_transfer_lp_out#lp_escrow_amount"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Utilization of Stale State Values",
+            "description": "The claim_farm_emissions and market_collect_emission instructions use outdated emission indexes because they fail to update them before calculating rewards. This leads to incorrect reward amounts being distributed to liquidity providers. Similarly, the last_seen_staged field in market.emissions.trackers is not reduced after claims, causing the tracker to reflect more rewards than are actually available. The cause is the lack of index updates and balance adjustments in critical code paths. An attacker could exploit this by timing claims to maximize rewards based on stale data. The impact includes unfair reward distribution and potential over-allocation of emissions.\n",
+            "severity": "high",
+            "location": [
+                "claim_farm_emissions#emission indexes",
+                "market_collect_emission#emission indexes",
+                "get_position#emissions"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Locked Escrow Funds",
+            "description": "The buy_yt instruction performs a do_repay_sy call to repay borrowed SY tokens, but it omits the subsequent do_deposit_sy CPI call. As a result, the repaid SY tokens remain locked in the token_sy_escrow account and are not returned to the liquidity pool. The root cause is the missing CPI invocation to deposit the tokens back into the pool. An attacker could exploit this by repeatedly borrowing and repaying SY tokens, effectively removing them from circulation. The impact is reduced liquidity and potential denial of service for other users relying on the SY pool.\n",
+            "severity": "high",
+            "location": [
+                "buy_yt#do_deposit_sy"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Mathematical Errors from Incorrect Operations",
+            "description": "In MarketFinancials::trade_pt, the sy_fee is incorrectly calculated by multiplying asset_fee by sy_exchange_rate instead of dividing, leading to inflated fees. Additionally, in sy_magnitude_from_net_trader_asset, floor is used instead of ceil when net_trader_asset is negative, potentially underpaying SY tokens. Furthermore, the dec_num library defines MAX_U96 as 1 << 96, which is off-by-one since the correct maximum for a 96-bit unsigned integer is (2^96) - 1. These errors stem from incorrect arithmetic operations and constant definitions. Attackers could exploit these to manipulate fee calculations or receive fewer tokens than expected. The impact includes financial loss and incorrect state transitions.\n",
+            "severity": "high",
+            "location": [
+                "MarketFinancials.trade_pt#sy_fee",
+                "sy_magnitude_from_net_trader_asset#floor",
+                "dec_num#MAX_U96"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing Validation Logic",
+            "description": "The system fails to proactively validate mint accounts for token accounts, relying instead on runtime failures during transfers. This affects multiple instructions including `initialize_vault`, `MarketCollectEmission`, `add_farm`, `BuyYt`, `SellYt`, and `AddEmission`. For example, in `MarketTwo::add_farm`, there is no check to prevent duplicate farms for the same `token_mint`, and `get_farm_emission_index` does not handle duplicates properly.\n\nThe root cause is the lack of explicit validation logic at the entry points of these instructions. Instead of asserting correct mints and ownerships upfront, the system assumes correctness and fails only when invalid transfers occur, which is a reactive and unsafe approach.\n\nAn attacker could provide a token account with an incorrect mint, leading to unexpected behavior or denial of service. In the case of duplicate farms, this could distort emission calculations or lead to double allocation of rewards.\n\nThis can result in denial of service, incorrect state updates, or potential loss of funds if emissions or transfers are misdirected due to invalid or duplicate accounts.\n",
+            "severity": "high",
+            "location": [
+                "MarketCollectEmission#",
+                "MarketTwo.add_farm#",
+                "BuyYt#",
+                "SellYt#",
+                "exponent_core::AddEmission#"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-182"
+                ]
+            },
+            "title": "Integer Overflow Risk in Trade Function",
+            "description": "The `trade` function in `tcurve/src/math.rs` calculates a pre-fee net trader asset using the exchange rate and applies a fee, but does not revalidate the post-fee exchange rate. The assertion `assert!(er > N::one())` only checks the pre-fee rate, allowing scenarios where the effective rate after fees drops below 1, violating the invariant that the asset must be worth more than PT.\n\nThe root cause is the failure to revalidate the exchange rate after fee deduction. The function computes `pre_fee_net_trader_asset`, subtracts the fee to get `net_trader_asset`, but never checks whether the resulting value maintains the required valuation relationship.\n\nAn attacker could exploit this by executing trades where the fee causes the effective exchange rate to drop below 1, effectively receiving more value than they should, especially in edge cases with high fees or volatile rates.\n\nThis could lead to incorrect valuations, loss of funds for the protocol, and potential manipulation of the trading mechanism, undermining the economic model.\n",
+            "severity": "high",
+            "location": [
+                "tcurve::trade#"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Improper Reward Distribution",
+            "description": "The LpFarm::increase_share_indexes and MarketTwo::update_emissions_from_position_state functions use the total lp_supply to calculate share index increases, even though rewards should only be distributed based on active LP positions. This causes rewards to be diluted across all LP tokens rather than concentrated on those actively providing liquidity. The root cause is the use of the total supply instead of the active position supply in reward calculations. An attacker could exploit this by maintaining inactive positions to claim undeserved rewards. The impact is unfair reward distribution and reduced incentives for active liquidity provision.\n",
+            "severity": "medium",
+            "location": [
+                "LpFarm.increase_share_indexes#lp_supply",
+                "MarketTwo.update_emissions_from_position_state#lp_supply"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Inconsistent Handling of Interest Rate Adjustments",
+            "description": "The withdraw_yt and merge instructions do not check whether the vault is in emergency mode before adjusting sy_for_pt amounts. While update_vault_yield prevents changes during emergency mode, these functions bypass that protection. This allows an attacker to withdraw more SY tokens than they are entitled to when the exchange rate decreases. The root cause is the missing emergency mode check in critical withdrawal paths. An attacker could exploit this by triggering withdrawals during negative interest rate scenarios. The impact includes unauthorized withdrawal of SY tokens and potential protocol insolvency.\n",
+            "severity": "medium",
+            "location": [
+                "withdraw_yt#emergency mode",
+                "merge#emergency mode"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Improper Authorization Login in Farming Instructions",
+            "description": "The add_farm and send_farm_tokens instructions lack proper access control, allowing any user to invoke them. This could lead to unauthorized modification of farm emissions or bloating of the emissions array. Additionally, the token_farm account in send_farm_tokens is incorrectly authorized by market.token_sy_escrow instead of market, which would cause CPI reverts. The root cause is missing authority checks and incorrect account configuration. An attacker could exploit this to spam the system or disrupt farm operations. The impact includes unauthorized state changes and potential denial of service.\n",
+            "severity": "medium",
+            "location": [
+                "add_farm#authority",
+                "send_farm_tokens#authority"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Faulty Reallocation of Market Size",
+            "description": "The AddMarketEmission instruction uses market.cpi_accounts for reallocating the MarketTwo account instead of the cpi_accounts provided as input. This can result in incorrect reallocation size if the stored cpi_accounts are outdated, potentially leading to account size errors or failed transactions. The root cause is the use of stale state data instead of fresh input data for memory management. An attacker could exploit this by manipulating the stored cpi_accounts to cause allocation failures. The impact includes transaction failures and potential denial of service during market updates.\n",
+            "severity": "medium",
+            "location": [
+                "AddMarketEmission#realloc"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Missing Share Index Update",
+            "description": "The modify_market_setting instruction updates the farm emission rate (new_rate) without first calling increase_share_indexes to update the share indexes. This results in incorrect reward calculations because the transition between old and new emission rates is not properly accounted for. Users who participated before the rate change may lose accrued rewards. The root cause is the incorrect ordering of operations—rate update before index adjustment. An attacker could exploit this by timing rate changes to minimize reward payouts. The impact is unfair reward distribution and loss of user funds.\n",
+            "severity": "medium",
+            "location": [
+                "modify_market_setting#increase_share_indexes"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Unutilized Accumulated Funds",
+            "description": "The increase_lambo_fund function updates treasury_sy and treasury_emission fields in the vault, but these values are never accessed or utilized in any subsequent logic. This results in accumulated funds being effectively lost or wasted. The root cause is the lack of follow-up logic to withdraw or distribute these funds. An attacker could exploit this by forcing accumulation of funds that cannot be recovered. The impact is financial waste and reduced treasury efficiency.\n",
+            "severity": "medium",
+            "location": [
+                "increase_lambo_fund#treasury_sy",
+                "increase_lambo_fund#treasury_emission"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Incorrect Flooring Conversion",
+            "description": "The floor_u128 function in precise_number does not correctly apply the floor operation. Instead of rounding down to the nearest integer, it uses to_imprecise(), which truncates without proper flooring. For example, Number::from_ratio(19, 10) (i.e., 1.9) should floor to 1, but the current implementation may not behave correctly. The root cause is the incorrect implementation of the floor logic. An attacker could exploit this in contexts requiring precise arithmetic, leading to underpayments or incorrect state transitions. The impact includes mathematical inaccuracies and potential financial loss.\n",
+            "severity": "medium",
+            "location": [
+                "floor_u128#to_imprecise"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Inefficient Memory Reallocation in AddPrincipleAdmin",
+            "description": "The `AddPrincipleAdmin` instruction reallocates 64 bytes for each new admin, but a public key is only 32 bytes, resulting in 32 bytes of wasted space per addition. Additionally, when admins are removed via `RemovePrincipleAdmin`, the account size does not shrink, leading to persistent memory bloat.\n\nThe cause is the reallocation logic incorrectly assumes 64 bytes are needed per admin without accounting for the actual size of a `Pubkey`. Furthermore, there is no mechanism to downsize the account when admins are removed.\n\nWhile not directly exploitable for fund theft, an attacker could force repeated additions and removals of admins to inflate account size unnecessarily, increasing transaction costs and potentially contributing to denial of service through excessive compute usage.\n\nThis leads to inefficient use of memory, increased lamport costs for account storage, and degraded performance over time due to bloated accounts.\n",
+            "severity": "medium",
+            "location": [
+                "AddPrincipleAdmin#"
+            ]
+        }
+    ]
+}

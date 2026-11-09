@@ -1,0 +1,243 @@
+{
+    "path": "reports/neodyme_drift_protocol_v2.pdf",
+    "project_info": {
+        "url": "https://github.com/drift-labs/protocol-v2",
+        "commit_id": "b82831031a2c157bd5623f5891ee05dcadb29b37",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-02-01",
+        "project_path": "contracts/neodyme_drift_protocol_v2.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Flat keeper reward can be used to bankrupt an attacker-controlled user and steal quote",
+            "description": "This vulnerability allows an attacker to exploit the flat keeper reward mechanism to drain value from the protocol by manipulating margin logic. The issue arises because keepers receive a flat fee (e.g., $0.01) for cranking orders, which is deducted directly from the user's USDC balance without proper margin checks. The margin calculation accounts for only one fee deduction per order, but the fee can be triggered twice: once when triggering a `TriggerLimitOrder` and again when attempting to fill it, which results in cancellation due to a reduce-only restriction. By creating an attacker-controlled maker account with minimal funds and opening multiple reduce-only buy orders, the filler (another attacker-controlled account) can trigger and then cancel these orders, collecting the keeper fee twice. This drains the maker account below zero, resulting in bankruptcy, which can then be resolved via the insurance fund, effectively socializing the loss. The same exploit applies to perp orders. The impact is significant, potentially allowing attackers to extract up to ~$250k per day.\n",
+            "severity": "Critical",
+            "location": [
+                "margin.rs#158",
+                "orders.rs#4794",
+                "orders.rs#3490",
+                "orders.rs#4842",
+                "orders.rs#3487"
+            ],
+            "files": [
+                "programs/drift/src/math/margin.rs",
+                "programs/drift/src/math/orders.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Possible to open risk-increasing orders while violating initial margin requirement",
+            "description": "This vulnerability allows users to open risk-increasing orders while bypassing the initial margin requirement due to incorrect weighting of open orders in the margin calculation. The margin logic calculates collateral and liabilities by simulating the execution of all open orders at the oracle price, regardless of the actual (and potentially worse) limit price of the order. This means a user can place a large sell order at a price significantly below the oracle price, which the system evaluates as less risky than it actually is. For example, a user with 1 SOL can place a 5 SOL sell order at $93 when the oracle price is $100, making the system calculate a favorable asset-liability balance. Another account can then fill this order, gaining an arbitrage profit, while the first account ends up with a liability that violates the initial margin requirement. Although fill-time checks prevent immediate loss of funds, the user has effectively opened a high-risk position without meeting initial margin. A similar issue exists for perp orders where unrealized PNL is calculated using oracle prices only, enabling mispricing exploits. The root cause is the lack of consideration for actual order prices during margin evaluation.\n",
+            "severity": "Medium",
+            "location": [
+                "margin.rs#158",
+                "orders.rs#3907",
+                "orders.rs#486-494",
+                "orders.rs#3551",
+                "spot_market.rs#375-386",
+                "orders.rs#3260-3268",
+                "margin.rs#569",
+                "position.rs#102-108",
+                "margin.rs#477",
+                "orders.rs#2661"
+            ],
+            "files": [
+                "programs/drift/src/math/margin.rs",
+                "programs/drift/src/math/orders.rs",
+                "programs/drift/src/controller/orders.rs",
+                "programs/drift/src/state/spot_market.rs",
+                "programs/drift/src/math/position.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Circumventing Pausing of Withdraw and Deposit, as well as Similar Restrictions",
+            "description": "The protocol implements ExchangeStatus flags to pause withdrawals and deposits during security incidents, but these restrictions can be circumvented through flash loan instructions and external market fills. The root cause is the absence of checks for paused withdrawal and deposit states in these specific code paths. An attacker can exploit this by initiating a flash loan, swapping tokens, and sending a portion to another wallet, effectively withdrawing funds even when withdrawals are paused. Similarly, by manipulating external market spreads and filling orders, an attacker can extract funds. The impact is that critical pause functionality can be bypassed, undermining incident response mechanisms and potentially allowing fund loss during an active exploit.\n",
+            "severity": "Medium",
+            "location": [
+                "user.rs#L2365",
+                "user.rs#L2615",
+                "orders.rs#L4325"
+            ],
+            "files": [
+                "programs/drift/src/instructions/user.rs",
+                "programs/drift/src/controller/orders.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "External Users Can Block Admin From Adding New Serum Markets",
+            "description": "The handle_initialize_serum_fulfillment_config instruction uses solana_program::system_instruction::create_account directly to create a serum_open_orders PDA, which fails if the account already holds lamports. Since any user can send lamports to a PDA (even before it exists), an attacker can pre-emptively fund the PDA address for a target Serum market, making it impossible for the admin to initialize it. The cause is the direct use of create_account instead of a safer allocate-assign pattern. This allows an attacker to perform a denial-of-service attack on market creation, preventing the protocol from expanding. The impact is limited to operational disruption rather than direct fund loss.\n",
+            "severity": "Low",
+            "location": [
+                "admin.rs#L361",
+                "pda.rs#L24"
+            ],
+            "files": [
+                "programs/drift/src/instructions/admin.rs",
+                "programs/drift/src/controller/pda.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Whitelist Mint Check is Easily Circumvented",
+            "description": "The protocol has an optional feature to check if a user possesses a whitelist mint token when creating a subaccount, but the current implementation only validates that the user controls a token account with the correct mint, not that the account holds any actual tokens. The root cause is the lack of a balance check in the validate_whitelist_token function. An attacker can easily bypass this check by creating an empty token account for the whitelist mint. If this feature were enabled, it would provide a false sense of security. The impact is minimal since the feature is currently disabled, but it could lead to unauthorized access if enabled without fixing the check.\n",
+            "severity": "Low",
+            "location": [
+                "user.rs#L120-L127"
+            ],
+            "files": [
+                "programs/drift/src/instructions/user.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Surge Pricing for Subaccounts is Ineﬀective",
+            "description": "The protocol implements surge pricing to limit the creation of subaccounts when utilization is high, charging extra fees that are stored as excess lamports in the user account. However, users can reclaim these excess lamports via the reclaim_rent instruction after their user_stats account is older than 13 days. The flaw is that the age check is on the user_stats account, not the subaccount itself, allowing an attacker to create multiple user_stats accounts, wait 13 days, and then create unlimited subaccounts without paying surge fees. This undermines the surge pricing mechanism and allows for a low-cost denial-of-service on subaccount space. The impact is limited to resource exhaustion rather than direct financial loss.\n",
+            "severity": "Low",
+            "location": [
+                "user.rs#L162-L183",
+                "user.rs#L1938-L1947"
+            ],
+            "files": [
+                "programs/drift/src/instructions/user.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Possible to enter spot margin trading when it is disabled",
+            "description": "When checking whether a user can enter spot margin trading, the system values open bids at the oracle price rather than the actual order price. This allows a user to create mispriced orders that effectively transfer value to another account, bypassing the margin trading restriction. The root cause is the use of oracle price instead of actual execution price in the margin validation logic. An attacker can exploit this to engage in margin trading even when disabled, potentially increasing their leverage and risk exposure beyond intended limits. The impact is a violation of the margin trading flag, which could lead to increased protocol risk during volatile market conditions.\n",
+            "severity": "Low",
+            "location": [
+                "margin.rs#L708"
+            ],
+            "files": [
+                "programs/drift/src/math/margin.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Admin Can Pass Invalid Oracle Accounts",
+            "description": "Admin instructions such as handle_initialize_perp_market, handle_initialize_spot_market, handle_update_perp_market_oracle, and handle_update_spot_market_oracle accept oracle accounts without validating their ownership or correctness. The oracle account is read without owner checks, and in some cases, the oracle pubkey is taken directly from instruction data rather than the account context, allowing an arbitrary key to be stored. While this is limited to admin privileges, it could introduce edge cases or incorrect oracle data if misused. The impact is low since only the admin can trigger it, but it reduces system robustness and could lead to incorrect price feeds if exploited by a compromised admin.\n",
+            "severity": "Informational",
+            "location": [
+                "admin.rs#L2040"
+            ],
+            "files": [
+                "programs/drift/src/instructions/admin.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "An Attacker Can Prevent Deletion of All ‘0’ Subaccounts for All Users",
+            "description": "The vulnerability allows an attacker to prevent a user from deleting their 0th subaccount by setting them as a referrer, which permanently blocks deletion due to a validation rule. The root cause is that the condition for allowing a referrer is based on the current number of subaccounts (number_of_sub_accounts == 1), which can be repeatedly triggered by creating and deleting subaccounts. An attacker can exploit this by repeatedly creating and deleting a subaccount while specifying the victim as a referrer, thereby setting the is_referrer flag on the victim's UserStats account. Since this flag is never unset, the victim cannot delete their 0th subaccount, which prevents them from reclaiming rent. The impact is limited to user annoyance and inability to close accounts, as no funds are directly stolen, but it degrades user experience and increases cost for users wanting to exit the system.\n",
+            "severity": "Informational",
+            "location": [
+                "https://github.com/drift-labs/protocol-v2/blob/fab9760f4709a0acdd233e86911aa077f4bd3758/programs/drift/src/instructions/user.rs#L96-L118",
+                "https://github.com/drift-labs/protocol-v2/blob/fab9760f4709a0acdd233e86911aa077f4bd3758/programs/drift/src/validation/user.rs#L13-L17"
+            ],
+            "files": [
+                "programs/drift/src/instructions/user.rs",
+                "programs/drift/src/validation/user.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Truncating Casts",
+            "description": "The code performs truncating casts in three locations: one when casting an order index, and two during price conversions for Serum orders. These casts could lead to loss of precision or unexpected behavior if the values exceed the target type's range. The root cause is the use of unsafe casting operations instead of checked or verified casts. While these casts are not currently exploitable due to value constraints, they represent a latent risk—if future changes allow larger inputs, these casts could result in exploitable arithmetic errors. An attacker could potentially exploit such a scenario if the system later allows larger values, leading to miscalculations in order pricing or fulfillment. The impact is currently none, but the potential future impact could include incorrect trade execution or financial loss if combined with other changes.\n",
+            "severity": "Informational",
+            "location": [
+                "https://github.com/drift-labs/protocol-v2/blob/c5a1389d9514794346953e5a69cb24b43c816352/programs/drift/src/math/fulfillment.rs#L75",
+                "https://github.com/drift-labs/protocol-v2/blob/c5a1389d9514794346953e5a69cb24b43c816352/programs/drift/src/math/serum.rs#L34",
+                "https://github.com/drift-labs/protocol-v2/blob/c5a1389d9514794346953e5a69cb24b43c816352/programs/drift/src/math/serum.rs#L40"
+            ],
+            "files": [
+                "programs/drift/src/math/fulfillment.rs",
+                "programs/drift/src/math/serum.rs"
+            ]
+        }
+    ]
+}

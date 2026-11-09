@@ -1,0 +1,120 @@
+{
+    "project": "blocksec_burrow_margin_trade_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrow_margin_trade_v1.0-signed.pdf.json/contracts/contract/src/margin_pyth.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-670",
+        "CWE-691"
+    ],
+    "cwe_detected": [
+        "CWE-755",
+        "CWE-285",
+        "CWE-435",
+        "CWE-284",
+        "CWE-346",
+        "CWE-703"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect enumeration of tokens requiring price feeds",
+            "description": "The function `margin_involved_tokens()` is responsible for identifying which tokens need price feeds for margin operations. It includes `token_c_id` and `token_d_id`, but fails to include `token_p_id` when `token_c_id` equals `token_d_id`. Since `token_p_id` is required for slippage protection calculations, its omission can result in missing price data during critical operations. When the callback `callback_margin_execute_with_pyth()` is invoked, it may fail due to unavailable price feeds for `token_p_id`, causing the entire transaction to revert. This disrupts legitimate margin trading activities and can lead to denial of service for users attempting to open or modify positions.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract implements a margin trading system that interacts with the Pyth oracle for price data. Three potential CWE vulnerabilities were identified:\n\n1. CWE-284: Improper Access Control - The `callback_margin_execute_with_pyth` function is marked as `#[private]`, meaning it should only be callable by the contract itself after a cross-contract call. However, NEAR's `#[private]` annotation relies on `env::current_account_id()` to restrict access. If the function is invoked directly via a malicious promise or if the callback is forged, and the `env::predecessor_account_id()` is not properly validated against `env::current_account_id()`, an attacker could potentially manipulate the price data by calling this callback directly with arbitrary parameters. Although `assert!(env::promise_results_count() == ...)` provides some validation, there is no explicit check that the caller is the expected callback issuer.\n\n2. CWE-703: Improper Check or Handling of Exceptional Conditions - The function `callback_margin_execute_with_pyth` uses `env::panic_str` on failed promise results, which abruptly terminates execution. While this prevents invalid state updates, it does not gracefully handle cases where price feeds are temporarily unavailable. This could lead to denial-of-service scenarios where legitimate transactions fail permanently if one price feed is down, even if fallback prices exist. Additionally, the use of `.unwrap()` on `all_prices.prices.get_mut(&token_id)` could panic if the token ID was not properly initialized, leading to unexpected failures.\n\n3. CWE-435: Improper Interaction Between Multiple Correctly-Behaving Entities - The function `internal_margin_execute_with_pyth` batches multiple price-fetching promises and combines their results. However, if some promises succeed and others fail, the entire callback may panic due to the all-or-nothing handling in `callback_margin_execute_with_pyth`. This creates a race or consistency issue where the system's behavior depends on the interaction between multiple external oracle calls, and partial success is not handled. This could allow an attacker to exploit timing or availability differences across oracle feeds to manipulate execution flow.\n",
+            "findings": [
+                {
+                    "title": "Missing Caller Validation in Callback Function",
+                    "description": "The `callback_margin_execute_with_pyth` function lacks explicit validation that the caller is the contract itself (via `env::current_account_id()`), relying solely on `#[private]` and promise result checks. This could allow a malicious actor to invoke the callback directly with forged price data if the execution context is manipulated.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Inadequate Error Handling for Oracle Price Fetching",
+                    "description": "The contract uses `env::panic_str` and `.unwrap()` in `callback_margin_execute_with_pyth` when processing oracle results, which can lead to abrupt transaction failures and potential denial-of-service. There is no fallback mechanism or retry logic for transient oracle failures, even when default prices are available.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "All-or-Nothing Oracle Price Aggregation",
+                    "description": "The interaction between multiple oracle price promises assumes all must succeed. If one fails, the entire operation reverts, which may be exploitable by attackers targeting specific price feeds. This creates an improper interaction between otherwise correct components (individual price fetches) leading to systemic fragility.",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract implements a margin trading system that relies on Pyth oracle prices for executing margin actions. Three potential CWE vulnerabilities were identified:\n\n1. CWE-346 (Origin Validation Error): The `callback_margin_execute_with_pyth` function assumes that the promise results come from trusted sources (Pyth oracle or cross-contract calls), but it does not validate that the results are from the expected origin. An attacker could potentially manipulate the promise chain or spoof results if the external calls are not strictly validated by origin.\n\n2. CWE-285 (Improper Authorization): Although the `callback_margin_execute_with_pyth` is marked as `#[private]`, the function relies on the `account_id` passed from the caller in the callback. Since callbacks can be invoked by anyone after the promise resolution, there is a risk of reentrancy or account impersonation if the `account_id` is not re-validated against the original requestor. The function trusts the `account_id` without confirming it matches the original request.\n\n3. CWE-755 (Improper Handling of Exceptional Conditions): In the promise resolution loop, if any `env::promise_result` fails, the contract panics using `env::panic_str`. While this prevents invalid state updates, it does so without graceful error handling or logging, potentially leading to denial of service or loss of funds if a single price feed fails. This hard panic does not allow for partial execution or fallback mechanisms, which could be exploitable in volatile network conditions.\n\nAdditionally, the use of `expect` and `unwrap` in multiple places (e.g., `all_prices.prices.get_mut`, `serde_json::from_slice`, `AccountId::try_from`) increases the risk of runtime panics under unexpected inputs, contributing to CWE-755.\n",
+            "findings": [
+                {
+                    "title": "Origin Validation Missing in Oracle Callback",
+                    "description": "The function `callback_margin_execute_with_pyth` processes promise results based on flags and indexes but does not validate that the results originate from the expected Pyth oracle or authorized cross-contract calls. This allows potential manipulation if an attacker can influence the promise resolution order or inject fake results.",
+                    "category": "CWE-346",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Authorization in Callback Function",
+                    "description": "The `callback_margin_execute_with_pyth` function accepts an `account_id` parameter from the callback without re-validating whether the caller is authorized to act on that account. Although the function is private, NEAR callbacks can be triggered by any contract, and trusting the passed `account_id` without origin check could allow account impersonation.",
+                    "category": "CWE-285",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Improper Handling of Exceptional Conditions in Price Resolution",
+                    "description": "The contract uses `env::panic_str` and `expect`/`unwrap` extensively when processing oracle price results. A failed price fetch or deserialization error causes the entire transaction to panic, potentially leading to denial of service. No fallback or partial execution logic is implemented, which could be exploited during network congestion or oracle outages.",
+                    "category": "CWE-755",
+                    "severity": "medium",
+                    "confidence": 0.98
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-269",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-393",
+            "CWE-1038",
+            "CWE-188",
+            "CWE-1270",
+            "CWE-436",
+            "CWE-923",
+            "CWE-1267",
+            "CWE-439",
+            "CWE-228",
+            "CWE-397",
+            "CWE-282",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-754",
+            "CWE-755"
+        ]
+    ]
+}

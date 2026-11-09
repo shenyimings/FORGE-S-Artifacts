@@ -1,0 +1,184 @@
+{
+    "path": "reports/Hacken_Polymesh.md",
+    "project_info": {
+        "url": "https://github.com/PolymeshAssociation/polymesh",
+        "commit_id": "e5cc1de8208e6d3461b40b97ed5cf4338ad96010",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-08-19",
+        "project_path": "contracts/Hacken_Polymesh.md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Benchmarking Gaps in Contract Instantiation Weight Calculation",
+            "description": "1. **Description:** The weight calculation for several extrinsics in the contracts pallet does not account for the size of the `data` parameter passed during contract instantiation. This parameter can carry arbitrary data to the contract constructor but is not bounded in size.\n2. **Cause:** The benchmarking process used to estimate computational weight assumes empty `data` vectors, leading to inaccurate fee calculations that do not scale with actual resource usage.\n3. **Exploitation:** An attacker could submit transactions with extremely large `data` payloads, consuming significant node resources during processing without paying proportionally higher fees.\n4. **Impact:** This could result in a denial-of-service (DoS) condition, where network performance degrades due to resource exhaustion, potentially leading to delayed block production or node crashes.\n",
+            "severity": "medium",
+            "files": [
+                "pallets/contracts/src/lib.rs"
+            ],
+            "location": [
+                "contracts.instantiate_with_code_perms#463",
+                "contracts.instantiate_with_hash_perms",
+                "contracts.instantiate_with_code_as_primary_key",
+                "contracts.instantiate_with_hash_as_primary_key"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-789"
+                ]
+            },
+            "title": "Denial of Service Risk Due to Oversized PortfolioId Vectors",
+            "description": "1. **Description:** Several extrinsics in the settlement pallet accept unbounded `Vec<PortfolioId>` inputs without considering their length in weight calculations, leading to potential resource misuse.\n2. **Cause:** The weight functions for these extrinsics only account for other parameters (e.g., `legs` vector) and ignore the `PortfolioId` vector length, while no upper limit is enforced on input size.\n3. **Exploitation:** An attacker could craft transactions with very large `Vec<PortfolioId>` inputs, causing excessive memory and CPU usage during processing without incurring appropriate transaction fees.\n4. **Impact:** This could enable a denial-of-service attack, degrading node performance or halting block production temporarily due to resource overload.\n",
+            "severity": "medium",
+            "files": [
+                "pallets/settlement/src/lib.rs"
+            ],
+            "location": [
+                "settlement.affirm_with_receipts",
+                "settlement.add_and_affirm_instruction",
+                "settlement.affirm_instruction",
+                "settlement.withdraw_affirmation",
+                "settlement.affirm_with_receipts_with_count",
+                "settlement.affirm_instruction_with_count",
+                "settlement.withdraw_affirmation_with_count",
+                "settlement.add_and_affirm_with_mediators"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "Vulnerable and Unmaintained Dependencies",
+            "description": "1. **Description:** Multiple direct and indirect Rust dependencies used in the Polymesh node have known vulnerabilities or are unmaintained, posing potential security and stability risks.\n2. **Cause:** The project relies on outdated or deprecated crates such as `parity-util-mem`, `rustls`, `webpki`, `curve25519-dalek`, `ed25519-dalek`, and others that either contain security flaws or are no longer actively maintained.\n3. **Exploitation:** Attackers could exploit known vulnerabilities (e.g., infinite loop in `rustls::ConnectionCommon::complete_io`, DoS in `webpki`, timing side-channels in `curve25519-dalek`) or leverage unmaintained dependencies where fixes are not forthcoming.\n4. **Impact:** Depending on the exploited crate, consequences range from denial of service and degraded performance to potential cryptographic weaknesses and long-term maintainability issues.\n",
+            "severity": "medium",
+            "files": [
+                "Cargo.toml"
+            ],
+            "location": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Insecure Arithmetic Practices Affecting Weight Calculations",
+            "description": "1. **Description:** Unsafe arithmetic operations are used in weight calculation routines, particularly in the utility and assets pallets, which may lead to incorrect fee estimations.\n2. **Cause:** The use of raw addition (`+`) without overflow checks in weight summations (e.g., in `batch`, `batch_all`, and `create_asset_with_custom_type`) can result in integer overflow, especially when combining large weights.\n3. **Exploitation:** An attacker could construct transactions that trigger arithmetic overflow in weight calculations, leading to underpriced fees relative to actual resource consumption.\n4. **Impact:** This could enable a denial-of-service attack by allowing low-fee transactions to consume disproportionate system resources, though exploitation is considered difficult.\n",
+            "severity": "low",
+            "files": [
+                "pallets/utility/src/lib.rs",
+                "pallets/asset/src/lib.rs"
+            ],
+            "location": [
+                "utility.batch",
+                "utility.batch_all",
+                "assets.create_asset_with_custom_type"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Weight Calculation Neglect of Portfolio Name Length",
+            "description": "1. **Description:** The weight calculation for portfolio creation does not consider the length of the `PortfolioName`, despite its variable storage cost.\n2. **Cause:** The weight annotation only includes parameters from asset creation and custom type registration, omitting `PortfolioName.len()` even though longer names consume more storage.\n3. **Exploitation:** Users could create portfolios with maximum-length names (up to 2048 characters) while paying the same fee as those with short names, leading to disproportionate resource usage.\n4. **Impact:** This results in inefficient and unfair fee distribution, potentially enabling minor abuse and long-term storage bloat, though the impact is limited due to the fixed upper bound.\n",
+            "severity": "low",
+            "files": [
+                "pallets/portfolio/src/lib.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Ticker Linking Mechanism Deficiency",
+            "description": "1. **Description:** The `link_ticker_to_asset_id` extrinsic fails to validate whether an asset is already linked to a ticker, allowing multiple or conflicting mappings.\n2. **Cause:** The function does not unlink or update existing ticker-asset associations before creating a new one, leaving stale entries in storage.\n3. **Exploitation:** An attacker or misconfigured call could link a new ticker to an already-linked asset, preventing the original ticker from being reused or transferred.\n4. **Impact:** This leads to frozen tickers, storage inconsistencies, and potential manipulation of ticker availability, undermining the integrity of asset identification.\n",
+            "severity": "low",
+            "files": [
+                "pallets/asset/src/lib.rs"
+            ],
+            "location": [
+                "asset.link_ticker_to_asset_id"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ]
+            },
+            "title": "Insufficiencies in Admin Removal Mechanisms",
+            "description": "1. **Description:** The multisig pallet allows adding an admin but lacks a direct mechanism for signers to remove the admin without assigning a replacement or relying on the admin to self-remove.\n2. **Cause:** The removal logic requires either reassignment or execution by the admin account itself via `remove_admin_via_admin`, leaving no path for forced removal by signers.\n3. **Exploitation:** If the admin account becomes compromised or behaves maliciously, signers cannot revoke its privileges without cooperation.\n4. **Impact:** This creates a risk of excessive centralization and reduced resilience, potentially leading to governance deadlock or abuse of admin powers.\n",
+            "severity": "low",
+            "files": [
+                "pallets/multisig/src/lib.rs"
+            ],
+            "location": [
+                "multisig.remove_admin_via_admin"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Inconsistent Proposal Handling When Changing Confirmation Requirements",
+            "description": "1. **Description:** When the required number of signatures in a multisig changes, existing proposals are not re-evaluated against the new threshold, leading to delayed execution or rejection.\n2. **Cause:** The logic in `change_sigs_required` and `change_sigs_required_via_admin` does not trigger revalidation of pending proposals upon threshold updates.\n3. **Exploitation:** While not directly exploitable for fund theft, this can be abused to stall proposal resolution, especially if thresholds are adjusted strategically.\n4. **Impact:** Proposals that should be executable or rejectable under the new rules remain stuck until additional votes are cast, reducing system reliability and responsiveness.\n",
+            "severity": "low",
+            "files": [
+                "pallets/multisig/src/lib.rs"
+            ],
+            "location": [
+                "multisig.change_sigs_required",
+                "multisig.change_sigs_required_via_admin"
+            ]
+        }
+    ]
+}

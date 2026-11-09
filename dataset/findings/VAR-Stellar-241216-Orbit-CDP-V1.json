@@ -1,0 +1,263 @@
+{
+    "path": "reports/VAR-Stellar-241216-Orbit-CDP-V1.pdf",
+    "project_info": {
+        "url": "https://github.com/orbit-cdp/orbit-contracts",
+        "commit_id": "311f35f",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-12-20",
+        "project_path": "contracts/VAR-Stellar-241216-Orbit-CDP-V1.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ]
+            },
+            "title": "Centralization Risk",
+            "description": "The OrbitCDP smart contracts implement an administrator role with elevated privileges, including the ability to upgrade contracts, control interest rates, add new stablecoins, and change oracles. This centralized control creates a single point of failure. The root cause is the reliance on a single administrative account without decentralized safeguards. An attacker who compromises the admin's private key could exploit this to upgrade contracts maliciously, mint arbitrary stablecoins, and disrupt the entire ecosystem. The impact includes total loss of protocol integrity, potential financial loss for users, and systemic instability across OrbitCDP's services.\n",
+            "severity": "medium",
+            "files": [
+                "admin/src/contract.rs"
+            ],
+            "location": [
+                "OrbitCDP.Admin#upgrade",
+                "OrbitCDP.Admin#set_interest_rate",
+                "OrbitCDP.Admin#add_stablecoin",
+                "OrbitCDP.Admin#change_oracle"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Pegkeeper doesn\u2019t share profits with protocol",
+            "description": "The protocol documentation states that profits from liquidated debt positions should be shared between the protocol and the liquidator, but the implementation sends all profits solely to the fee taker. The root cause is a missing logic step in the fl_receive function that omits the protocol's share. An attacker is not required to exploit this, as any user calling the function benefits fully from the liquidation profit. The impact is reduced revenue for the protocol, undermining its economic model and long-term sustainability, even though funds are not lost outright.\n",
+            "severity": "medium",
+            "files": [
+                "pegkeeper/src/contract.rs"
+            ],
+            "location": [
+                "Pegkeeper.fl_receive#9"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "Lack of Blend pool address validation allows users to take arbitrary flash-loans",
+            "description": "The keep_peg function in the Treasury contract does not validate the blend_pool address provided by the caller. The root cause is missing input validation, allowing a malicious user to pass a self-controlled contract address that mimics the Blend pool interface. This enables the user to receive a flash loan and not repay it through the expected path, effectively obtaining a nearly free flash loan. The impact includes abuse of protocol liquidity for arbitrary purposes, such as price manipulation in external markets, and potential systemic risk due to uncontrolled capital availability.\n",
+            "severity": "medium",
+            "files": [
+                "treasury/src/contract.rs"
+            ],
+            "location": [
+                "Treasury.keep_peg#"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Pegkeeper can end with an open debt position",
+            "description": "The fl_receive function in the Pegkeeper contract does not enforce full repayment of debt after a liquidation, allowing the Pegkeeper to retain an open debt position. The root cause is insufficient validation of the liquidation request parameters (liq_amount, lot_amount), which are user-controlled and not checked against the actual debt and collateral balance. A malicious or erroneous caller can trigger partial liquidation, leaving the Pegkeeper with residual debt. While no immediate asset loss occurs, the impact includes degraded protocol health, potential future insolvency of the Pegkeeper, and reduced profitability for liquidators.\n",
+            "severity": "low",
+            "files": [
+                "pegkeeper/src/contract.rs",
+                "pegkeeper/src/helper.rs"
+            ],
+            "location": [
+                "Pegkeeper.fl_receive#",
+                "Pegkeeper.helper::liquidate#1-18"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "Admin transfer mistakes are irreversible",
+            "description": "The set_admin function transfers administrative rights immediately without a two-step acceptance mechanism. The root cause is the lack of a confirmation step, making the transfer irreversible if the wrong address is specified. An attacker is not required to exploit this, but a simple user error by the current admin can result in permanent loss of control. The impact is complete loss of administrative functionality, including the inability to perform critical upgrades or configuration changes, posing a significant operational risk.\n",
+            "severity": "low",
+            "files": [
+                "admin/src/contract.rs"
+            ],
+            "location": [
+                "Admin.set_admin#"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Sanity checks when adding a stablecoin",
+            "description": "The new_stablecoin function lacks validation for duplicate tokens and legitimate blend_pool addresses. The root cause is missing checks that could prevent overwriting existing configurations or linking to fake pools. A malicious admin or compromised admin key could exploit this to register a malicious stablecoin or redirect funds to a rogue pool. The impact includes corruption of the stablecoin registry, potential loss of funds, and integration with non-standard or malicious contracts, undermining trust in the protocol.\n",
+            "severity": "informational",
+            "files": [
+                "admin/src/contract.rs"
+            ],
+            "location": [
+                "Admin.new_stablecoin#"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "OUSD token pegged to USDC instead of USD",
+            "description": "The bridge-oracle contract configures OUSD to be pegged to USDC rather than directly to USD, which may mislead users about its valuation. The root cause is the use of USDC as the conversion target in the lastprice function. While not a direct security vulnerability, this creates a usability issue where users may assume price stability against USD, but are actually exposed to USDC's solvency and market risks. The impact is potential loss of user trust and financial discrepancies if USDC depegs, even slightly, from USD.\n",
+            "severity": "informational",
+            "files": [
+                "bridge-oracle/src/contract.rs"
+            ],
+            "location": [
+                "BridgeOracle.lastprice#"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "PegKeeper function name call is not validated",
+            "description": "The keep_peg function in the Treasury contract accepts a function name (name) parameter that is passed directly to invoke_contract without validation. The root cause is the absence of a whitelist or check on the function name. Although currently only fl_receive is available, future extensions of the PegKeeper could expose sensitive functions, allowing unauthorized execution. The impact is a potential future security risk where arbitrary functions in PegKeeper could be called, leading to unintended behavior or fund loss if not addressed.\n",
+            "severity": "informational",
+            "files": [
+                "treasury/src/contract.rs"
+            ],
+            "location": [
+                "Treasury.keep_peg#7"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Missing slippage protection can make liquidator walkout without profit",
+            "description": "The fl_receive function does not enforce a minimum profit threshold for liquidators. The root cause is the lack of a slippage check or user-defined minimum profit requirement. A liquidator may execute a transaction where the profit is negligible or consumed by gas costs due to price movement during the swap. The impact is economic inefficiency and potential loss for liquidators, discouraging participation and reducing protocol robustness in maintaining healthy collateral ratios.\n",
+            "severity": "informational",
+            "files": [
+                "pegkeeper/src/contract.rs"
+            ],
+            "location": [
+                "Pegkeeper.fl_receive#"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-1325"
+                ]
+            },
+            "title": "Unbounded data is saved into instance storage",
+            "description": "The set_blend_pool and set_bridge_asset functions store unbounded data in instance storage, which is inefficient and costly. The root cause is the use of instance storage for dynamic, growing datasets. As more assets are added, the storage load increases for every contract invocation, degrading performance and increasing transaction costs. The impact includes scalability issues, higher gas fees for users, and potential future denial-of-service due to excessive storage bloat.\n",
+            "severity": "informational",
+            "files": [
+                "treasury/src/contract.rs",
+                "bridge-oracle/src/contract.rs"
+            ],
+            "location": [
+                "Treasury.set_blend_pool#",
+                "BridgeOracle.set_bridge_asset#"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Maintainability issues",
+            "description": "The codebase exhibits several maintainability problems, including use of literals instead of constants, variable shadowing, incorrect comments, use of deprecated interfaces, confusing variable names, and unchecked return values. The root cause is inconsistent coding practices and lack of code review standards. While not directly exploitable, these issues increase the risk of future bugs during development or upgrades. The impact is reduced code clarity, higher likelihood of human error, and increased difficulty in auditing or extending the codebase.\n",
+            "severity": "informational",
+            "files": [
+                "admin/src/contract.rs",
+                "pegkeeper/src/contract.rs",
+                "pegkeeper/src/helper.rs",
+                "treasury/src/contract.rs"
+            ],
+            "location": [
+                "Admin.contract.rs",
+                "Pegkeeper.contract.rs",
+                "Pegkeeper.helper.rs",
+                "Treasury.contract.rs",
+                "Pegkeeper.helper::swap"
+            ]
+        }
+    ]
+}

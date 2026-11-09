@@ -1,0 +1,159 @@
+{
+    "path": "reports/blocksec_ref_finance_exchange_v2.0_signed.pdf",
+    "project_info": {
+        "url": "https://github.com/ref-finance/ref-contracts/tree/main/ref-exchange",
+        "commit_id": "19e98ec7e70b72d0a2bb1281eb8cd171cebcc931",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-11-20",
+        "project_path": "contracts/blocksec_ref_finance_exchange_v2.0_signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ]
+            },
+            "title": "Improper Account Unregistration",
+            "description": "The function `storage_unregister()` allows users to unregister their accounts and reclaim their NEAR deposits, but it fails to verify whether the user's `legacy_tokens` mapping is empty before proceeding with unregistration. This flaw arises because the function does not include a validation check on associated token balances stored in legacy data structures. An attacker or regular user could exploit this by unregistering their account while still holding recorded legacy tokens, resulting in irreversible loss of those tokens. The impact is loss of user funds that remain recorded in the contract but become unrecoverable after account removal.\n",
+            "severity": "medium",
+            "files": [
+                "ref-exchange/src/storage_impl.rs"
+            ],
+            "location": [
+                "storage_unregister#Listing 2.1"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Unrestricted Referral Account",
+            "description": "The protocol allows users to specify a referral account during swap operations to earn referral rewards, but it does not enforce that the referral account must be different from the sender's own account. This lack of access control or input validation enables users to self-refer by inputting their own address as the referral, thereby collecting the referral fee themselves. An attacker can exploit this by repeatedly conducting swaps with self-referral to extract additional fees contrary to the intended incentive model. The impact is economic loss to the protocol due to misallocated referral rewards and potential abuse of the fee distribution mechanism.\n",
+            "severity": "low",
+            "files": [
+                "ref-exchange/src/token_receiver.rs"
+            ],
+            "location": [
+                "ft_on_transfer#Listing 2.2"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect Admin Fees Calculation in Simple Pool",
+            "description": "In the Simple Pool implementation, the calculation for minting shares to the admin as part of admin fees is mathematically incorrect. The current formula results in fewer shares being minted than required, leading to admin fees that are consistently lower than the configured rate. This stems from an erroneous derivation of the minted share amount based on the change in geometric mean (k-value) of the pool reserves. An attacker cannot directly exploit this, but the protocol systematically under-collects admin fees, which impacts revenue. The impact is financial loss to the protocol over time due to incorrect fee accounting and distribution.\n",
+            "severity": "medium",
+            "files": [
+                "ref-exchange/src/simple_pool.rs"
+            ],
+            "location": [
+                "SimplePool.mint_admin_shares#Listing 2.3"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-252"
+                ]
+            },
+            "title": "Lack of Check on Guardians’ Removal",
+            "description": "The `remove_guardians()` function allows the owner to remove guardian accounts but does not validate whether the specified guardians actually exist in the current guardian list. The function silently proceeds even if non-existent accounts are provided, which may mislead the owner into believing certain accounts were removed when they were never present. This issue arises from missing return value checks on the `.remove()` operation on the guardians set. While not directly exploitable by external attackers, it can lead to configuration errors and false assumptions about system state, potentially weakening governance security.\n",
+            "severity": "n/a",
+            "files": [
+                "ref-exchange/src/owner.rs"
+            ],
+            "location": [
+                "Owner.remove_guardians#65-70"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Improper Check on the Admin Fees",
+            "description": "The `modify_admin_fee()` function allows the owner to set the exchange and referral fees, but permits their sum to reach up to FEE_DIVISOR (100%). This means the entire fee collected from users can be allocated to the admin, leaving nothing for liquidity providers. The root cause is insufficient upper-bound validation on the combined fee percentage. An attacker with ownership privileges could set excessive fees, discouraging liquidity provision and harming protocol sustainability. The impact is economic imbalance and potential loss of LP participation due to unfair fee distribution.\n",
+            "severity": "n/a",
+            "files": [
+                "ref-exchange/src/admin_fee.rs"
+            ],
+            "location": [
+                "Owner.modify_admin_fee#138-144"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Lack of Check in retrieve_unmanaged_token()",
+            "description": "The `retrieve_unmanaged_token()` function enables the owner to withdraw accidentally sent tokens from the contract, but it lacks any validation on the amount being withdrawn. There is no check to ensure that only truly \"unmanaged\" tokens (i.e., those not used in pools or owed to users) are transferred out. This creates a risk that the owner could withdraw user funds or pool assets under the guise of recovery. The absence of safeguards or amount limits means malicious or compromised owners could exploit this to drain funds. The impact is potential loss of user and protocol assets due to insufficient access control and validation.\n",
+            "severity": "n/a",
+            "files": [
+                "ref-exchange/src/owner.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Lack of Check on the Gas Used by migrate()",
+            "description": "The `migrate()` function does not verify that sufficient gas is attached to the transaction to complete execution. This omission could lead to transaction failure partway through migration, especially if the operation involves large state changes. The root cause is the lack of a pre-execution gas check against a known minimum threshold. While not directly exploitable for financial gain, an attacker could trigger the function with minimal gas, causing partial state updates or DoS-like conditions. The impact is potential disruption of upgrade processes and wasted user resources.\n",
+            "severity": "n/a",
+            "files": [
+                "ref-exchange/src/owner.rs"
+            ],
+            "location": []
+        }
+    ]
+}

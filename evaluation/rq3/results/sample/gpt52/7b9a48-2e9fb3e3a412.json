@@ -1,0 +1,176 @@
+{
+    "project": "blocksec_ref_exchange_v4.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_exchange_v4.0_signed.pdf.json/ref-exchange/src/account_deposit.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3,
+        "recall": 1.0,
+        "f1": 0.4615384615384615
+    },
+    "cwe_ground_truth": [
+        "CWE-666",
+        "CWE-664",
+        "CWE-826"
+    ],
+    "cwe_detected": [
+        "CWE-669",
+        "CWE-664",
+        "CWE-672",
+        "CWE-682",
+        "CWE-435",
+        "CWE-666",
+        "CWE-703",
+        "CWE-400",
+        "CWE-826",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Improper Account Unregistration",
+            "description": "1. **Description:** The contract allows for account unregistration, but does not properly handle or validate the state of the account before unregistering, potentially leading to inconsistent storage or loss of user funds. Specifically, the function `storage_unregister()` fails to check whether the `legacy_tokens` field of the account is empty before proceeding with unregistration.\n2. **Cause:** The function only checks if the `tokens` map is empty (via `account_deposit.tokens.is_empty()`), but does not validate the `legacy_tokens` field, which could still hold token balances.\n3. **Exploitation:** A malicious or misinformed user could unregister their account while still having tokens recorded in `legacy_tokens`, leading to loss of those tokens. An attacker could also exploit this to force the system into an invalid state.\n4. **Impact:** Users may permanently lose tokens tracked in the `legacy_tokens` field, resulting in financial loss or denial of service for affected accounts.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code implements an internal deposit ledger with token registration, storage accounting, and cross-contract FT transfers with a failure callback. Several security-relevant issues arise from (a) inconsistent enforcement of the whitelisted-token protection mechanism, (b) storage/resource lifetime handling across asynchronous calls, and (c) arithmetic/storage-cost calculations performed with unchecked math and approximate constants.\n\nMost notably, `internal_deposit` allows deposits of non-whitelisted tokens as long as the user pre-registers them (registration is permissionless and not whitelist-gated), undermining the intended whitelist defense. Additionally, the withdraw flow can permanently fail to refund the user on transfer failure due to storage becoming insufficient after `unregister`, sending funds to the owner “lostfound” path. Finally, multiple balance and storage calculations are done with unchecked arithmetic and approximate storage constants, which can cause incorrect balances or undercharged storage (contract subsidization/DoS).\n",
+            "findings": [
+                {
+                    "title": "Whitelist bypass: users can deposit any token by pre-registering it",
+                    "description": "`internal_deposit` is documented to \"Fail if ... token isn't whitelisted\", but the actual check is:\n`self.whitelisted_tokens.contains(token_id) || account.get_balance(token_id).is_some()`.\n\nBecause `register_tokens` is permissionless and does not enforce whitelisting, any user can:\n1) call `register_tokens([arbitrary_token])` (paying storage),\n2) then transfer that arbitrary token into the contract (triggering `internal_deposit`),\nand the deposit will be accepted even though the token is not whitelisted.\n\nThis defeats the token whitelist protection mechanism and can expand the contract’s attack surface\n(e.g., weird/malicious FT behavior, unexpected assets held, accounting edge cases).\n",
+                    "category": "CWE-693",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Refund on failed withdraw can be blocked by storage changes (unregister/low storage), routing funds to owner",
+                    "description": "In `withdraw`, the contract subtracts the user’s internal balance and may `unregister` the token entry\n*before* making the external `ft_transfer` call. If `ft_transfer` fails, the callback attempts to\nrestore funds via `deposit_with_storage_check`. However, restoration can fail if the user no longer\nhas sufficient `near_amount` to cover the re-introduced storage (a situation made more likely if\nthe user used `unregister == Some(true)` and/or withdrew storage NEAR earlier).\n\nWhen restoration fails, the callback sends the tokens to `internal_lostfound` (owner) instead of\nreliably refunding the original user. This is an interaction bug between correct components\n(token unregistering + async FT transfer + storage checks) that can cause permanent, unexpected\nloss of user funds on transfer failure.\n",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Failure-path handling sends user funds to owner (lostfound) instead of guaranteeing refund/revert",
+                    "description": "In `exchange_callback_post_withdraw`, if the outgoing FT transfer fails and the user's account is\nmissing or does not have enough storage to re-credit the token balance, the code calls\n`internal_lostfound` which deposits the amount into the owner account (for whitelisted tokens).\n\nThis is a security-relevant exceptional-condition handling issue: a recoverable operational failure\n(cross-contract transfer failed) can result in an ownership change of assets (user -> owner) rather\nthan reverting the withdraw or ensuring the user can later reclaim funds.\n\nEven if this is intended as a \"lost funds\" sink, it is a dangerous default because adversaries can\nintentionally pick misbehaving tokens (or induce failures) to trigger this path and cause\nirreversible outcomes.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Owner lostfound deposits bypass account storage assertions; contract may subsidize storage",
+                    "description": "`internal_lostfound` loads (or creates) the owner's `Account` via `internal_unwrap_or_default_account`,\ncalls `lostfound.deposit(...)`, and then writes it to `self.accounts` with a direct `insert`\n(not via `internal_save_account`), explicitly bypassing `account.assert_storage_usage()`.\n\nIf the owner account’s `near_amount` does not cover the incremental storage for additional token\nentries/balances, the contract will still persist the data, effectively making the contract pay\nfor the owner’s storage. An attacker can try to drive this path by repeatedly causing withdraw\nfailures and refund failures (see related findings), resulting in storage growth paid by the contract.\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Unchecked arithmetic on balances can overflow/underflow leading to incorrect accounting",
+                    "description": "Several balance operations use `+`/`-` on `u128` without checked math:\n- `deposit_with_storage_check`: `new_balance = balance + amount`\n- `deposit`: `amount + x`, `amount + x` (existing)\n- `internal_register_account`: `account.near_amount += amount`\n- `internal_storage_withdraw`: `account.near_amount -= withdraw_amount`\n\nIf values approach `u128::MAX`, these operations can wrap in release builds (or panic depending on\ncompilation settings), producing incorrect balances and potentially breaking storage gating or\nwithdrawal logic. Even if hitting `u128::MAX` seems unlikely, this is a security-critical accounting\npath and should use `checked_add/checked_sub` with explicit failure behavior.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Storage usage calculation relies on approximate constants; may undercharge storage and break invariants",
+                    "description": "`Account::storage_usage` uses fixed byte constants for keys and values to estimate storage:\n`INIT_ACCOUNT_STORAGE + legacy_tokens.len() * (...) + tokens.len() * (...)` multiplied by\n`env::storage_byte_cost()`.\n\nHowever, NEAR collections like `UnorderedMap` have additional internal overhead (prefixes, hashing,\nserialization details, etc.) that can vary. Underestimation means `assert_storage_usage()` may pass\neven though actual on-chain storage increased more than accounted for, causing the contract to\nsubsidize storage or later fail unexpectedly when state grows.\n\nSince storage accounting gates registration/deposit safety, an incorrect calculation here can\npropagate into resource management and fund safety decisions.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "The main security risks in this code are around storage-accounting and the asynchronous withdraw+callback flow.\n\n1) `internal_lostfound` directly inserts the owner’s `Account` into `self.accounts` without calling `internal_save_account` (and therefore without `assert_storage_usage`). This allows state growth (new token entries) that is not backed by the owner’s `near_amount`, effectively making the contract subsidize storage and enabling unbounded storage growth if the code path can be triggered repeatedly.\n\n2) In `exchange_callback_post_withdraw`, when the outbound FT transfer fails, the contract attempts to refund the user by re-depositing the token. If that re-deposit fails the storage check (e.g., because the user withdrew their storage NEAR earlier and/or withdrew with `unregister=true` and is now underfunded for re-adding the token entry), the code routes the tokens to `owner_id` via `internal_lostfound`. This is an incorrect cross-sphere transfer: user funds end up under owner control due to a storage-accounting condition and the async failure path, rather than being reliably restored to the user.\n\n3) Because `internal_lostfound` bypasses storage invariant checks, it can put the owner’s account state into a phase where future operations that use `internal_save_account` (and thus `assert_storage_usage`) may start failing for the owner due to insufficient `near_amount` relative to the now-larger stored structure. This is a “wrong phase of lifetime” issue: the contract creates/updates a persisted resource without ensuring it is in a valid/maintainable state.\n",
+            "findings": [
+                {
+                    "title": "Lostfound path bypasses storage invariant checks, enabling contract-subsidized/unbounded state growth",
+                    "description": "`internal_lostfound` modifies the owner’s `Account` and persists it with `self.accounts.insert(&self.owner_id, ...)` instead of using `internal_save_account`, which enforces `account.assert_storage_usage()`.\n\nAs a result, the owner account can accumulate additional token keys/balances without having sufficient `near_amount` to cover the incremental storage usage. If an attacker can repeatedly trigger the `failed => internal_lostfound(...)` path (e.g., by inducing repeated withdraw transfer failures for a whitelisted token), the contract can be forced to grow state without corresponding storage deposits, leading to storage exhaustion / economic denial of service.\n",
+                    "category": "CWE-400",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Failed-withdraw callback can transfer user funds to owner due to storage underfunding (refund failure)",
+                    "description": "In `exchange_callback_post_withdraw`, if `ft_transfer` fails, the contract tries to restore the user’s internal balance via `deposit_with_storage_check`.\nIf that storage check fails (insufficient `near_amount` to re-create the token entry), the code sets `failed = true` and routes the amount to `internal_lostfound`, i.e., credits `owner_id` (for whitelisted tokens).\n\nThis means a user’s funds can end up under owner control, not because the user authorized a transfer to the owner, but because the async transfer failed and the user did not have enough prepaid storage to re-add/refund the token entry (which can happen after `unregister=true` and/or after prior storage withdrawals).\n",
+                    "category": "CWE-669",
+                    "severity": "high",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Owner account can be persisted in an invalid phase (state updates performed without required storage backing)",
+                    "description": "By writing the owner’s account via `self.accounts.insert` in `internal_lostfound` without checking storage coverage, the contract can create an owner `Account` state that does not satisfy the invariant enforced elsewhere (`storage_usage() <= near_amount`).\n\nLater, any owner operation that goes through `internal_save_account` may start failing due to `assert_storage_usage`, effectively bricking owner interactions or other flows that depend on updating/saving the owner account. This is operating on a persisted resource outside the intended lifecycle/validity phase (skipping required initialization/validation checks before making it durable).\n",
+                    "category": "CWE-666",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code is a NEAR smart contract module handling internal token balances and asynchronous withdrawals via `ft_transfer` followed by a callback (`exchange_callback_post_withdraw`). From the provided CWE candidates, network/SSL-related CWEs (CWE-605, CWE-593) are not applicable, and Rust/NEAR code here does not expose manual memory deallocation patterns indicative of CWE-415 (double free).\n\nHowever, there is a state-machine/resource-lifetime issue around “releasing” storage-backed registration state before the asynchronous withdrawal is finalized. The `withdraw` method can optionally `unregister` a token immediately (removing the token record and reducing required storage). Between the initial `withdraw` call and the later callback, the user can withdraw their freed storage deposit (NEAR) using `internal_storage_withdraw` (or an exposed wrapper elsewhere in the contract), reducing `near_amount`. If the external FT transfer fails, the callback attempts to re-credit the user by re-inserting the token record and balance via `deposit_with_storage_check`; this can fail due to insufficient `near_amount`, causing the refund to be diverted to `internal_lostfound` (owner) instead of restoring the user’s balance. This is effectively a “premature release” of a resource (storage collateral / registration state) still needed to safely complete the pending operation, and the contract then attempts to operate assuming the resource is still available in the failure path.\n\nThis maps to:\n- CWE-826: releasing a resource (token registration / storage backing) before the async operation’s lifetime completes.\n- CWE-672: the contract’s failure-path refund logic depends on a resource (sufficient storage deposit) that may have been released/withdrawn before the callback executes, leading to incorrect behavior (refund not restored to the original user).\n",
+            "findings": [
+                {
+                    "title": "Async withdraw allows premature release of storage-backed token registration, breaking refund on transfer failure",
+                    "description": "In `Contract::withdraw`, the contract subtracts the internal balance and may immediately `unregister` the token (`account.unregister(&token_id)`), which reduces the account’s storage requirement before the external `ft_transfer` promise resolves.\n\nBecause NEAR promises are asynchronous, the user can make additional calls before `exchange_callback_post_withdraw` executes (e.g., withdraw freed storage deposit via `internal_storage_withdraw` / its public wrapper). This can reduce `account.near_amount` below what is needed to re-insert the token entry if the transfer later fails.\n\nOn `PromiseResult::Failed`, the callback tries to refund by calling `deposit_with_storage_check(&token_id, amount.0)`. If the user withdrew storage in the meantime, this storage check can fail, and the code diverts the refund to `internal_lostfound` (owner) instead of restoring the user’s internal balance. This creates an unsafe lifecycle where storage/registration is released while still required to correctly handle the pending withdrawal’s failure case.\n",
+                    "category": "CWE-826",
+                    "severity": "high",
+                    "confidence": 0.82
+                },
+                {
+                    "title": "Refund logic operates assuming storage resource is still available after it may have been withdrawn",
+                    "description": "The failure path in `exchange_callback_post_withdraw` attempts to restore user state after an external transfer failure by reinserting the token record/balance. This restoration requires sufficient `near_amount` to cover storage (`deposit_with_storage_check`).\n\nHowever, after `withdraw` (especially with `unregister=true`) and before the callback, the user can reduce `near_amount` by withdrawing storage deposit. When the callback executes, the contract is effectively operating under an assumption that the storage backing is still present; if it is not, the refund cannot be applied to the user account and is redirected to `lostfound`.\n\nThis is an operation on a resource (storage backing for account state) after it may have been “released”/made unavailable, leading to incorrect and potentially value-losing behavior for users interacting with failing/malicious FT contracts.\n",
+                    "category": "CWE-672",
+                    "severity": "high",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-669",
+            "CWE-913",
+            "CWE-1229",
+            "CWE-400",
+            "CWE-665",
+            "CWE-410",
+            "CWE-668",
+            "CWE-580",
+            "CWE-221",
+            "CWE-1329",
+            "CWE-662",
+            "CWE-666",
+            "CWE-118",
+            "CWE-404",
+            "CWE-704",
+            "CWE-610",
+            "CWE-496",
+            "CWE-501",
+            "CWE-706",
+            "CWE-673",
+            "CWE-911",
+            "CWE-487",
+            "CWE-922",
+            "CWE-372",
+            "CWE-495"
+        ],
+        [
+            "CWE-826",
+            "CWE-605",
+            "CWE-593",
+            "CWE-415",
+            "CWE-672"
+        ]
+    ]
+}

@@ -1,0 +1,124 @@
+{
+    "project": "offside-labs-damm-v2-audit-oct-2025.pdf.json",
+    "files": [
+        "dataset/contracts/offside-labs-damm-v2-audit-oct-2025.pdf.json/programs/cp-amm/src/state/pool.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-436",
+        "CWE-435"
+    ],
+    "cwe_detected": [
+        "CWE-284",
+        "CWE-682",
+        "CWE-285",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Inconsistent max_fee_numerator Validation Between Pool Creation and Swaps",
+            "description": "1. **Description:** When creating a pool with version V0, the contract allows `max_fee_numerator` values above `MAX_FEE_NUMERATOR_V0` as long as they are below `MAX_FEE_NUMERATOR_V1`, but during swaps, the value is capped at the V0 limit.\n2. **Cause:** A mismatch in validation logic between pool creation and swap execution, where creation-time checks are less strict than runtime behavior.\n3. **Exploitation:** A malicious or misconfigured pool creator could set a high `max_fee_numerator` that passes creation checks but is silently capped during swaps, leading to unexpected behavior.\n4. **Impact:** Creates inconsistency between configuration and execution, potentially misleading integrators or users about the actual fee parameters in effect, undermining trust and predictability.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After analyzing the provided code, several potential security issues were identified based on the specified CWE categories.\n\nFirst, in the `claim_protocol_fee` and `claim_partner_fee` functions, there is no access control to verify that the caller is authorized (e.g., the protocol or partner). Any user could potentially call these functions and drain accumulated fees, which constitutes an Improper Access Control (CWE-284).\n\nSecond, in the `validate_authority_to_edit_reward` function, the logic allows either the pool creator (only for reward index 0) or an admin (via `assert_eq_admin`) to initialize or edit rewards. However, the `assert_eq_admin` function is used without clear enforcement of who qualifies as an admin. If this function is not properly implemented elsewhere, it could allow unauthorized actors to manipulate reward configurations, leading to another instance of Improper Access Control (CWE-284).\n\nThird, the `update_rate_after_funding` method in `RewardInfo` calculates a new reward rate based on funding amount and remaining time. It uses `safe_mul_shr_cast` and `safe_shl_div_cast`, but the rounding mode is set to `Down`. While this prevents overflow, incorrect rounding in reward calculations could lead to miscalculated incentives, potentially affecting fairness or economic security—this is an Incorrect Calculation (CWE-682) if the rounding behavior deviates from expected financial models.\n\nFourth, the `claim_ineligible_reward` function computes `ineligible_reward` using `safe_mul_shr_cast` on `cumulative_seconds_with_empty_liquidity_reward` and `reward_rate`. However, this reward is not tied to any recipient; it simply returns the value without transferring tokens. This may indicate a logic flaw where rewards are calculated but not properly distributed or accounted for, leading to potential loss or incorrect state, again falling under Incorrect Calculation (CWE-682).\n\nFinally, multiple functions such as `apply_swap_result`, `apply_add_liquidity`, and `apply_remove_liquidity` perform arithmetic operations using `safe_add` and `safe_sub`. While these are safe math wrappers, the code does not consistently check for external reentrancy or side effects during state updates. However, since this is a Solana program and reentrancy is less of a concern due to the runtime model, this is not flagged as a critical issue.\n",
+            "findings": [
+                {
+                    "title": "Missing Access Control in claim_protocol_fee and claim_partner_fee",
+                    "description": "The functions `claim_protocol_fee` and `claim_partner_fee` do not validate that the caller is authorized (e.g., protocol or partner). This allows any user to withdraw accumulated fees, leading to loss of funds.",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Insufficient Authorization Check in validate_authority_to_edit_reward",
+                    "description": "The function allows reward initialization by either the pool creator (for index 0) or any signer that passes `assert_eq_admin`. If `assert_eq_admin` is not strictly enforced, unauthorized users could manipulate reward parameters.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Potential Incorrect Calculation in update_rate_after_funding Due to Rounding",
+                    "description": "The `update_rate_after_funding` function uses `Rounding::Down` when recalculating reward rates. This may lead to underpayment or miscalculation of rewards over time, especially in high-precision scenarios.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Incorrect Handling of Ineligible Rewards in claim_ineligible_reward",
+                    "description": "The `claim_ineligible_reward` function calculates a reward amount but does not associate it with any withdrawal or transfer logic. This may result in incorrect accounting or loss of track of reward funds.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "After analyzing the provided code, several potential security issues were identified based on the given CWE list. The main concerns are related to improper authorization, incorrect user management, and potential integer underflow/overflow issues in arithmetic operations.\n\nFirst, the `validate_authority_to_edit_reward` function allows either the pool creator or an admin (via `assert_eq_admin`) to edit reward configurations. However, the `assert_eq_admin` function is used in multiple places without clear definition in the provided code, which could lead to improper authorization if the admin check is weak or bypassed. This constitutes CWE-285 (Improper Authorization).\n\nSecond, the `claim_protocol_fee` and `claim_partner_fee` functions allow fee claiming without explicit authorization checks. These functions are critical as they handle fund withdrawals, but there is no verification that the caller is authorized (e.g., protocol or partner address). This is a clear case of CWE-285.\n\nThird, arithmetic operations such as `safe_sub`, `safe_add`, and others are used, but in functions like `reduce_position` in `PoolMetrics`, wrapping operations (`wrapping_sub`) are used instead of safe math. This could lead to underflow if `total_position` is zero, resulting in a large unsigned value (CWE-191: Integer Underflow).\n\nAdditionally, the `get_max_amount_in` function uses `try_into().unwrap()` when converting from `U256` to `u64`. While there is a check for `U256::from(u64::MAX)`, the use of `unwrap()` is risky and could panic if assumptions fail, though this is less of a security issue and more of a robustness concern.\n\nNo other CWEs from the provided list were found to be directly applicable based on the code review.\n",
+            "findings": [
+                {
+                    "title": "Missing Authorization in Fee Claim Functions",
+                    "description": "The functions `claim_protocol_fee` and `claim_partner_fee` allow any caller to withdraw fees without verifying if the caller is the authorized entity (e.g., protocol or partner address). This could allow unauthorized users to drain accumulated fees.",
+                    "category": "CWE-285",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Improper Authorization in Reward Configuration",
+                    "description": "The function `validate_authority_to_edit_reward` allows the pool creator or an admin to edit reward settings, but relies on `assert_eq_admin` which is not defined in the provided code. If this check is not rigorously implemented, it could allow unauthorized actors to manipulate reward parameters.",
+                    "category": "CWE-285",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Integer Underflow in PoolMetrics::reduce_position",
+                    "description": "The `reduce_position` function uses `wrapping_sub(1)` on `total_position`. If `total_position` is 0, this will underflow to the maximum value of `u64`, potentially leading to incorrect metrics and possible logic issues in position tracking.",
+                    "category": "CWE-191",
+                    "severity": "medium",
+                    "confidence": 0.95
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-193",
+            "CWE-269",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-191",
+            "CWE-1270",
+            "CWE-190",
+            "CWE-923",
+            "CWE-1267",
+            "CWE-135",
+            "CWE-369",
+            "CWE-128",
+            "CWE-1339",
+            "CWE-282",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-1280",
+            "CWE-1335"
+        ]
+    ]
+}

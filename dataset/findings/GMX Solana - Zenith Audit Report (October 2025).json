@@ -1,0 +1,276 @@
+{
+    "path": "reports/zenith/GMX Solana - Zenith Audit Report (October 2025).pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/gmsol-labs/gmx-solana/"
+        ],
+        "commit_id": [
+            "bae0050e5fad88790c20b93fd9bd709413b95da8"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-09-23",
+        "project_path": "contracts/GMX Solana - Zenith Audit Report (October 2025).pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Unstake allows to bypass claim_enabled gate by using negligible unstake_amount",
+            "description": "The unstake_lp instruction allows users to mint GT rewards unconditionally during partial unstaking, even when global_state.claim_enabled is set to false. This occurs because the reward minting logic does not enforce the same claim_enabled gate as the dedicated claim_gt instruction. As a result, users can bypass the intended claim restriction by calling unstake_lp with a negligible unstake amount, effectively claiming rewards while remaining staked. This undermines the purpose of the claim_enabled flag, which is meant to globally pause reward claims. The impact includes potential manipulation of reward distribution timing and circumvention of protocol safety measures.\n",
+            "severity": "medium",
+            "location": [
+                "programs/liquidity-provider/src/lib.rs#L373-L417"
+            ],
+            "files": [
+                "gmx-solana/programs/liquidity-provider/src/lib.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ]
+            },
+            "title": "Full withdrawal in unstake_lp() can be blocked by donation attack",
+            "description": "The unstake_lp function attempts to close the vault token account when full_exit is true, but this operation will fail if the account holds a non-zero balance. An attacker can exploit this by sending a small (dust) amount of LP tokens to a user's vault account, thereby preventing the close_account instruction from succeeding. This effectively blocks the user from fully withdrawing their stake, resulting in a denial-of-service condition. The root cause is the lack of a pre-check or automatic sweep of residual tokens before account closure. The impact is that users may be unable to exit their positions completely, leading to fund lock-up.\n",
+            "severity": "medium",
+            "location": [
+                "/programs/liquidity-provider/src/lib.rs#L450-L491"
+            ],
+            "files": [
+                "gmx-solana/programs/liquidity-provider/src/lib.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "update_fees_state() does not persist update due to missing commit()",
+            "description": "The update_fees_state function is designed to manually update borrowing fee factors during non-trading hours, but it fails to persist these updates because it omits calls to market.commit() and virtual_inventories.commit(). As a result, any changes made during the function execution are lost, rendering the function ineffective. This creates a situation where the protocol cannot properly adjust fees in response to market conditions, potentially leading to incorrect fee calculations and economic imbalances. The root cause is the absence of state persistence mechanisms in the function. The impact is functional failure of a critical administrative feature.\n",
+            "severity": "medium",
+            "location": [
+                "/programs/store/src/instructions/exchange/update_fees.rs#L73-L102"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "APY gradient buckets can be retroactively modified altering accrued rewards",
+            "description": "The APY gradient used for reward calculation is read from global_state.apy_gradient at claim or unstake time, rather than being based on the values in effect during the staking period. Because the authority can update past APY buckets via update_apy_gradient_sparse or update_apy_gradient_range, these changes retroactively affect the rewards accrued by existing positions. This means users cannot rely on the APY at the time of staking, as future changes can alter their expected rewards. The root cause is the lack of a snapshot mechanism to lock in APY values over time. The impact is reduced predictability and fairness in reward distribution, potentially undermining user trust.\n",
+            "severity": "low",
+            "location": [
+                "programs/liquidity-provider/src/lib.rs#L110-L173"
+            ],
+            "files": [
+                "gmx-solana/programs/liquidity-provider/src/lib.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Permissionless liquidity provider initialization allows first caller to seize authority and parameters",
+            "description": "The initialize instruction in the liquidity provider program can be called by any signer, allowing an attacker to front-run or back-run the deployment transaction and set themselves as the authority. This enables them to arbitrarily configure critical parameters such as min_stake_value, initial_apy, and pricing_staleness_seconds. The root cause is the absence of access control requiring the deployer's signature (e.g., program keypair) to initialize the program. The impact includes potential governance takeover and malicious parameterization, forcing redeployment if exploited. While the likelihood is low, the consequences could be severe.\n",
+            "severity": "informational",
+            "location": [
+                "programs/liquidity-provider/src/lib.rs#L65-L89",
+                "programs/liquidity-provider/src/lib.rs#L764-L779"
+            ],
+            "files": [
+                "gmx-solana/programs/liquidity-provider/src/lib.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Typo in log message in get_market_token_value instruction",
+            "description": "A typo exists in a log message within the get_market_token_value instruction, where \"evluation was not performed\" is incorrectly written instead of \"evaluation was not performed\". While this does not affect functionality, it can cause confusion during debugging or monitoring, especially in automated log analysis systems. The root cause is a simple spelling error in a msg! macro. The impact is purely on observability and developer experience, with no security or financial consequences.\n",
+            "severity": "informational",
+            "location": [
+                "programs/store/src/instructions/market.rs#L956"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/instructions/market.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "PriceFeedPrice.is_market_open() does not correctly reflect market status",
+            "description": "The is_market_open() function does not accurately represent the full range of market states. It treats \"market open and trading disallowed\" (e.g., due to stale oracle data) as equivalent to \"market closed\", when in fact these are distinct states with different operational implications. This can lead to incorrect application of market-closed parameters and allow operations like liquidation when they should be restricted. The root cause is an oversimplified binary state model. The impact is potential misapplication of risk parameters and inconsistent behavior during oracle failures, though the client has acknowledged and accepted this design.\n",
+            "severity": "informational",
+            "location": [
+                "/programs/store/src/states/oracle/feed.rs#L152",
+                "/crates/utils/src/price/feed_price.rs#L114-L150"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/states/oracle/feed.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-115"
+                ]
+            },
+            "title": "Liquidity withdrawal will fail when the index token is delisted",
+            "description": "When an index token is delisted, its price is reset to zero according to Chainlink, but the protocol's validation logic rejects zero prices in both PriceMap::set() and Price::is_valid(). This causes liquidity withdrawal to fail for users holding positions in delisted tokens. The root cause is the incompatibility between the protocol's non-zero price assumption and the oracle's delisting behavior. The impact is that users may be unable to withdraw liquidity after delisting, requiring manual intervention such as switching to a fixed-price feed. The issue is acknowledged but not fixed at the program level.\n",
+            "severity": "informational",
+            "location": [
+                "/programs/store/src/states/oracle/price_map.rs#L52",
+                "/crates/model/src/price.rs#L93-L100"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/states/oracle/price_map.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "close_empty_position() fails to handle the case position.created_at == 0",
+            "description": "The close_empty_position function checks if a position is old enough to be closed using position.created_at and MinPositionAgeForManualClose. However, existing positions have position.created_at set to zero, which causes them to immediately satisfy the age condition and be closable by the owner. This bypasses the intended timelock mechanism designed to protect keepers from spam attacks. The root cause is the lack of special handling for legacy positions with zero creation timestamp. The impact is limited, as only a small number of existing positions are affected, and the client has acknowledged the risk as acceptable.\n",
+            "severity": "informational",
+            "location": [
+                "programs/store/src/instructions/exchange/order.rs#L1146-L1168"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/instructions/exchange/order.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-392"
+                ]
+            },
+            "title": "Silent saturation of GT reward amount",
+            "description": "The calculate_gt_reward_amount function silently saturates reward values at u64::MAX without logging or warning when the calculated amount exceeds this limit. This means that in extreme edge cases, users may receive less than the mathematically correct reward, and operators would have no visibility into this truncation. The root cause is the use of .min(u64::MAX as u128) without any diagnostic output. The impact is low, as overflow is highly unlikely, but the lack of observability could hinder debugging in rare scenarios.\n",
+            "severity": "informational",
+            "location": [
+                "programs/liquidity-provider/src/lib.rs#L648"
+            ],
+            "files": [
+                "gmx-solana/programs/liquidity-provider/src/lib.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Incorrect instruction docstring for update_fees_state",
+            "description": "The docstring for the update_fees_state instruction incorrectly states \"Update the closed state for the market,\" which is a copy-paste error from the update_closed_state instruction. This misleading documentation is reflected in the IDL and can confuse developers and integrators who rely on auto-generated SDKs or documentation. The root cause is a failure to update the comment after code duplication. The impact is on developer experience and integration correctness, with potential for misconfiguration due to misunderstood functionality.\n",
+            "severity": "informational",
+            "location": [
+                "programs/store/src/lib.rs#L2558"
+            ],
+            "files": [
+                "gmx-solana/programs/store/src/lib.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Incorrect config/flag names in changelog",
+            "description": "The CHANGELOG.md file contains incorrect configuration flag names: \"min_collatereal_factor_for_liquidation\" instead of \"min_collateral_factor_for_liquidation\" and \"enable_market_closed_params\" instead of \"use_market_closed_params\". These typos can mislead users reading the changelog about the actual configuration options. The root cause is a documentation error during release note preparation. The impact is confusion during configuration and deployment, though it does not affect code behavior. The issue has been resolved in a subsequent PR.\n",
+            "severity": "informational",
+            "location": [
+                "CHANGELOG.md#L30-L45"
+            ],
+            "files": [
+                "gmx-solana/CHANGELOG.md"
+            ]
+        }
+    ]
+}

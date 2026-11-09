@@ -1,0 +1,153 @@
+{
+    "path": "reports/Goki%20Audit%20Report.pdf",
+    "project_info": {
+        "url": "https://github.com/GokiProtocol/goki/",
+        "commit_id": "164d238",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-05-10",
+        "project_path": "contracts/Goki%20Audit%20Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Unchecked Buffer Transactions",
+            "description": "The vulnerability allows an attacker to sign for any SmartWallet due to missing permission checks during the creation and execution of the InstructionBuffer account. The root cause is the lack of authentication in the InitBuffer instruction, where the authority and executor accounts are unchecked and can be arbitrarily set by anyone. This enables an attacker to initialize an InstructionBuffer for any SmartWallet, append malicious instructions (e.g., changing ownership or lowering the threshold), finalize, and execute the bundle. As a result, the attacker can fully take over the SmartWallet, leading to complete loss of control and potential loss of funds for the legitimate owners.\n",
+            "severity": "critical",
+            "files": [
+                "programs/smart-wallet/src/instructions/buffer_init.rs",
+                "programs/smart-wallet/src/instructions/buffer_execute_bundle.rs"
+            ],
+            "location": [
+                "InitBuffer#",
+                "buffer_execute_bundle.rs#"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Smart Wallet Creation Thresholds",
+            "description": "The create_smart_wallet function does not validate that the provided threshold is less than or equal to the number of owners, which can result in a SmartWallet being created with an unachievable signature threshold. This issue arises because the invariant check present in the change_threshold function is missing during initialization. An attacker or user could accidentally or intentionally create a wallet that is unusable from inception, leading to a denial of service for that wallet. While this does not directly lead to fund loss, it undermines the reliability and usability of the system.\n",
+            "severity": "informational",
+            "files": [
+                "programs/smart-wallet/src/lib.rs"
+            ],
+            "location": [
+                "create_smart_wallet#"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Duplicate Owners",
+            "description": "The SmartWallet allows duplicate owners to be set during creation or update, but only the first occurrence of a public key is recognized due to the use of iter().position() in owner_index_opt. This creates ambiguity in ownership semantics and could lead to unexpected behavior, such as a user believing they have increased voting weight by adding the same key twice, when in fact only one vote is counted. The system should either explicitly prevent duplicates or support them with appropriate weight calculation.\n",
+            "severity": "informational",
+            "files": [
+                "programs/smart-wallet/src/state.rs"
+            ],
+            "location": [
+                "SmartWallet.owner_index_opt#"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-228"
+                ],
+                "3": [
+                    "CWE-229"
+                ],
+                "4": [
+                    "CWE-231"
+                ]
+            },
+            "title": "Missing Owners Length Check",
+            "description": "The set_owners instruction fails to validate the length of the new owners list against the max_owners limit set during wallet creation. Although this check exists in create_smart_wallet, it is missing in set_owners, which can lead to a runtime panic if the new list exceeds max_owners. This could be exploited to cause a denial of service by rendering the wallet inoperable. The issue stems from inconsistent validation logic across related functions.\n",
+            "severity": "informational",
+            "files": [
+                "programs/smart-wallet/src/lib.rs"
+            ],
+            "location": [
+                "set_owners#"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-188"
+                ]
+            },
+            "title": "Incorrect Discriminator Size",
+            "description": "The SmartWallet account's space calculation assumes a 4-byte discriminator, while Anchor actually uses an 8-byte discriminator. Although this is currently mitigated by the presence of reserved space in the SmartWallet struct, it poses a future risk if the reserved space is reduced or repurposed. This could lead to account reallocation failures or data corruption. The issue is a result of incorrect assumptions about Anchor's internal layout.\n",
+            "severity": "informational",
+            "files": [
+                "programs/smart-wallet/src/state.rs"
+            ],
+            "location": [
+                "SmartWallet::space#"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Validator Account Checks",
+            "description": "Account validation is performed inconsistently, with some checks done via Anchor attributes and others in validator implementations. Additionally, certain checks (e.g., smart_wallet == transaction.smart_wallet) are duplicated across both methods, increasing code complexity and the risk of logic divergence. This redundancy and inconsistency make the code harder to audit and maintain, potentially leading to missed validations in future updates.\n",
+            "severity": "informational",
+            "files": [
+                "programs/smart-wallet/src/instructions/approve.rs",
+                "programs/smart-wallet/src/validators.rs"
+            ],
+            "location": [
+                "Approve#",
+                "Validate::validate#"
+            ]
+        }
+    ]
+}

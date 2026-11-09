@@ -1,0 +1,234 @@
+{
+    "path": "reports/blocksec_paras_NFT_signed_v1.0.pdf",
+    "project_info": {
+        "url": "https://github.com/ParasHQ/paras-nft-contract",
+        "commit_id": "8974748d4deeaed8c1a2351ab63e3950907b0485",
+        "address": [],
+        "chain": null,
+        "compiler_version": "n/a",
+        "audit_date": "2022-09-23",
+        "project_path": "contracts/blocksec_paras_NFT_signed_v1.0.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Non-Mintable NFT with a Selling Price",
+            "description": "The vulnerability exists in the `nft_decrease_series_copies()` function where the price of an NFT series is not set to None when the series becomes non-mintable due to the exhaustion of available copies. This causes an inconsistency with the behavior in `_nft_mint_series()`, which correctly sets the price to None when the supply is maxed out. The root cause is the omission of price cleanup logic when reducing series copies. An attacker or user could list a series as non-mintable while still displaying a price, misleading buyers into believing the NFT is purchasable. The impact is primarily a user experience and consistency issue, leading to confusion and potential loss of trust, but does not result in direct financial loss or fund theft.\n",
+            "severity": "low",
+            "files": [
+                "paras-nft-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#615-617"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Potential Inconsistent Transaction Fee",
+            "description": "The `market_data_transaction_fee` for an NFT series is not automatically updated when the global `transaction_fee` is changed via `set_transaction_fee()`. Instead, it only updates when `nft_set_series_price()` is called. This means that even if the contract-wide fee changes, existing series continue using outdated fees unless explicitly refreshed. The root cause is the lack of synchronization between global fee updates and per-series fee state. An attacker cannot directly exploit this, but buyers may end up paying incorrect fees—either higher or lower than expected—depending on the discrepancy. The impact is economic inconsistency and potential revenue loss or overcharging, undermining the fairness and predictability of the marketplace.\n",
+            "severity": "low",
+            "files": [
+                "paras-nft-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#670-672"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ]
+            },
+            "title": "Incomplete NFT Token Burning Mechanism",
+            "description": "When `nft_burn()` is called, the token ID of the burnt NFT is not removed from the `TokenSeries.tokens` UnorderedSet. As a result, the supply count remains inflated, and new tokens cannot reuse burnt token IDs. The root cause is the omission of cleanup logic in the burn function. This leads to a permanent increase in token ID space and prevents token ID reuse, which could be problematic for series with limited supply. While the project claims this is by design (supply includes burnt tokens), it contradicts typical NFT expectations where burnt tokens are truly destroyed. The impact is a deviation from standard NFT behavior, potentially misleading users about available supply and preventing efficient token ID management.\n",
+            "severity": "low",
+            "files": [
+                "paras-nft-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Transaction Fee Bypass with Direct NFT Minting",
+            "description": "The `nft_mint()` function allows creators to mint NFTs without paying the `market_data_transaction_fee`, enabling fee-free minting for the creator. The root cause is the absence of fee enforcement in the minting path used by creators. This allows creators to bypass the transaction fee mechanism that applies to regular purchases, creating an economic imbalance. While the project states this is by design (creators don't need to pay fees), it opens a potential abuse vector where creators could mint and sell without contributing to the protocol's revenue. The impact is a loss of potential revenue for the treasury and unfair advantage for creators, undermining the economic model.\n",
+            "severity": "low",
+            "files": [
+                "paras-nft-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "Potential Centralization Problem",
+            "description": "The contract relies on a privileged `owner_id` account that can modify critical parameters like `transaction_fee` and `treasury_id`, and the contract can be upgraded by whoever holds the full access key. The root cause is the centralized control model with no safeguards like multi-sig or DAO governance. This creates a single point of failure where a compromised key could lead to theft of funds or malicious upgrades. The impact is high: an attacker gaining control could drain assets, alter fees, or deploy malicious code. Even without attack, it undermines trust in the system's decentralization. The recommendation is to remove the full access key and transition ownership to a multi-sig or DAO.\n",
+            "severity": "n/a",
+            "files": [
+                "paras-nft-contract/src/lib.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Improper NFT Series MetaData Query",
+            "description": "The `nft_get_series()` view function returns `transaction_fee: None` for all series, despite the contract supporting per-series transaction fees stored in `market_data_transaction_fee`. The root cause is the hard-coded `None` value in the mapping logic. This prevents frontend applications and users from seeing the actual transaction fee for a given series, leading to incorrect fee estimation. The impact is degraded user experience and potential transaction failures due to underestimating required deposits. Users and dApps cannot accurately calculate costs, which may result in failed transactions or overpayments. The fix is to fetch and return the actual fee from the map.\n",
+            "severity": "n/a",
+            "files": [
+                "paras-nft-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#776"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "Redundant Code (I)",
+            "description": "The functions `calculate_market_data_transaction_fee()` and `get_market_data_transaction_fee()` include fallback logic to use the default transaction fee if the per-series fee is None. However, the contract ensures that `market_data_transaction_fee` is always set when a series is created, making the None-check and fallback redundant. The root cause is unnecessary defensive coding that adds complexity without benefit. While not exploitable, it increases code size and maintenance burden. The impact is minor, limited to gas inefficiency and reduced code clarity. The project claims this was added later for backward compatibility, but it remains a code quality issue.\n",
+            "severity": "n/a",
+            "files": [
+                "paras-nft-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#257-264",
+                "lib.rs#283-289"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant Code (II)",
+            "description": "The `nft_buy()` function includes an explicit check on the attached deposit amount (lines 421-425), but this is redundant because the `refund_deposit()` function later performs a stricter assertion that will panic if the deposit is insufficient. The root cause is duplicate validation logic. This adds unnecessary code and gas cost without enhancing security. The impact is minimal, limited to wasted computation and slightly higher transaction fees. The proper fix is to remove the redundant check and rely solely on the existing panic-based validation in `refund_deposit()`.\n",
+            "severity": "n/a",
+            "files": [
+                "paras-nft-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#421-425"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Redundant Function Parameter",
+            "description": "The `nft_create_series()` function accepts a `creator_id` parameter, but it is immediately overwritten with `env::predecessor_account_id()`. The only use of the input is to validate that it matches the caller, making the parameter unnecessary. The root cause is poor API design. This increases function complexity and confuses developers about who sets the creator. The impact is minor, affecting only code clarity and gas usage. The fix is to remove the parameter and directly use the predecessor account, simplifying the interface.\n",
+            "severity": "n/a",
+            "files": [
+                "paras-nft-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#309"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Storage Optimization",
+            "description": "In `nft_burn()`, after removing a token from a user's set, if the set becomes empty, it is not removed from `tokens_per_owner`. This leaves empty collections in storage, wasting space and increasing costs. The root cause is missing cleanup logic. While the data is correct, it is inefficient. The impact is higher storage costs for the contract, which are ultimately borne by users via deposits. Removing empty sets would reclaim storage and reduce long-term costs. This is a best practice in NEAR contracts due to explicit storage fees.\n",
+            "severity": "n/a",
+            "files": [
+                "paras-nft-contract/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        }
+    ]
+}

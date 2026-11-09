@@ -1,0 +1,68 @@
+{
+    "project": "MetaPool_Liquid_Staking_NEAR_Smart_Contract_Security_Audit_Report_Halborn_Final.pdf.json",
+    "files": [
+        "dataset/contracts/MetaPool_Liquid_Staking_NEAR_Smart_Contract_Security_Audit_Report_Halborn_Final.pdf.json/metapool/src/utils.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-1041",
+        "CWE-710"
+    ],
+    "cwe_detected": [
+        "CWE-703",
+        "CWE-682",
+        "CWE-697"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "FUNCTION CAN BE REPLACED BY MACRO",
+            "description": "The contract implements a custom `assert_callback_calling()` function to ensure that only the contract itself can call certain methods, by comparing the predecessor account with the current account. This same functionality can be achieved more safely and concisely using the built-in #[private] macro provided by the NEAR SDK. The current approach duplicates functionality already handled by the framework, increasing code size and potential for errors. While not exploitable directly, it represents a deviation from best practices and reduces code readability.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The utility module contains several arithmetic helpers used for share/amount conversions and multiplier logic. From the provided CWEs, the main risks are (1) exceptional-condition handling around division-by-zero, and (2) incorrect calculations caused by unchecked truncation when converting from U256 back to u128, plus (3) a potentially-wrapping addition in a security-relevant comparison helper. These can lead to panics (DoS) or incorrect value computation (e.g., rewards/fees/shares), depending on how these helpers are used by the rest of the contract.\n",
+            "findings": [
+                {
+                    "title": "Division-by-zero panic in proportional() and damp_multiplier() via half==0",
+                    "description": "`proportional(amount, numerator, denominator)` performs `... / U256::from(denominator)` with no guard against `denominator == 0`.\n\n`damp_multiplier()` computes `let half = max_to_distribute / 2;` and then (in the final `else` branch) calls:\n`proportional(multiplier as u128, currently_distributed - max_to_distribute, half)`.\nIf `max_to_distribute` is 0 or 1, then `half == 0`. When the code reaches this branch (e.g., `multiplier > 10` and `currently_distributed == max_to_distribute`), this results in a division-by-zero and a contract panic.\n\nImpact: transaction abort / denial-of-service on any pathway that can invoke these helpers with such parameters (attacker-controlled inputs or reachable edge-states).\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unchecked truncation when converting U256 to u128 can corrupt amounts",
+                    "description": "Several functions compute intermediate values in `U256` and then convert using `.as_u128()`:\n  - `apply_pct(basis_points, amount)`\n  - `apply_multiplier(amount, percentage)`\n  - `proportional(amount, numerator, denominator)`\n\n`.as_u128()` truncates the high 128 bits if the result exceeds `u128::MAX` (it does not fail/return an error). For example:\n  - `proportional()` can exceed `u128::MAX` when `amount * numerator / denominator` is large (e.g., large `amount`, large `numerator`, small `denominator`).\n  - `apply_multiplier()` can exceed `u128::MAX` for large `amount` with large `percentage` (it can scale `amount` up by >1x), causing truncation and producing a much smaller unintended value.\n\nImpact: incorrect calculation of security-critical quantities (shares, payouts, fees, limits). Depending on usage, this can enable value manipulation (e.g., underpaying/overpaying, bypassing caps) rather than reverting.\n\nFix: use checked conversions (e.g., `try_into()` with explicit bounds checks), or ensure via preconditions that the computed result cannot exceed `u128::MAX`.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Potential wrapping overflow in is_close() upper-bound check",
+                    "description": "`is_close(requested, total)` uses:\n`requested <= total + ONE_MILLI_NEAR`\nwhere `total + ONE_MILLI_NEAR` is a plain `u128` addition.\n\nIn Rust release builds, overflowing integer addition wraps. If `total` is close to `u128::MAX`, `total + ONE_MILLI_NEAR` can wrap to a small number, making the comparison incorrect (potentially returning false/true unexpectedly).\n\nImpact: incorrect comparison in a helper described as being used to decide “treat as all my tokens” behavior; if extreme values are reachable, this can create logic bypasses or unexpected acceptance/rejection.\n\nFix: use `total.saturating_add(ONE_MILLI_NEAR)` (symmetrical with the existing `saturating_sub`).\n",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

@@ -1,0 +1,220 @@
+{
+    "path": "reports/AlephBFT.pdf",
+    "project_info": {
+        "url": "https://github.com/Cardinal-Cryptography/AlephBFT",
+        "commit_id": "b73a6caf",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2021-06-21",
+        "project_path": "contracts/AlephBFT.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ],
+                "3": [
+                    "CWE-1110"
+                ]
+            },
+            "title": "Code documentation does not reference the paper",
+            "description": "The AlephBFT Rust code implements the consensus protocol outlined in the Aleph Zero paper but does not reference specific sections of the paper, making it more difficult to audit the code and verify alignment with the formal specification. This lack of cross-referencing increases the risk of undetected deviations from the intended protocol design. The root cause is insufficient inline documentation linking code constructs to their theoretical counterparts in the paper. While this does not enable direct exploitation, an attacker could potentially identify inconsistencies between implementation and specification that might be leveraged in complex attacks. The impact is primarily on long-term maintainability and auditability, reducing confidence in the system's correctness.\n",
+            "severity": "informational",
+            "files": [
+                "src/lib.rs",
+                "src/terminal.rs"
+            ],
+            "location": [
+                "src/lib.rs#76-77",
+                "src/terminal.rs#352-379"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Use of different types to represent rounds",
+            "description": "The code uses different types to represent rounds, primarily using `Round` as a `usize`, but downcasting it to `u16` when creating a `UnitCoord`. This can result in silent truncation if the round number exceeds `u16::MAX`, leading to incorrect round values being used in the protocol. The root cause is unsafe type casting without overflow checks. An attacker could potentially force the system into a state with corrupted round numbers by prolonging execution to very high round counts, although current configurations limit rounds to safe values. The impact includes undefined behavior and potential consensus divergence if round numbers are misinterpreted across nodes.\n",
+            "severity": "informational",
+            "files": [
+                "src/lib.rs",
+                "src/units.rs",
+                "src/units/store.rs"
+            ],
+            "location": [
+                "src/lib.rs#76-77",
+                "src/units.rs#10-31",
+                "src/units/store.rs#3-15"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Use of incorrect loop break to handle add_to_store and handle_events failures",
+            "description": "The Terminal's event handler loop uses a `break` statement inside a `for` loop, which only exits the inner loop, not the outer `loop` block. This means that even if `add_to_store` or `handle_events` fails, the outer loop continues processing new events, violating intended control flow. The root cause is incorrect use of control flow constructs in nested loops. Although currently only triggered by closed channels (considered programming errors), future changes could expose this to external triggers. The impact is potential state inconsistency and undefined behavior if error conditions are not properly propagated and handled.\n",
+            "severity": "informational",
+            "files": [
+                "src/terminal.rs"
+            ],
+            "location": [
+                "src/terminal.rs#352-379"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Incorrect state rollback upon removal of forker’s units",
+            "description": "When removing a forker's units from the store, the `mark_forker` function fails to decrement the `self.n_units_per_round` counter, leaving the state inconsistent with the actual number of units stored. The root cause is incomplete state rollback logic during error recovery. While this does not currently affect correctness due to other safeguards, it creates a discrepancy between metadata and actual data. An attacker could potentially exploit this in combination with other edge cases to manipulate unit counting or trigger logic errors. The impact is undefined behavior and potential long-term state corruption.\n",
+            "severity": "informational",
+            "files": [
+                "src/units/store.rs"
+            ],
+            "location": [
+                "src/units/store.rs#115-119",
+                "src/units/store.rs#146-149"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-252"
+                ]
+            },
+            "title": "Lack of error handling in Terminal’s post-insert hooks",
+            "description": "The Terminal allows registration of post-insert hooks but does not handle failures in these hooks. The `update_on_dag_add` function invokes hooks without checking their results, and even if a hook fails (e.g., due to a closed channel), execution continues unaffected. The root cause is the use of `unbounded_send` without proper error propagation. An attacker could close channels to disrupt internal communication, and these failures would be silently ignored. The impact includes loss of critical internal events (like parent candidate notifications or partial order extensions), potentially stalling consensus progress.\n",
+            "severity": "informational",
+            "files": [
+                "src/terminal.rs",
+                "src/consensus.rs"
+            ],
+            "location": [
+                "src/terminal.rs#233-255",
+                "src/consensus.rs#44-55"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "Different byte representations decode to the same data",
+            "description": "The `BoolNodeMap` structure uses a custom `Decode` implementation that allows multiple byte representations to decode to the same logical value. Specifically, it truncates a `BitVec` to a decoded capacity without validating that the byte length matches the expected size. The root cause is insufficient validation during deserialization. This could allow an attacker to craft alternative encodings of the same data, potentially causing signature mismatches if signatures are verified against byte representations. While AlephBFT currently avoids this by re-encoding before verification, the inconsistency remains a risk for future changes or integrations.\n",
+            "severity": "informational",
+            "files": [
+                "src/nodes.rs"
+            ],
+            "location": [
+                "src/nodes.rs#126-141",
+                "aleph_bft::nodes::BoolNodeMap"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-252"
+                ]
+            },
+            "title": "Errors in async code leave the program in an inconsistent state",
+            "description": "Panics in async tasks (e.g., from `unwrap` or `expect`) terminate only the individual task, not the entire program, because parent tasks do not monitor child task handles. The root cause is the use of `spawn` without returning or awaiting `JoinHandle`s, combined with unchecked panics. An attacker could trigger a panic (e.g., via unexpected input) in a child task like Extender or Terminal, causing it to silently fail while the rest of the system continues, leading to partial failures and inconsistent node state. The impact is a denial of service at the node level, where the node may stop making progress without crashing, reducing network reliability.\n",
+            "severity": "low",
+            "files": [
+                "src/consensus.rs",
+                "src/member.rs"
+            ],
+            "location": [
+                "src/consensus.rs#13-71",
+                "src/member.rs#425-445"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ]
+            },
+            "title": "Blocking I/O in Network trait implementations will block async runtime threads",
+            "description": "The `Network` trait's `send` and `broadcast` methods are synchronous, meaning that blocking implementations will halt the entire async runtime thread. The root cause is the lack of `async` annotations or documentation warning implementers about non-blocking requirements. An attacker could exploit a blocking network implementation by causing I/O delays, leading to thread starvation and degraded performance or complete unresponsiveness. The impact is a potential denial of service due to runtime thread exhaustion, especially under high load or adversarial network conditions.\n",
+            "severity": "informational",
+            "files": [
+                "src/network.rs"
+            ],
+            "location": [
+                "src/network.rs#31-40"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-544"
+                ]
+            },
+            "title": "Inconsistent handling of closed channel errors",
+            "description": "The codebase handles closed channel errors inconsistently—some parts use `expect` to panic on closure, while others gracefully return `Err`. The root cause is a lack of unified error handling policy. This inconsistency makes the system's behavior unpredictable under failure conditions. An attacker could close channels to trigger either panics (in `expect`-using code) or silent error returns, depending on the path, leading to divergent failure modes. The impact includes reduced system resilience and difficulty in diagnosing failures due to non-uniform error propagation.\n",
+            "severity": "informational",
+            "files": [
+                "src/rmc.rs",
+                "src/extender.rs"
+            ],
+            "location": [
+                "src/rmc.rs#230-232",
+                "src/extender.rs#151-155"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,174 @@
+{
+    "path": "reports/jito-restaking.md",
+    "project_info": {
+        "url": "https://github.com/jito-foundation/restaking",
+        "commit_id": "406903e569da657035a2ca71ad16f8a930db6940",
+        "address": [
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-11-26",
+        "project_path": "contracts/jito-restaking.md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-266"
+                ]
+            },
+            "title": "Missing revoke instruction leads to Old delegate accounts have unlimited number",
+            "description": "The Restaking and Vault programs allow delegation of token accounts to a delegate admin, who can approve a delegate account using the SPL Token 2022 `approve` instruction with an unlimited allowance (U64_MAX). However, there is no mechanism to revoke this allowance when the delegate is changed. As a result, old delegate accounts retain their unlimited token approval indefinitely. The root cause is the absence of a `revoke` instruction call in the delegation logic. An attacker who was previously a delegate can exploit this by spending the remaining allowance on the owner's behalf, even after being replaced. This leads to direct theft of user funds, as the malicious delegate can transfer tokens from the owner's account without further authorization.\n",
+            "severity": "informational",
+            "files": [
+                "restaking_program/src/ncn_delegate_token_account.rs",
+                "restaking_program/src/operator_delegate_token_account.rs",
+                "vault_program/src/delegate_token_account.rs"
+            ],
+            "location": [
+                "ncn_delegate_token_account.rs#62-69",
+                "operator_delegate_token_account.rs#62-69",
+                "delegate_token_account.rs#65-72"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Theft of Unclaimed Yields Due to Improper Reward Distribution in Vault Program",
+            "description": "The Vault program's `UpdateVaultBalance` function is not enforced before minting new tokens via `mint_to`. This allows an attacker to mint tokens immediately after rewards are deposited into the vault but before the vault balance is updated. As a result, the newly minted tokens are included in the reward distribution calculation, entitling the attacker to a share of rewards they did not contribute to. The root cause is the lack of a mandatory balance update prior to minting, which breaks the expected reward accrual logic. The attacker can exploit this by monitoring reward deposits and frontrunning the `UpdateVaultBalance` call with a `mint_to` transaction. The impact is theft of unclaimed yield, leading to financial loss for legitimate depositors who receive a reduced share of the rewards.\n",
+            "severity": "high",
+            "files": [
+                "vault_program/src/mint_to.rs",
+                "vault_program/src/update_vault_balance.rs"
+            ],
+            "location": [
+                "mint_to.rs",
+                "update_vault_balance.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-684"
+                ],
+                "3": [
+                    "CWE-440"
+                ]
+            },
+            "title": "The vault program don't support token2022 transfer",
+            "description": "The Vault program claims to support SPL Token 2022, but in practice, it does not. The `process_mint` instruction hardcodes the SPL Token program ID (`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`) instead of supporting the SPL Token 2022 program ID (`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`). Additionally, the `load_token_program` function explicitly checks for the SPL Token program ID and rejects others, preventing initialization or transfer of SPL Token 2022 assets. The root cause is the hardcoded program ID and lack of conditional logic to handle both token standards. As a result, any attempt to use SPL Token 2022 with the vault will fail, rendering the program inoperable for such tokens. This leads to the smart contract being unable to operate due to lack of token funds when users attempt to deposit SPL Token 2022 assets.\n",
+            "severity": "informational",
+            "files": [
+                "vault_program/src/mint_to.rs",
+                "vault_program/src/initialize_vault.rs"
+            ],
+            "location": [
+                "process_mint()",
+                "process_initialize_vault()"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "The vault reward mechanism can be sandwiched by MEV",
+            "description": "The `process_update_vault_balance` function updates the vault's deposited token balance and VRT supply in a way that temporarily increases the exchange rate between deposited tokens and VRT. Specifically, it first deducts the reward fee from the deposited amount, then mints VRT based on the fee, but the order of updates creates a window where the exchange rate becomes favorable. The root cause is the incorrect sequence of state updates: the deposited amount is reduced before the VRT supply is increased, which distorts the ratio. An attacker can exploit this by frontrunning a reward deposit with a deposit and backrunning the `update_vault_balance` call with a withdrawal, effectively sandwiching the reward update. This allows the attacker to redeem more deposited tokens than they are entitled to, resulting in theft of unclaimed yield from other stakers.\n",
+            "severity": "high",
+            "files": [
+                "vault_program/src/update_vault_balance.rs"
+            ],
+            "location": [
+                "process_update_vault_balance()"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Attackers can steal rewards by depositing, updating vault balance and withdrawing i",
+            "description": "When rewards are sent to the vault, the VRT token supply does not reflect the new value until `update_vault_balance` is called. An attacker can exploit this by depositing a large amount of tokens just before this update, thereby receiving a disproportionately large number of VRT tokens based on the pre-reward total. The root cause is the lack of synchronization between reward receipt and balance update in the `mint_to` instruction. The attacker monitors the network for reward deposits, deposits a large amount, calls `update_vault_balance`, and then immediately enqueues a withdrawal. Because the VRT supply increase from the reward is distributed across all VRT holders\u2014including the attacker's newly minted tokens\u2014the attacker captures a large share of the reward. The impact is theft of unclaimed yield, where the attacker can drain the majority of the reward intended for long-term stakers.\n",
+            "severity": "high",
+            "files": [
+                "vault_program/src/mint_to.rs"
+            ],
+            "location": [
+                "mint_to"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Rewards can be stolen by depositing immediately after reward tokens get sent to vault",
+            "description": "The `update_vault_balance` function is responsible for redistributing staking rewards to VRT holders by updating the vault's token balance and adjusting the value of VRT tokens accordingly. The vulnerability arises because the function calculates rewards as the difference between the current ST token balance of the vault and the previously recorded `tokens_deposited`. If an attacker observes that reward tokens have been sent to the vault but `update_vault_balance` has not yet been called, they can deposit ST tokens immediately before the update. These newly deposited tokens will then be included in the total balance used to calculate rewards, making the attacker's VRT tokens eligible for a share of the newly added rewards. This allows the attacker to unfairly gain a disproportionate share of the rewards at the expense of existing long-term VRT holders, effectively stealing unclaimed yield. The impact is economic dilution and loss of expected returns for honest participants.\n",
+            "severity": "high",
+            "files": [
+                "vault_program/src/update_vault_balance.rs"
+            ],
+            "location": [
+                "update_vault_balance.rs#44",
+                "update_vault_balance.rs#47",
+                "update_vault_balance.rs#60"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Vault creators can not withdraw their fees without being recursively charged",
+            "description": "The vault and program fee withdrawal mechanism subjects fee wallets (vault_fee_wallet and program_fee_wallet) to the same fee rules as regular users. When a vault creator attempts to withdraw accumulated VRT fees from the vault_fee_wallet, the withdrawal process itself incurs both vault withdrawal fees and program fees. This results in a recursive fee structure where a portion of the withdrawal is deducted as fees, and the remaining amount is less than the original balance. To fully withdraw the fees, the owner must repeatedly enqueue and burn withdrawal tickets over multiple epochs, each time paying additional fees. This leads to overpayment of program fees (e.g., 25% higher than expected in the PoC) and a denial-of-service condition where full withdrawal takes an impractically long time (e.g., 42 epochs or 84 days in the example). The root cause is the lack of exemption for fee wallets during withdrawal, leading to unintended recursive fee deductions.\n",
+            "severity": "high",
+            "files": [
+                "vault_program/src/burn_withdrawal_ticket.rs"
+            ],
+            "location": [
+                "burn_withdrawal_ticket.rs#94",
+                "vault.rs#1008"
+            ]
+        }
+    ]
+}

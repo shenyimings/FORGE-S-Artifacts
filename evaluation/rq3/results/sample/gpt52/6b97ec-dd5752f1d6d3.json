@@ -1,0 +1,286 @@
+{
+    "project": "2022-02-anchor.md.json",
+    "files": [
+        "dataset/contracts/2022-02-anchor.md.json/contracts/anchor-token-contracts/contracts/community/src/contract.rs",
+        "dataset/contracts/2022-02-anchor.md.json/contracts/anchor-token-contracts/contracts/distributor/src/contract.rs",
+        "dataset/contracts/2022-02-anchor.md.json/contracts/money-market-contracts/contracts/market/src/contract.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3888888888888889,
+        "recall": 0.7777777777777778,
+        "f1": 0.5185185185185185
+    },
+    "cwe_ground_truth": [
+        "CWE-664",
+        "CWE-755",
+        "CWE-703",
+        "CWE-710",
+        "CWE-248",
+        "CWE-1041",
+        "CWE-372"
+    ],
+    "cwe_detected": [
+        "CWE-544",
+        "CWE-664",
+        "CWE-755",
+        "CWE-682",
+        "CWE-285",
+        "CWE-284",
+        "CWE-710",
+        "CWE-248",
+        "CWE-460",
+        "CWE-703",
+        "CWE-400",
+        "CWE-684",
+        "CWE-280",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Spend limit on owner can be bypassed",
+            "description": "The spend limit set on the owner in the distributor and community contracts can be bypassed because the config.spend_limit value is never decreased after a successful spend operation. This lack of decrement logic allows the owner to repeatedly call the spend function with amounts up to the spend limit, effectively spending an unlimited total amount. The root cause is the missing state update to reduce the spend limit after each transaction. An attacker (or malicious owner) could exploit this by sending multiple transactions, each for the full spend limit, thereby bypassing the intended restriction. The impact includes potential loss of funds from the contract due to unbounded spending by the owner, undermining the security model that relies on spend limits for protection.\n"
+        },
+        {
+            "title": "community contract :: execute function",
+            "description": "1. **Description:** The `execute` function in the community contract handles governance actions such as `UpdateConfig` and `Spend`. Currently, governance authorization checks are implemented separately within each handler.\n2. **Cause:** Redundant access control checks are performed inside individual functions instead of being centralized at the entry point (`execute`).\n3. **Exploitation:** While not directly exploitable, this design increases code complexity and the risk of inconsistent permission enforcement.\n4. **Impact:** It leads to code duplication and reduced maintainability. Centralizing the governance check in `execute` would improve code clarity and reduce the likelihood of future security flaws due to missing checks.\n"
+        },
+        {
+            "title": "money-market-contracts/contracts/market claim_rewards may revert due to spend_limit set on distributor",
+            "description": "The `claim_rewards` function in the market contract calls `distributor_contract#spend()`, which reverts if the requested amount exceeds the `spend_limit`. The root cause is the hard cap enforced by the distributor contract without dynamic adjustment or user-controlled partial claims. An attacker cannot directly exploit this, but users may be unable to claim rewards once the limit is reached, especially after large accruals. This results in a denial of service for reward claiming, leading to loss of yield until the limit is increased by an admin.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code contains several issues mapped to the provided CWE root causes. The most severe is in the money market “market” contract: `RegisterContracts` is callable without checking `info.sender`, relying only on “can be called once” (fields are empty) as a protection mechanism. This lets any external caller front-run initialization and set critical dependency addresses (overseer/interest/distribution/collector/distributor) to attacker-controlled contracts, which then affects later privileged flows (e.g., `execute_epoch_operations` only checks the overseer address stored in config). Additionally, there are multiple exceptional-condition hazards (panic/underflow) due to unchecked `unwrap()` in `reply` and unchecked subtraction of `distributed_interest` from balance in both execute and query paths. There is also potential incorrect accounting/rounding behavior in reserve conversion (`Decimal256 * Uint256::one()`), which can miscalculate amounts sent to the collector.\n",
+            "findings": [
+                {
+                    "title": "Unauthorized one-time initialization of critical contract addresses (RegisterContracts)",
+                    "description": "In the market contract `execute`, the `ExecuteMsg::RegisterContracts { ... }` branch calls `register_contracts(...)` without passing `MessageInfo` and `register_contracts` performs no caller authorization at all. The only gate is that the stored addresses must still be unset (`CanonicalAddr::from(vec![])`).\n\nAs a result, any account can call `RegisterContracts` immediately after instantiation (before the intended owner/admin), permanently setting:\n- `overseer_contract`\n- `interest_model`\n- `distribution_model`\n- `collector_contract`\n- `distributor_contract`\n\nThis enables full takeover of subsequent privileged flows. For example, `execute_epoch_operations` authorizes solely via `info.sender == config.overseer_contract`; if the attacker set `overseer_contract` to themselves, they can execute epoch operations, influence interest/reward updates, and trigger bank sends to an attacker-chosen `collector_contract`.\n",
+                    "category": "CWE-284",
+                    "severity": "critical",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Unchecked underflow/panic when subtracting distributed_interest from contract balance",
+                    "description": "In the market contract, both:\n- `execute_epoch_operations`: `let balance: Uint256 = query_balance(...) ? - distributed_interest;`\n- `query_epoch_state`: `let balance = query_balance(...) ? - distributed_interest;`\n\nperform subtraction on `Uint256` without checking `distributed_interest <= balance`.\n\nIf `distributed_interest` exceeds the queried balance, this can underflow and either panic or throw (depending on the `Uint256` implementation), causing the transaction/query to fail. In `execute_epoch_operations`, this becomes especially dangerous if combined with the initialization takeover (CWE-284) where an attacker-controlled overseer can deliberately pass a too-large `distributed_interest` to DoS epoch operations.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Panic risk in reply handler due to unchecked unwrap of reply result/data",
+                    "description": "In the market contract `reply` handler:\n- `msg.result.unwrap().data.unwrap()`\n\nassumes the reply always contains an Ok result with `data`. If the chain/module returns a reply without data (or an error result), these `unwrap()` calls will panic, aborting execution and potentially leaving the contract in a partially initialized or stuck state (e.g., aTerra token instantiated but `aterra_contract` not registered).\n\nThis is an exceptional-condition handling issue; replies are generally reliable, but contracts should defensively handle missing/failed reply data.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Potential reserve accounting inaccuracies due to lossy Decimal-to-Uint conversion pattern",
+                    "description": "In `execute_epoch_operations`:\n- `let total_reserves = state.total_reserves * Uint256::one();`\n- then `state.total_reserves = state.total_reserves - Decimal256::from_uint256(total_reserves);`\n\nThis pattern likely converts `Decimal256` reserves into an integer amount by multiplication with `1`, which can truncate/floor fractional reserves depending on operator semantics, and then subtracts back the integer-converted value. If truncation occurs, small residual reserves can accumulate or be handled inconsistently, leading to incorrect reserve accounting and potentially incorrect amounts sent to the collector over time.\n\nBecause reserves movement is a value-transfer decision, rounding behavior should be explicit (e.g., choose floor/ceil with comments and invariants).\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Fragile 'unset' sentinel for initialization uses empty CanonicalAddr",
+                    "description": "The market contract uses `CanonicalAddr::from(vec![])` as an “unset” sentinel in both `register_aterra` and `register_contracts` to decide whether initialization is allowed.\n\nUsing a magic sentinel value for access/initialization control is brittle: it relies on the invariant that this value can never coincide with a real address representation and that state cannot be reset/corrupted. If this invariant is broken (by migration/state manipulation/bugs), initialization gates may be bypassed or permanently locked. This is a resource-lifetime/control concern, and also represents a weak protection mechanism when used as the primary guardrail.\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Non-compiling / unsafe pattern in distributor spend: moving whitelist then using config",
+                    "description": "In the distributor contract `spend`:\n- `if !config.whitelist.into_iter().any(|w| w == sender_raw) { ... }`\n\nconsumes (`moves`) `config.whitelist`. The function later uses `config.spend_limit` and `config.anchor_token`, which would be illegal after a partial move and should not compile as written. If this was “fixed” ad-hoc (e.g., by cloning) in other branches/versions, it risks introducing logic discrepancies or accidental authorization bypasses if not handled consistently.\n\nWhile primarily a correctness/maintainability issue, inconsistent fixes around authorization checks are a common source of security regressions.\n",
+                    "category": "CWE-710",
+                    "severity": "low",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains multiple issues that stem from the provided CWE root causes, primarily around authorization, exceptional-condition handling, and arithmetic edge cases.\n\nThe most severe problem is in the money market contract: `ExecuteMsg::RegisterContracts` calls `register_contracts()` which performs no authentication/authorization check at all. It only checks that the stored contract addresses are still empty. This means *any account* can front-run or race to call `RegisterContracts` immediately after instantiation and set critical dependency addresses (overseer/interest/distribution/collector/distributor) to attacker-controlled contracts. Since these addresses are later trusted for privileged operations (e.g., `execute_epoch_operations` authorization relies on `overseer_contract`), this becomes a full contract takeover.\n\nAdditionally, the reply handler uses `unwrap()` on `msg.result` and `data`, which can panic on unusual reply shapes (failed submessage, missing data). Panics in CosmWasm abort execution and can lock initialization flows into a permanently broken state (DoS).\n\nThere is also a potential integer underflow in `execute_epoch_operations` and `query_epoch_state` when subtracting `distributed_interest` from `balance` without checking that `distributed_interest <= balance`. Depending on the `Uint256` implementation, this can panic or produce incorrect arithmetic, corrupting rate calculations or causing a DoS.\n\nFinally, both the “community” and “distributor” spend-limit contracts implement a `spend_limit` check but do not account/accumulate spending, so the limit is effectively “per call” rather than a tracked budget. If the intended spec was a global/community budget cap, this is an incorrect implementation that can lead to much higher cumulative spending than expected.\n",
+            "findings": [
+                {
+                    "title": "Unauthenticated RegisterContracts allows full dependency-address takeover",
+                    "description": "In the money market contract, `ExecuteMsg::RegisterContracts` calls `register_contracts()`, which does not verify `info.sender` (no owner/admin check). It only checks that the stored contract addresses are still unset (`CanonicalAddr::from(vec![])`).\n\nAny account can call `RegisterContracts` right after instantiation (before the intended admin does) and set:\n- `overseer_contract`\n- `interest_model`\n- `distribution_model`\n- `collector_contract`\n- `distributor_contract`\n\nThese addresses are subsequently trusted for authorization and external queries. For example, `execute_epoch_operations` authorizes solely by checking `info.sender` equals `config.overseer_contract`. If the attacker sets `overseer_contract` to themselves, they can invoke privileged epoch operations and influence reserve transfers and emission-rate calculations, potentially leading to fund loss or severe protocol manipulation.\n",
+                    "category": "CWE-285",
+                    "severity": "critical",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Unchecked subtraction may underflow when distributed_interest exceeds balance",
+                    "description": "In both `execute_epoch_operations()` and `query_epoch_state()`, the contract computes:\n  `balance = query_balance(...) ? - distributed_interest;`\n\nThere is no check that `distributed_interest <= balance`. If a caller supplies a `distributed_interest` larger than the current on-chain balance, this subtraction can underflow.\n\nDepending on `cosmwasm_bignumber::Uint256` operator behavior, this may:\n- panic and abort execution (DoS), or\n- wrap/produce an unexpected huge value, corrupting interest/exchange-rate computations and downstream logic.\n\n`execute_epoch_operations` is gated by `overseer_contract`, but since `RegisterContracts` is currently unauthenticated, an attacker can first seize `overseer_contract` and then exploit this underflow path.\n",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Reply handler uses unwrap() on potentially-missing fields causing DoS",
+                    "description": "In `reply()`:\n  `msg.result.unwrap().data.unwrap()`\n\nIf the instantiate submessage fails, or if the chain/runtime returns a reply without `data`, these `unwrap()` calls will panic. Panics abort contract execution and can permanently prevent successful initialization/registration flows, effectively bricking the contract instance.\n\nProper handling should convert missing/failed reply results into a controlled `ContractError` instead of panicking.\n",
+                    "category": "CWE-755",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Spend limit is not tracked cumulatively (limit is effectively per-call)",
+                    "description": "In both spend-limit contracts (`community` and `distributor`), `spend_limit` is only checked as:\n  `if config.spend_limit < amount { ... }`\n\nBut the contract does not decrement a remaining budget, nor track spent amounts over time. As a result, an authorized caller can spend up to `spend_limit` repeatedly across many calls, leading to cumulative spending far exceeding the apparent “limit”.\n\nIf the intended specification is a total budget cap (common for “community spend” style modules), this is an implementation mismatch that can lead to unintended token drainage over multiple transactions.\n",
+                    "category": "CWE-684",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unbounded whitelist growth can cause state/gas exhaustion over time",
+                    "description": "In the distributor contract, `add_distributor()` appends to `config.whitelist` with no maximum size enforcement.\nAlthough only `gov_contract` can add entries, a compromised gov key or malicious governance proposal could grow the whitelist indefinitely, increasing storage size and gas costs for:\n- future `spend()` authorization checks (`any()` over the full vector)\n- `query_config()` which maps and returns the full whitelist\n\nThis can degrade usability and potentially make some operations fail due to gas limits as the list grows.\n",
+                    "category": "CWE-400",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "The codebase contains multiple security-relevant error/privilege-handling issues that map to the provided CWE root causes.\n\n1) In the money-market contract, `ExecuteMsg::RegisterContracts` performs no caller authorization and only checks whether the stored contract fields are empty. This enables a classic “first caller wins” initialization/front-running scenario where any account can set critical dependency addresses (overseer/interest model/distribution model/collector/distributor) immediately after instantiation, permanently seizing control of core flows.\n\n2) In the money-market contract, `update_config` persists mutated state (`store_state`) before finishing all remaining operations and before persisting the updated config. If a later step errors (e.g., canonicalization, storage write), execution aborts after state has already been committed, leaving the contract in an unexpected partially-updated condition (inconsistent config vs. state).\n\n3) The money-market contract `reply` handler uses `unwrap()` on `msg.result` and `data`. While it is currently wired via `reply_on_success`, defensive code should still not panic on unexpected reply contents. A panic aborts execution and can create a denial of service for the reply path.\n\n4) The money-market instantiation constructs CW20 token metadata using string slicing on `msg.stable_denom` (`[1..]`, `[1..len-1]`) without validating length/format; malformed input can panic (abort), creating a DoS vector at instantiation time.\n\n5) Across the provided contracts, error handling is inconsistent (custom `ContractError` vs ad-hoc `StdError::generic_err` strings). This lack of a standardized mechanism complicates reliable error matching/handling by integrators and increases the risk of callers incorrectly treating failures as non-failures or mishandling specific error cases.\n",
+            "findings": [
+                {
+                    "title": "Missing authorization on one-time contract dependency registration (front-runnable initialization)",
+                    "description": "In the money-market contract, `execute` routes `ExecuteMsg::RegisterContracts { ... }` to `register_contracts(...)`.\n`register_contracts` only checks whether the stored addresses are still unset (equal to `CanonicalAddr::from(vec![])`) and does not verify `info.sender` against `owner_addr` (or any privileged role).\nAs a result, immediately after instantiation (before the intended owner calls it), any account can call `RegisterContracts` once and set:\n- `overseer_contract`\n- `interest_model`\n- `distribution_model`\n- `collector_contract`\n- `distributor_contract`\nThis permanently hijacks critical dependencies and can redirect funds, manipulate rate models, or break invariants.\n",
+                    "category": "CWE-280",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Partial state commit on later failure in update_config (state/config inconsistency)",
+                    "description": "In the money-market contract `update_config`, when `interest_model.is_some()`:\n- it loads `state`\n- calls `compute_interest(...)`\n- then immediately persists the updated state via `store_state(deps.storage, &state)?;`\nAfter that, the function continues and can still fail (e.g., `addr_canonicalize(...)` for new model addresses, `store_config(...)`, etc.).\nIf any later operation errors, the transaction aborts but the state write has already happened, leaving a partially-updated contract (state advanced, config unchanged). This is an improper cleanup/rollback behavior on error.\n",
+                    "category": "CWE-460",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Reply handler can panic due to unwrap on reply result/data",
+                    "description": "In the money-market contract `reply`:\n  msg.result.unwrap().data.unwrap()\nis used before parsing `MsgInstantiateContractResponse`.\nAlthough the submessage is emitted with `SubMsg::reply_on_success`, relying on unwrap is brittle; unexpected runtime conditions, version differences, or malformed reply payloads can still trigger a panic.\nPanics abort execution and can cause a denial-of-service for the reply flow (preventing proper initialization of `aterra_contract`).\n",
+                    "category": "CWE-248",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Instantiation can panic due to unchecked stable_denom string slicing",
+                    "description": "In the money-market `instantiate`, token name/symbol are derived via:\n  msg.stable_denom[1..].to_uppercase()\n  msg.stable_denom[1..(msg.stable_denom.len() - 1)].to_uppercase()\nThis assumes a minimum length and valid UTF-8 boundary alignment for the indices.\nA malformed `stable_denom` (too short or unexpected encoding) can panic at runtime, aborting instantiation (DoS).\nEven if typical denoms are well-formed, the contract should validate format/length before slicing.\n",
+                    "category": "CWE-248",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Inconsistent/non-standardized error handling across contracts",
+                    "description": "The first two contracts predominantly return `StdError::generic_err(\"<string>\")` with ad-hoc messages, while the money-market contract uses a structured `ContractError` in many places but still mixes in `StdError` conversions/strings in some paths.\nThis inconsistency can lead to integrators or higher-level modules failing to reliably distinguish authorization failures vs. parameter validation vs. internal errors, increasing the risk of incorrect handling of error conditions (e.g., treating an unexpected failure as retryable or as a non-failure).\n",
+                    "category": "CWE-544",
+                    "severity": "low",
+                    "confidence": 0.6
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-1061",
+            "CWE-221",
+            "CWE-1267",
+            "CWE-393",
+            "CWE-1093",
+            "CWE-287",
+            "CWE-1126",
+            "CWE-1041",
+            "CWE-911",
+            "CWE-1339",
+            "CWE-495",
+            "CWE-369",
+            "CWE-749",
+            "CWE-118",
+            "CWE-1280",
+            "CWE-1229",
+            "CWE-1076",
+            "CWE-285",
+            "CWE-1065",
+            "CWE-1066",
+            "CWE-1048",
+            "CWE-397",
+            "CWE-404",
+            "CWE-286",
+            "CWE-191",
+            "CWE-1101",
+            "CWE-1044",
+            "CWE-1092",
+            "CWE-269",
+            "CWE-673",
+            "CWE-704",
+            "CWE-1270",
+            "CWE-346",
+            "CWE-282",
+            "CWE-1335",
+            "CWE-913",
+            "CWE-228",
+            "CWE-669",
+            "CWE-410",
+            "CWE-1209",
+            "CWE-580",
+            "CWE-501",
+            "CWE-1068",
+            "CWE-1357",
+            "CWE-684",
+            "CWE-190",
+            "CWE-665",
+            "CWE-1120",
+            "CWE-662",
+            "CWE-755",
+            "CWE-477",
+            "CWE-496",
+            "CWE-666",
+            "CWE-1283",
+            "CWE-1127",
+            "CWE-1164",
+            "CWE-706",
+            "CWE-922",
+            "CWE-923",
+            "CWE-193",
+            "CWE-1329",
+            "CWE-754",
+            "CWE-128",
+            "CWE-668",
+            "CWE-400",
+            "CWE-1059",
+            "CWE-487",
+            "CWE-610",
+            "CWE-1177",
+            "CWE-570",
+            "CWE-135",
+            "CWE-571",
+            "CWE-573",
+            "CWE-372",
+            "CWE-657",
+            "CWE-758"
+        ],
+        [
+            "CWE-396",
+            "CWE-392",
+            "CWE-460",
+            "CWE-544",
+            "CWE-274",
+            "CWE-209",
+            "CWE-280",
+            "CWE-636",
+            "CWE-756",
+            "CWE-248",
+            "CWE-390"
+        ]
+    ]
+}

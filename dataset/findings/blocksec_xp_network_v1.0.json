@@ -1,0 +1,140 @@
+{
+    "path": "reports/blocksec_xp_network_v1.0.pdf",
+    "project_info": {
+        "url": "https://github.com/XP-NETWORK/xp-near-integration",
+        "commit_id": "436edf9a6ea6fbf62bb21cfc4b258fd6d10dda7c",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-01-12",
+        "project_path": "contracts/blocksec_xp_network_v1.0.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-252"
+                ]
+            },
+            "title": "Lack of Failure Handle in Callback Functions",
+            "description": "The contract fails to handle potential failures in cross-contract invocations, particularly in callback functions like validate_unfreeze_nft(). The root cause is the absence of error handling logic when external calls (e.g., NFT transfers) fail. An attacker or network condition could cause the external call to revert, leaving the contract in an inconsistent state where the user's NFT is not returned despite the operation failing. This could lead to permanent loss of user assets, especially since similar issues exist in other critical functions such as validate_transfer_nft(), withdraw_nft(), and freeze_nft().\n",
+            "severity": "high",
+            "files": [
+                "contract/xpbridge/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#446-467"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack of Sanity Check in withdraw_nft()",
+            "description": "The withdraw_nft() function allows users to unfreeze NFTs on other chains after burning XPNFTs on NEAR, but it does not verify that the user has actually paid the required fee. The fee amount is user-controlled and there is no validation that the attached deposit matches the expected fee. This flaw stems from missing input validation and trust in unverified user input. An attacker could exploit this by calling the function with a zero or insufficient fee, effectively bypassing the fee mechanism. The impact includes loss of revenue for the protocol and potential manipulation of the tx_fees state variable, undermining the economic model of the bridge.\n",
+            "severity": "high",
+            "files": [
+                "contract/xpbridge/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-669"
+                ]
+            },
+            "title": "Lack of Specified Gas Distribution in Cross Contract Invocation",
+            "description": "Several functions, including validate_transfer_nft(), withdraw_nft(), freeze_nft(), and validate_unfreeze_nft(), do not explicitly specify gas distribution for cross-contract calls. This results in the default gas weight being set to 1, causing the remaining gas to be split equally between the cross-contract call and the callback function. The root cause is improper configuration of gas parameters in NEAR's promise API. If insufficient gas is allocated to the callback, it may fail even if the main call succeeds, leading to an inconsistent contract state. This could be exploited under high gas price conditions or complex callbacks, resulting in denial of service or loss of user funds due to failed state updates.\n",
+            "severity": "high",
+            "files": [
+                "contract/xpbridge/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#446-467"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Improper Calculation for Storage Balance",
+            "description": "The validate_withdraw_fees() function incorrectly calculates the withdrawable amount by using self.tx_fees - storage_used * storage_byte_cost, which assumes tx_fees equals the actual account balance. However, self.tx_fees is a manually tracked variable and does not reflect the real NEAR balance in the contract. This discrepancy arises from a misunderstanding of NEAR's account balance model. An attacker could manipulate this by forcing a withdrawal when the actual balance is lower than tx_fees, potentially draining the contract or causing underflow. The impact includes incorrect fund distribution and potential contract lockup due to failed transfers.\n",
+            "severity": "high",
+            "files": [
+                "contract/xpbridge/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#161-181"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Lack of Whitelist Check in freeze_nft()",
+            "description": "The freeze_nft() function allows any NFT from any token contract to be bridged to another chain without verifying if the NFT is on a trusted whitelist. This is caused by missing access control checks on the input token_contract parameter. An attacker could exploit this by bridging low-value or malicious NFTs, increasing gas costs for relayers and potentially spamming the destination chain. While this does not directly lead to fund loss, it degrades system efficiency and increases operational costs, contradicting the design goal of bridging only valuable NFTs.\n",
+            "severity": "low",
+            "files": [
+                "contract/xpbridge/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#384-407"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Incorrect tx_fee Receiver",
+            "description": "The callback function withdraw_callback() transfers tx_fees to the contract itself instead of a valid external receiver. This issue also affects freeze_callback() and validate_withdraw_fees(). The root cause is incorrect use of Promise::new(env::current_account_id()) for fund transfer, which sends funds to the contract rather than an owner or treasury address. This results in the fees being permanently locked within the contract, making them inaccessible. The impact is financial loss for the protocol, as collected transaction fees cannot be withdrawn or utilized, effectively burning the funds.\n",
+            "severity": "high",
+            "files": [
+                "contract/xpbridge/src/lib.rs"
+            ],
+            "location": [
+                "lib.rs#186-194"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,353 @@
+{
+    "path": "reports-without-source/2025-07-22-cyfrin-doryoku-v2.0.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/Warlands-Nft/xbelo",
+            "https://github.com/Warlands-Nft/belo_clmm_lp_farming"
+        ],
+        "commit_id": [
+            "7601b7bc4c05e0885f487f9f8cc05aea2c413264",
+            "f37639cd7586625f6ecbf2c67ad53c2d52f350d4"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-07-04",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Multiple vault_gkhan_account Can be Used Resulting in DoS on complete_vest",
+            "description": "The program validates the vault_gkhan_account only by checking that it is owned by the state PDA and uses the correct BELO mint, but does not verify that it is the canonical vault account derived via deterministic seeds or the Associated Token Account (ATA) program. This allows an attacker to create a \"phantom\" vault account under their control and pass it as the vault_gkhan_account during deposit. The root cause is the lack of a check to bind the vault to a single, canonical, program-controlled address. An attacker can deposit funds through their phantom vault, receive xBELO tokens, and later call complete_vest while specifying the legitimate vault, thereby draining funds from the real vault. This results in the legitimate vault being underfunded when honest users attempt to withdraw, leading to transaction failures and effectively locking their funds. The impact is a denial-of-service for legitimate users and potential insolvency of the protocol due to misappropriation of deposited BELO tokens.\n",
+            "severity": "high",
+            "location": [
+                "xbelo program::deposit",
+                "xbelo program::complete_vest"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Hard-coded 165-byte vault account is too small for Raydium Token-2022 mints with extensions",
+            "description": "The stake_clmm_position instruction in the CLMM LP Farming program creates a vault token account with a fixed size of 165 bytes, which corresponds to the legacy SPL-Token account size. However, Raydium CLMM position NFTs are implemented using Token-2022, which supports on-chain extensions such as MetadataPointer and MintCloseAuthority. These extensions increase the required account size beyond 165 bytes. The root cause is the use of a hard-coded size instead of dynamically calculating the required space based on the mint's extensions. When a user attempts to stake a Raydium position NFT with extensions, the initialize_account3 instruction fails with an InvalidAccountData error due to insufficient account space. This prevents users from staking their legitimate liquidity positions, resulting in a denial-of-service for the farming pool and rendering the staking functionality unusable for affected users.\n",
+            "severity": "high",
+            "location": [
+                "belo_clmm_lp_farming::stake_clmm_position"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Hard-coded 9 decimals for xBELO mint can mismatch underlying BELO mint",
+            "description": "During initialization, the xBELO program creates the receipt token with a fixed decimal precision of 9, regardless of the actual decimal precision of the underlying BELO mint. The root cause is the failure to read and mirror the decimals field from the BELO mint when initializing the xBELO mint. If the BELO mint has a different number of decimals (e.g., 6 or 18), the 1:1 accounting assumption between deposited BELO and issued xBELO tokens is violated. An attacker could exploit this by depositing a large amount of BELO with lower precision, causing the system to issue an incorrect amount of xBELO, leading to either over-issuance or under-issuance. The impact is a breakdown in the core accounting mechanism of the protocol, potentially leading to insolvency or incorrect vesting calculations.\n",
+            "severity": "low",
+            "location": [
+                "xbelo::initialize"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Improper Rounding in Burn Logic Lets Users Avoid Penalty",
+            "description": "The burn amount during vesting is calculated using integer division that truncates the result (rounds down), without adding an adjustment to ensure proper rounding. The formula used is (amount * burn_pct) / 100, where burn_pct is between 2 and 50. Because this operation always rounds down, small vesting amounts can result in a burn amount of zero. The root cause is the use of truncating integer arithmetic instead of ceiling division for fee-like calculations. An attacker can exploit this by repeatedly vesting small amounts (e.g., 49 tokens with a 2% burn rate) to avoid the burn penalty entirely. While the individual impact per transaction is small, the ability to repeat this indefinitely allows users to bypass the intended economic penalty. The impact is a loss of protocol revenue and weakening of the intended vesting incentives.\n",
+            "severity": "low",
+            "location": [
+                "xbelo::vest"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Vesting Durations Might be out of Bounds Which Allows Immediate Withdrawals",
+            "description": "The vest instruction does not enforce the configured minimum and maximum vesting duration bounds. Specifically, the check that would validate the vest_duration parameter is commented out in the code. The root cause is the absence of input validation for a critical parameter. As a result, users can specify a vesting duration as short as 1 second, and the system will treat it as if the minimum duration (e.g., 10 days) has been met. This allows users to deposit, vest for an arbitrarily short time, and immediately withdraw their funds without waiting the intended period. The impact is the complete circumvention of the vesting mechanism, allowing users to bypass lock-up periods and gain immediate access to their funds, undermining the core purpose of the xBELO token.\n",
+            "severity": "low",
+            "location": [
+                "xbelo::vest"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Steep Stepwise Jumps in Burn Percentages",
+            "description": "The burn percentage (burn_pct) is calculated using integer arithmetic without a precision multiplier (e.g., basis points), resulting in a step function where the burn rate remains constant over multi-day intervals. The calculation produces jumps approximately every 3.5 days, meaning users vesting for 10 days and 13.4 days pay the same burn percentage. The root cause is the use of low-precision arithmetic in a financial calculation that should be smooth and continuous. This creates an incentive for users to optimize their vesting duration to land just before a jump point, maximizing their retained amount. While not directly exploitable for infinite gains, it leads to an unfair and non-linear incentive structure. The impact is a suboptimal user experience and potential manipulation of vesting behavior to minimize fees.\n",
+            "severity": "low",
+            "location": [
+                "xbelo::vest"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Consider Two-step Ownership Transfer",
+            "description": "The transfer_admin function in both the xbelo and clmm_lp_farming programs allows the current admin to transfer ownership in a single transaction without requiring acceptance by the new admin. The root cause is the use of a one-step transfer pattern, which is risky because a typo in the new admin's address could result in permanent loss of administrative control. If the admin accidentally sets the new owner to an invalid or inaccessible address, critical functions like updating vesting parameters or pausing the contract become unusable. The impact is a high risk of accidental governance lockout, which could prevent necessary upgrades or emergency responses, potentially leading to permanent loss of functionality.\n",
+            "severity": "informational",
+            "location": [
+                "xbelo::transfer_admin",
+                "belo_clmm_lp_farming::transfer_admin"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unneccessary Rent Account Usage",
+            "description": "The Initialize instruction in the xbelo program includes the system program's rent account in its accounts struct, but this account is never used in the instruction logic. The root cause is the inclusion of a redundant account that serves no purpose in the current implementation. Since rent exemption and account creation are handled automatically by the runtime when using the system program, explicitly passing the rent account is unnecessary. The impact is minimal, but it increases the complexity of the instruction signature and could confuse auditors or developers. Removing it would improve code clarity and reduce the attack surface slightly.\n",
+            "severity": "informational",
+            "location": [
+                "xbelo::initialize"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Vesting Parameter Updates are Not Constrained Sufficiently",
+            "description": "The update_vest_params function allows the admin to update vesting parameters such as minimum and maximum durations and burn percentages, but it does not validate the logical consistency between these values. The root cause is the lack of cross-parameter validation. For example, an admin could set vest_min higher than vest_max, which would make it impossible for any vest_duration to satisfy the bounds check, effectively disabling the vesting function. Similarly, burn_min could be set higher than burn_max. The impact is the potential for accidental or malicious misconfiguration that breaks core protocol functionality, leading to denial-of-service for users.\n",
+            "severity": "informational",
+            "location": [
+                "xbelo::update_vest_params"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Initializer Can Be Front-Run to Gain Control of the Program",
+            "description": "The initialize and initialize_farm functions can be called by any user after the program is deployed, and they set the initial admin and critical parameters. The root cause is the lack of access control on initialization, allowing anyone to invoke these functions. A malicious actor could monitor the network and front-run the legitimate deployment transaction by calling initialize first, thereby setting themselves as the admin and taking control of the program. The impact is a complete compromise of the protocol's governance, allowing an attacker to set malicious parameters or lock out the legitimate team.\n",
+            "severity": "informational",
+            "location": [
+                "xbelo::initialize",
+                "belo_clmm_lp_farming::initialize_farm"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unnecessary Utility Functions in the xbelo Program",
+            "description": "The xbelo program contains several functions that are either redundant or non-functional: transfer_hook, transfer_xgkhan, and verify_non_transferable. The root cause is the inclusion of code that duplicates or misrepresents existing SPL token functionality. The transfer_hook is unnecessary because xBELO is not a Token-2022 token with extensions. The transfer_xgkhan function is a custom transfer that always fails and is bypassed by the token program's freeze logic. The verify_non_transferable function duplicates the built-in is_frozen check from the SPL token program. The impact is increased code complexity and attack surface without providing any benefit. These functions should be removed to improve code clarity and security.\n",
+            "severity": "informational",
+            "location": [
+                "xbelo::transfer_hook",
+                "xbelo::transfer_xgkhan",
+                "xbelo::verify_non_transferable"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Redundant Instruction Attributes in Initialize and Vest Instructions",
+            "description": "The Initialize and Vest account structs use the #[instruction(...)] attribute unnecessarily. For Initialize, the attribute declares no parameters and is unused. For Vest, it declares parameters (amount and vest_duration) that are not used in account validation constraints. The root cause is the inclusion of boilerplate code that serves no purpose. These attributes are meant to pass instruction data into account validation, but since the data is not used in constraints, they are redundant. The impact is minimal, but it reduces code clarity and increases compilation overhead slightly. Removing them would improve maintainability.\n",
+            "severity": "informational",
+            "location": [
+                "xbelo::Initialize",
+                "xbelo::Vest"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Same Conditions Revalidated in Instruction Logic and Account Contexts",
+            "description": "In the clmm_lp_farming program, certain conditions are checked twice: once in the instruction function and once in the account validation struct. For example, user_position_token_account.amount == 1 is checked in both stake_clmm_position and the StakeCLMMPosition struct, and !stake.claimed is checked in both withdraw_clmm_position and WithdrawCLMMPosition. The root cause is code duplication due to overlapping validation layers. While this does not introduce a security vulnerability, it increases code complexity and maintenance burden. The impact is reduced readability and a higher risk of inconsistencies if one check is updated but not the other.\n",
+            "severity": "informational",
+            "location": [
+                "clmm_lp_farming::stake_clmm_position",
+                "clmm_lp_farming::withdraw_clmm_position"
+            ],
+            "files": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "Missing Event Emission for Admin Transfers",
+            "description": "The transfer_admin function in the clmm_lp_farming program modifies a critical state (the admin address) but does not emit an event. The root cause is the omission of event logging for an important state change. Without an event, off-chain services (e.g., dashboards, monitoring tools) cannot detect or react to admin transfers in real time. The impact is reduced transparency and auditability, making it harder to track governance changes and potentially allowing malicious admin transfers to go unnoticed.\n",
+            "severity": "informational",
+            "location": [
+                "clmm_lp_farming::transfer_admin"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "StakeCounter Struct Declared but Never Utilized",
+            "description": "The StakeCounter struct is defined in the clmm_lp_farming program but is never instantiated or used anywhere in the code. The root cause is dead code that was likely left over from an earlier design. The struct includes a count field that could have been intended for tracking staked positions, but it is not referenced in any instruction. The impact is minimal, but it increases the program's size and could confuse developers. Removing it would improve code hygiene.\n",
+            "severity": "informational",
+            "location": [
+                "clmm_lp_farming::StakeCounter"
+            ],
+            "files": []
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Unsafe Arithmetic in total_position_staked Updates",
+            "description": "The total_positions_staked counter is incremented and decremented using unchecked arithmetic (e.g., += 1, -= 1). The root cause is the use of wrapping arithmetic in Rust release builds, where overflows do not panic but instead wrap around. If the counter reaches its maximum value (u64::MAX) and is incremented, it will wrap to zero, corrupting the accounting. Similarly, underflow could occur if decremented from zero. The impact is incorrect tracking of staked positions, which could affect reward calculations or system state integrity. Using checked_add and checked_sub would prevent this class of bugs.\n",
+            "severity": "informational",
+            "location": [
+                "clmm_lp_farming::stake_clmm_position",
+                "clmm_lp_farming::withdraw_clmm_position"
+            ],
+            "files": []
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Unutilized position_collection Field in Events",
+            "description": "The CLMMPositionStaked and CLMMPositionWithdrawn events include a position_collection field of type Pubkey, but it is always set to Pubkey::default() in both emission sites. The root cause is the inclusion of a placeholder field that was never implemented. The field does not carry meaningful data and is not used by any off-chain system. The impact is minimal, but it wastes event data space and could mislead developers into thinking the field is functional. It should be removed unless there is a future plan to populate it.\n",
+            "severity": "informational",
+            "location": [
+                "clmm_lp_farming::emit CLMMPositionStaked",
+                "clmm_lp_farming::emit CLMMPositionWithdrawn"
+            ],
+            "files": []
+        }
+    ]
+}

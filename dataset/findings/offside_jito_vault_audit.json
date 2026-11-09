@@ -1,0 +1,139 @@
+{
+    "path": "reports/offside_jito_vault_audit.pdf",
+    "project_info": {
+        "url": "https://github.com/jito-foundation/restaking",
+        "commit_id": "60b388421be855466c7bed191edbea8f449c8a88",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-10-28",
+        "project_path": "contracts/offside_jito_vault_audit.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect PDA Validation in CooldownVaultNcnTicket Instruction",
+            "description": "The CooldownVaultNcnTicket instruction incorrectly validates the PDA for vault_ncn_ticket due to a parameter misordering in the VaultNcnTicket::load function call. Specifically, the 'vault' and 'ncn' parameters are swapped, which breaks the expected PDA derivation logic. This incorrect ordering causes the validation to fail regardless of the actual account provided. An attacker cannot directly steal funds, but they can prevent legitimate users from using the CooldownVaultNcnTicket functionality. This leads to a denial of service for that specific feature, disrupting normal protocol operations related to NCN ticket cooldowns.\n",
+            "severity": "medium",
+            "location": [
+                "CooldownVaultNcnTicket#33",
+                "VaultNcnTicket::load#95-101"
+            ],
+            "files": [
+                "vault_program/src/cooldown_vault_ncn_ticket.rs",
+                "vault_core/src/vault_ncn_ticket.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Vault with Token-2022 Mint is Unusable",
+            "description": "The vault program allows initialization with a Token-2022 mint by checking that the mint is owned by either the standard SPL token program or the SPL Token-2022 program. However, subsequent instructions that interact with associated token accounts use a validation function (load_associated_token_account) that only accepts accounts owned by the original SPL token program. This inconsistency means that while a vault can be created with a Token-2022 mint, users cannot perform operations like minting or transferring tokens because the ATA ownership check will fail. As a result, any vault initialized with a Token-2022 mint becomes effectively unusable, leading to a loss of functionality and potential user funds being locked.\n",
+            "severity": "low",
+            "location": [
+                "initialize_vault#208-212",
+                "load_associated_token_account#116-124"
+            ],
+            "files": [
+                "vault_program/src/initialize_vault.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Incorrect is_writable Validation in WarmupVaultNcnSlasherTicket Instruction",
+            "description": "In the WarmupVaultNcnSlasherTicket instruction, the vault_ncn_slasher_ticket account is passed to the VaultNcnSlasherTicket::load function with the expect_writable flag set to false. However, the instruction later modifies this account, which requires it to be marked as writable in the account validation. Failing to set expect_writable to true means the program does not enforce that the account is writable during deserialization, which could allow for incorrect usage or lead to runtime errors if the account is not actually writable. While this may not be directly exploitable for financial gain, it represents a flaw in data validation that could lead to inconsistent state transitions or failed transactions under certain conditions.\n",
+            "severity": "informational",
+            "location": [
+                "WarmupVaultNcnSlasherTicket#30-37"
+            ],
+            "files": [
+                "vault_program/src/warmup_vault_ncn_slasher_ticket.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Comment Mismatch in check_reward_fee_effective_rate",
+            "description": "The comment in the check_reward_fee_effective_rate function claims that the st_vrt_ratio is calculated with 6 decimal places of precision by multiplying by 1e6. However, the actual code uses MAX_FEE_BPS (which is 10,000) as the precision factor, providing only 4 decimal places of precision. This discrepancy between the code and its documentation can mislead developers during maintenance or audits, potentially leading to incorrect assumptions about the precision of fee calculations. While the code itself may function correctly, the misleading comment increases the risk of future bugs if developers rely on the documented precision.\n",
+            "severity": "informational",
+            "location": [
+                "check_reward_fee_effective_rate#850-856"
+            ],
+            "files": [
+                "vault_core/src/vault.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Inconsistent Use of MAX_FEE_BPS and MAX_BPS",
+            "description": "The vault program uses two constants, MAX_FEE_BPS and MAX_BPS, both currently set to 10,000, to validate fee parameters like reward_fee_bps. However, different parts of the code use different constants for the same logical check. For example, initialize_vault uses MAX_FEE_BPS, while other functions like check_fee_change_ok use MAX_BPS. This inconsistency is not currently exploitable because the values are equal, but if they are changed independently in the future, it could result in fee values being accepted in one context but not another, leading to unexpected behavior or potential fee manipulation. This represents a maintainability and future-proofing risk.\n",
+            "severity": "informational",
+            "location": [
+                "initialize_vault#56",
+                "Vault::check_reward_fee_effective_rate#180"
+            ],
+            "files": [
+                "vault_program/src/initialize_vault.rs",
+                "vault_core/src/vault.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Unclear Rent Receiver in close_vault_update_state_tracker",
+            "description": "The close_vault_update_state_tracker instruction closes the vault_update_state_tracker_info account and transfers its rent to the transaction signer. Since this instruction can be called by any user, a malicious actor can front-run the legitimate cranker by monitoring when tracker.all_operators_updated becomes true and submitting the close instruction first to claim the rent. This creates a race condition where the rent is awarded to the fastest transaction sender rather than the intended party. This could discourage honest participation in the state update process and introduce unnecessary MEV-like behavior. The rent should be returned to a designated payer recorded during initialization.\n",
+            "severity": "informational",
+            "location": [
+                "close_vault_update_state_tracker#88"
+            ],
+            "files": [
+                "vault_program/src/close_update_state_tracker.rs"
+            ]
+        }
+    ]
+}

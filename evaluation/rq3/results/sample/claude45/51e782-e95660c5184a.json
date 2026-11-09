@@ -1,0 +1,319 @@
+{
+    "project": "light_protocol_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/light_protocol_audit_final.pdf.json/programs/system/src/invoke_cpi/process_cpi_context.rs",
+        "dataset/contracts/light_protocol_audit_final.pdf.json/programs/account-compression/src/state/merkle_tree.rs",
+        "dataset/contracts/light_protocol_audit_final.pdf.json/programs/account-compression/src/state/access.rs",
+        "dataset/contracts/light_protocol_audit_final.pdf.json/programs/account-compression/src/state/rollover.rs",
+        "dataset/contracts/light_protocol_audit_final.pdf.json/programs/system/src/invoke_cpi/initialize.rs",
+        "dataset/contracts/light_protocol_audit_final.pdf.json/merkle-tree/hash-set/src/lib.rs",
+        "dataset/contracts/light_protocol_audit_final.pdf.json/merkle-tree/bounded-vec/src/lib.rs",
+        "dataset/contracts/light_protocol_audit_final.pdf.json/programs/account-compression/src/instructions/initialize_state_merkle_tree_and_nullifier_queue.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3333333333333333,
+        "recall": 0.2,
+        "f1": 0.25
+    },
+    "cwe_ground_truth": [
+        "CWE-862",
+        "CWE-284",
+        "CWE-20",
+        "CWE-834",
+        "CWE-563",
+        "CWE-697",
+        "CWE-682",
+        "CWE-638",
+        "CWE-415",
+        "CWE-664",
+        "CWE-691",
+        "CWE-710",
+        "CWE-1023",
+        "CWE-1285",
+        "CWE-707",
+        "CWE-1164",
+        "CWE-285",
+        "CWE-666",
+        "CWE-129",
+        "CWE-1041"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-1265",
+        "CWE-1093",
+        "CWE-664",
+        "CWE-697",
+        "CWE-404",
+        "CWE-691",
+        "CWE-284",
+        "CWE-1059",
+        "CWE-668",
+        "CWE-710",
+        "CWE-362",
+        "CWE-269",
+        "CWE-703",
+        "CWE-400"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Lack of Merkle Tree Association Check",
+            "description": "The `process_cpi_context` function lacks checks to verify that all input and output compressed accounts are part of the same Merkle tree as specified by `CpiContextAccount.associated_merkle_tree`. This omission allows accounts from different trees to be processed together. The root cause is missing cross-account consistency validation. An attacker could exploit this by mixing accounts from different trees, leading to invalid state transitions. The impact includes data integrity violations and potential manipulation of cross-tree operations. In `invoke_cpi::process_cpi_context`, without checking that the input and output compressed accounts are associated with the same Merkle tree as the `CpiContextAccount`, it is possible to utilize accounts from different Merkle trees. This may result in incorrect or invalid proof verifications because the proofs and the associated Merkle tree hashes may not match, leading to potential validation bypasses.\n"
+        },
+        {
+            "title": "Insecure Context Management",
+            "description": "The `InvokeCpiInstruction` lacks access control for `CpiContextAccount`, enabling an attacker to exploit the context by injecting malicious proofs if the context is set in multiple transactions. This is due to missing authorization checks on context usage. An attacker could exploit this by reusing or tampering with context data across transactions. The impact includes unauthorized execution of CPIs and potential fund theft or state manipulation. The vulnerability stems from the lack of explicit access control when utilizing `CpiContextAccount` in `invoke_cpi`. In `InvokeCpiInstruction`, `CpiContextAccount` is meant to hold or manage context information required for cross-program invocation (CPI). However, there are no specific checks or restrictions on who may modify or access this `CpiContextAccount`. This lack of control may be exploited by injecting a different proof during the utilization of `CpiContextAccount`, especially when the context settings span multiple transactions instead of one transaction, resetting the context account and removing the unutilized invoke inputs. This could allow unauthorized manipulation of CPI context, leading to privilege escalation or state corruption.\n"
+        },
+        {
+            "title": "Improper Equality Comparison",
+            "description": "The `CyclicBoundedVec::eq` function compares entire data slices directly, resulting in incorrect equality checks due to the unordered nature of elements affected by `first_index`. This is because the comparison does not normalize the cyclic order before checking equality. An attacker could exploit this by crafting vectors that are logically equal but appear different due to indexing. The impact includes incorrect state comparisons and potential bypass of validation logic that relies on equality checks. The function compares the underlying data of two vectors without accounting for the cyclic nature of the vector, which may result in incorrect outcomes. This is because the data in `CyclicBoundedVec` may be stored in a non-contiguous manner due to cyclic indexing, implying that the order of elements in the data array may not match the logical order of elements in the vector. The function creates a slice from the start of `self.data` up to `self.length` and iterates over the elements of the slice. It compares the elements of the iterator from `self.data` with those from `other.data`. This approach assumes that `self.data` and `other.data` are in the same order, but in a `CyclicBoundedVec`, the logical order may be different due to the `first_index` and `last_index`. As a result, two logically equal vectors may be considered unequal.\n"
+        },
+        {
+            "title": "Risk of Double Free Errors",
+            "description": "The `BoundedVec` and `CyclicBoundedVec` implementations do not deallocate memory upon `Drop`, which may result in double-free errors when using `from_raw_parts` to create these vectors. This is a memory management flaw where ownership semantics are not properly enforced. An attacker could exploit this by triggering multiple drops of the same memory region, leading to undefined behavior or program crashes. The impact includes potential denial of service and memory safety vulnerabilities. The vulnerability arises when `BoundedVec` or `CyclicBoundedVec` is created using `from_raw_parts`, where the memory referenced by the raw pointer is expected to be managed externally. However, if these structures attempt to deallocate the memory upon being dropped, a double-free error can occur if the original owner of the memory also attempts to free it. The root cause is the lack of proper ownership semantics enforcement in the drop implementation for these containers. An attacker could trigger this by causing the structure to be dropped after external deallocation, leading to undefined behavior, memory corruption, or potential denial of service. This is particularly dangerous in low-level systems code where memory safety is critical.\n"
+        },
+        {
+            "title": "Additional Safety Checks",
+            "description": "Several opportunities exist to improve code safety: making `fill_vectors_mut` private, using `Layout::array` for memory allocation, validating tree height and canopy depth, checking for empty CPI contexts, and performing bounds checks before incrementing indices. Public exposure of sensitive internal functions, unsafe memory layout assumptions, lack of parameter validation, and missing pre-access checks increase the risk of misuse or runtime errors. Malicious or incorrect usage of public internal functions or malformed inputs could lead to memory corruption, panics, or inconsistent state. These weaknesses reduce the robustness of the codebase and may lead to vulnerabilities under edge cases or adversarial conditions.\n"
+        },
+        {
+            "title": "Code Clarity",
+            "description": "The code contains redundancies and unclear logic, such as using `first_leaf_index` instead of directly using `self.next_index` in `append_batch`, redundant hashing in `IndexedArray::hash_element`, and misleading loop ranges in `HashSet::find_element_iter`. Suboptimal variable usage and unclear iteration semantics make the code harder to audit and maintain. While not directly exploitable, unclear code increases the likelihood of future bugs during maintenance or upgrades. Reduced readability and maintainability may lead to missed vulnerabilities during audits or incorrect modifications by developers.\n"
+        },
+        {
+            "title": "Incorrect Canopy Size Allocation in Merkle Tree Structures",
+            "description": "1. **Description:** The `merkle_tree_canopy` and `state_merkle_tree_canopy` fields in `AddressMerkleTreeAccount` and `StateMerkleTreeAccount` structures are allocated with an incorrect size. Given a canopy height of 10, the required size should be 2^10 * 32 = 32768 bytes, but this is not enforced.\n2. **Cause:** The size allocation does not reflect the actual mathematical requirement based on the canopy height, likely due to a hardcoded or miscalculated value in the account layout definition.\n3. **Exploitation:** An attacker could potentially exploit the incorrect size to cause memory corruption, deserialization failures, or state bloat by crafting accounts with mismatched canopy sizes.\n4. **Impact:** This could lead to program instability, denial of service, or potential privilege escalation if deserialization errors are not handled safely.\n"
+        },
+        {
+            "title": "Inefficient Iteration in hash-set::find_element_index",
+            "description": "1. **Description:** The `hash-set::find_element_index` function iterates over all possible bucket indices (0..self.capacity), which is inefficient, especially for large capacities.\n2. **Cause:** The function uses a full linear scan instead of limiting the number of probes to a small constant, as intended in hash table design.\n3. **Exploitation:** An attacker could trigger worst-case performance by forcing hash collisions, leading to excessive compute usage and potential transaction failure or denial of service.\n4. **Impact:** High computational cost per operation, increasing transaction fees and reducing scalability.\n"
+        },
+        {
+            "title": "Redundant Condition in CyclicBoundedVec::push",
+            "description": "1. **Description:** The condition `else if !self.is_empty()` in `CyclicBoundedVec::push` is redundant because it can only be reached if the vector is not empty, making it logically equivalent to `else`.\n2. **Cause:** Unnecessary conditional logic due to poor code simplification.\n3. **Exploitation:** Not directly exploitable, but increases cognitive load and risk of future bugs.\n4. **Impact:** Reduced code clarity and maintainability, potentially leading to logic errors during future modifications.\n"
+        },
+        {
+            "title": "Unused Variables in Multiple Structures and Functions",
+            "description": "1. **Description:** Several unused variables are present, including `program_owner` in `AccessMetadata`, `network_fee` in `RolloverMetadata`, `CPI_SEED` in `invoke_cpi`, and `system_program` in `InitializeStateMerkleTreeAndNullifierQueue`.\n2. **Cause:** Developers left behind variables that are no longer used, possibly during refactoring.\n3. **Exploitation:** These do not pose direct security risks but may indicate poor code hygiene and increase audit complexity.\n4. **Impact:** Increased code bloat and potential confusion; could hide malicious code if unused variables are exploited to store hidden state (though not observed here).\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After carefully analyzing the provided Solana smart contract code across multiple files, I have identified several security issues stemming from the candidate CWE root causes:\n\n1. **CWE-284 (Improper Access Control)**: In `process_cpi_context.rs`, the `set_cpi_context` function lacks proper access control. Any caller can set or modify the CPI context without verification of ownership or authorization. The function directly modifies `cpi_context_account.context` based on proof matching but doesn't verify that the caller has the right to perform this operation. This could allow unauthorized parties to manipulate cross-program invocation contexts.\n\n2. **CWE-697 (Incorrect Comparison)**: In `process_cpi_context.rs` at line 31, there's a problematic comparison: `if cpi_context_account.context[0].proof != inputs.proof`. This accesses `context[0]` without first checking if the context is empty, even though line 33 checks `if cpi_context_account.context.is_empty()`. This ordering issue means the code could panic on an empty vector before reaching the emptiness check, or the emptiness check becomes unreachable in certain execution paths.\n\n3. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: In `lib.rs` (hash_set implementation), the `insert` function at line 247 calls `find_element_iter` with hardcoded iteration limits (0, 20). If the hash set is nearly full or has many collisions, this fixed iteration count may be insufficient, leading to `HashSetError::Full` even when space might be available with more iterations. The error handling doesn't distinguish between \"truly full\" and \"couldn't find space in 20 iterations.\"\n\n4. **CWE-682 (Incorrect Calculation)**: In `lib.rs` (bounded_vec), the `CyclicBoundedVec::push` method has a logic issue in index calculation. When the vector is full and wrapping around, the calculation `self.last_index = (self.last_index + 1) % self.capacity()` followed by `self.first_index = (self.first_index + 1) % self.capacity()` could lead to incorrect state if capacity is 0 (though unlikely, it's not explicitly prevented in `with_capacity`).\n\n5. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: In `process_cpi_context.rs` line 36, the code sets `cpi_context_account.context = Vec::new()` after consuming the context. However, there's no mechanism to prevent the same context from being reused or to ensure proper cleanup. The context is cleared but the account remains, potentially allowing replay attacks or context confusion across different transactions.\n\n6. **CWE-691 (Insufficient Control Flow Management)**: In `process_cpi_context.rs`, the control flow between setting and consuming CPI context is complex. The function returns `Ok(None)` when setting context (line 27) and `Ok(Some(inputs))` when consuming (line 38), but the caller's handling of these different return values isn't validated within this function. This could lead to incorrect state transitions if the caller doesn't properly handle both cases.\n\n7. **CWE-710 (Improper Adherence to Coding Standards)**: The code contains multiple TODO comments (lines 41-42 in `process_cpi_context.rs`) indicating incomplete implementation of security-critical features like fee payer verification and context wiping. These unimplemented features represent potential security gaps.\n",
+            "findings": [
+                {
+                    "title": "Missing Access Control in CPI Context Modification",
+                    "description": "The `set_cpi_context` function in `process_cpi_context.rs` allows any caller to modify the CPI context account without verifying ownership or authorization. The function only checks proof matching but doesn't validate that the caller has the authority to set or modify the context. This could allow unauthorized manipulation of cross-program invocation contexts, potentially leading to privilege escalation or unauthorized state changes.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Out-of-Bounds Access Before Empty Check",
+                    "description": "In `process_cpi_context.rs` at line 31, the code accesses `cpi_context_account.context[0].proof` before checking if the context is empty (line 33). If the context vector is empty, this will cause a panic. The ordering of these checks is incorrect, creating a potential denial-of-service vulnerability where malformed input can crash the program.",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Insufficient Iteration Limit in Hash Set Insertion",
+                    "description": "The `insert` function in `lib.rs` (hash_set) calls `find_element_iter` with a hardcoded limit of 20 iterations. In a hash set with high load factor or many collisions, this may be insufficient to find available slots, causing premature `HashSetError::Full` errors even when capacity exists. This could lead to denial of service or incorrect rejection of valid insertions.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Improper CPI Context Lifecycle Management",
+                    "description": "In `process_cpi_context.rs`, after consuming the CPI context (line 36), the context is cleared with `Vec::new()` but the account persists. There's no mechanism to prevent context reuse across different transactions or to ensure proper cleanup. This could enable replay attacks where an attacker reuses a previously valid context in a different transaction, or cause context confusion between unrelated operations.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.81
+                },
+                {
+                    "title": "Incomplete Security Features in CPI Context",
+                    "description": "The code contains TODO comments (lines 41-42 in `process_cpi_context.rs`) indicating unimplemented security features: fee payer verification and context wiping parameters. These missing features represent security gaps where fee payer requirements aren't enforced and context cleanup isn't properly controlled, potentially allowing unauthorized operations or state pollution.",
+                    "category": "CWE-710",
+                    "severity": "medium",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Ambiguous Control Flow in CPI Context Processing",
+                    "description": "The `process_cpi_context` function returns different types (`Ok(None)` vs `Ok(Some(inputs))`) based on whether context is being set or consumed. This dual-mode operation without clear state machine enforcement could lead to incorrect state transitions if callers don't properly handle both return cases. The lack of explicit state validation increases the risk of control flow errors.",
+                    "category": "CWE-691",
+                    "severity": "low",
+                    "confidence": 0.72
+                }
+            ]
+        },
+        {
+            "reasoning": "After carefully analyzing the provided Solana smart contract code against the list of CWE candidates, I have identified several security issues:\n\n1. **CWE-665: Improper Initialization** - In `process_cpi_context.rs`, the `set_cpi_context` function modifies the `cpi_context_account.context` vector without proper validation of the account's initialization state. The function checks if `context.is_empty()` but doesn't verify if the account itself is properly initialized before use.\n\n2. **CWE-1265: Unintended Reentrant Invocation of Non-reentrant Code Via Nested Calls** - The `process_cpi_context` function in `process_cpi_context.rs` allows setting and retrieving CPI context data. The `set_cpi_context` function can be called multiple times with the same proof, potentially allowing nested invocations that could lead to unexpected state modifications. The logic at lines 47-54 shows that if the proof matches, it pushes to the context, but if it doesn't match, it overwrites the entire context. This could be exploited in nested CPI calls.\n\n3. **CWE-362: Race Condition** - In `lib.rs` (hash_set implementation), the `insert` method and `mark_with_sequence_number` method can be called concurrently on the same hash set. The `insert_into_occupied_cell` function (lines 308-335) checks sequence numbers and modifies cells, but there's no synchronization mechanism to prevent race conditions when multiple threads access the same bucket simultaneously.\n\n4. **CWE-400: Uncontrolled Resource Consumption** - In `lib.rs` (hash_set), the `insert` method uses quadratic probing with a fixed number of iterations (20 in `find_element_iter`). An attacker could craft inputs that cause maximum probing iterations repeatedly, leading to excessive CPU consumption. The `probe_index` function at line 262 uses quadratic probing which can be exploited.\n\n5. **CWE-404: Improper Resource Shutdown or Release** - In `lib.rs` (bounded_vec), the `BoundedVec` and `CyclicBoundedVec` structs allocate memory using `alloc::alloc` but the `Drop` implementation only exists for `HashSet`. If a `BoundedVec` or `CyclicBoundedVec` is not properly dropped, it will leak memory.\n\n6. **CWE-668: Exposure of Resource to Wrong Sphere** - In `process_cpi_context.rs`, the `cpi_context_account` is accessible and modifiable through the `set_cpi_context` function without proper access control beyond the proof check. The proof is used as the only authentication mechanism, but there's no verification that the caller has the right to modify this shared resource.\n\n7. **CWE-1093: Excessively Complex Data Representation** - The hash set implementation in `lib.rs` uses a complex quadratic probing scheme with sequence numbers and validity checks. The `HashSetCell` structure combines value storage with sequence number tracking, making the data representation unnecessarily complex and error-prone.\n\n8. **CWE-1059: Insufficient Technical Documentation** - Throughout the codebase, critical security assumptions are not documented. For example, in `process_cpi_context.rs`, the security model around the proof-based authentication is not explained. The hash set's sequence number mechanism and its security implications are not documented.\n\n9. **CWE-269: Improper Privilege Management** - In `initialize_state_merkle_tree_and_nullifier_queue.rs`, the function accepts `owner` and `program_owner` parameters but doesn't validate that the caller has the authority to set these ownership parameters. This could allow unauthorized privilege escalation.\n\n10. **CWE-665: Improper Initialization** - In `initialize_state_merkle_tree_and_nullifier_queue.rs`, the function uses `unimplemented!()` macros for non-default configurations (lines 72-80). This means the code will panic if non-default configurations are used, which is an improper way to handle initialization parameters.\n",
+            "findings": [
+                {
+                    "title": "Improper Initialization of CPI Context Account",
+                    "description": "The `set_cpi_context` function in `process_cpi_context.rs` modifies the `cpi_context_account.context` vector without verifying that the account is properly initialized. It only checks if the context vector is empty but doesn't validate the account's overall initialization state, potentially leading to operations on uninitialized memory.",
+                    "category": "CWE-665",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Potential Reentrant Invocation in CPI Context Processing",
+                    "description": "The `process_cpi_context` and `set_cpi_context` functions allow multiple invocations with the same proof, enabling nested CPI calls that could lead to unexpected state modifications. The logic that either pushes to or overwrites the context based on proof matching (lines 47-54) could be exploited in nested invocations to corrupt the context state.",
+                    "category": "CWE-1265",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Race Condition in Hash Set Operations",
+                    "description": "The hash set implementation in `lib.rs` lacks synchronization mechanisms for concurrent access. The `insert` and `mark_with_sequence_number` methods can be called concurrently, and the `insert_into_occupied_cell` function modifies shared state without proper locking, potentially leading to data corruption in multi-threaded scenarios.",
+                    "category": "CWE-362",
+                    "severity": "medium",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Uncontrolled Resource Consumption via Quadratic Probing",
+                    "description": "The hash set's `insert` method uses quadratic probing with a fixed iteration limit. An attacker could craft inputs that consistently trigger maximum probing iterations, causing excessive CPU consumption. The `probe_index` function's quadratic probing algorithm can be exploited to cause performance degradation.",
+                    "category": "CWE-400",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Memory Leak in BoundedVec and CyclicBoundedVec",
+                    "description": "The `BoundedVec` and `CyclicBoundedVec` structs in `lib.rs` allocate memory using `alloc::alloc` but do not implement the `Drop` trait. This means allocated memory will not be properly deallocated when these structures go out of scope, leading to memory leaks.",
+                    "category": "CWE-404",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient Access Control for CPI Context Account",
+                    "description": "The `cpi_context_account` in `process_cpi_context.rs` can be modified through `set_cpi_context` with only a proof-based check. There's no verification that the caller has proper authorization to modify this shared resource, potentially allowing unauthorized parties to corrupt the CPI context if they can obtain or guess a valid proof.",
+                    "category": "CWE-668",
+                    "severity": "high",
+                    "confidence": 0.82
+                },
+                {
+                    "title": "Excessively Complex Hash Set Data Representation",
+                    "description": "The hash set implementation uses a complex combination of quadratic probing, sequence numbers, and validity checks. The `HashSetCell` structure mixes value storage with temporal tracking, making the implementation difficult to reason about and potentially error-prone, increasing the risk of subtle bugs.",
+                    "category": "CWE-1093",
+                    "severity": "low",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Insufficient Documentation of Security Model",
+                    "description": "Critical security assumptions are not documented throughout the codebase. The proof-based authentication mechanism in `process_cpi_context.rs` and the sequence number security model in the hash set implementation lack explanatory comments about their security properties and potential attack vectors.",
+                    "category": "CWE-1059",
+                    "severity": "medium",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Missing Authorization Check for Ownership Assignment",
+                    "description": "The `process_initialize_state_merkle_tree_and_nullifier_queue` function accepts `owner` and `program_owner` parameters without validating that the caller (authority) has the right to assign these ownership roles. This could allow unauthorized privilege escalation if the function is called by an unauthorized party.",
+                    "category": "CWE-269",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Improper Handling of Non-Default Configurations",
+                    "description": "The initialization function in `initialize_state_merkle_tree_and_nullifier_queue.rs` uses `unimplemented!()` macros for non-default configurations (lines 72-80). This causes the program to panic rather than gracefully handling or rejecting invalid configurations, which is an improper initialization pattern that could lead to denial of service.",
+                    "category": "CWE-665",
+                    "severity": "medium",
+                    "confidence": 0.92
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-410",
+            "CWE-487",
+            "CWE-269",
+            "CWE-1077",
+            "CWE-1048",
+            "CWE-400",
+            "CWE-1270",
+            "CWE-668",
+            "CWE-923",
+            "CWE-1329",
+            "CWE-1093",
+            "CWE-496",
+            "CWE-430",
+            "CWE-1267",
+            "CWE-495",
+            "CWE-1265",
+            "CWE-286",
+            "CWE-221",
+            "CWE-1059",
+            "CWE-118",
+            "CWE-282",
+            "CWE-610",
+            "CWE-704",
+            "CWE-834",
+            "CWE-749",
+            "CWE-913",
+            "CWE-1209",
+            "CWE-580",
+            "CWE-669",
+            "CWE-287",
+            "CWE-841",
+            "CWE-573",
+            "CWE-1254",
+            "CWE-570",
+            "CWE-346",
+            "CWE-501",
+            "CWE-684",
+            "CWE-571",
+            "CWE-768",
+            "CWE-1283",
+            "CWE-705",
+            "CWE-1025",
+            "CWE-362",
+            "CWE-404",
+            "CWE-1127",
+            "CWE-1357",
+            "CWE-1177",
+            "CWE-431",
+            "CWE-1061",
+            "CWE-1076",
+            "CWE-799",
+            "CWE-1101",
+            "CWE-1120",
+            "CWE-1164",
+            "CWE-185",
+            "CWE-706",
+            "CWE-1041",
+            "CWE-1065",
+            "CWE-670",
+            "CWE-1280",
+            "CWE-477",
+            "CWE-1092",
+            "CWE-1044",
+            "CWE-758",
+            "CWE-911",
+            "CWE-183",
+            "CWE-673",
+            "CWE-666",
+            "CWE-662",
+            "CWE-1066",
+            "CWE-372",
+            "CWE-922",
+            "CWE-285",
+            "CWE-1068",
+            "CWE-1024",
+            "CWE-1229",
+            "CWE-1023",
+            "CWE-657",
+            "CWE-665",
+            "CWE-1126"
+        ]
+    ]
+}

@@ -1,0 +1,61 @@
+{
+    "path": "reports/2025-08-22.pdf",
+    "project_info": {
+        "url": "https://github.com/orca-so/whirlpools",
+        "commit_id": "6352a9b61a574fb62440a7dca9a933af02847db5",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-08-22",
+        "project_path": "contracts/2025-08-22.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Removal of DefaultAccountState Initialization Check",
+            "description": "1. **Description:** The audit identified that the check for the initialization status of the DefaultAccountState token extension has been removed in the updated code. This allows token badges to be granted even if the DefaultAccountState is not initialized or is frozen.\n2. **Cause:** The removal of the validation logic that previously ensured the DefaultAccountState was in an initialized state before allowing further operations. This change was introduced in PR974 for Token-2022 support.\n3. **Exploitation:** An attacker could potentially use tokens with a frozen DefaultAccountState to create liquidity pools, which contradicts the expected behavior since such tokens should not be freely transferable.\n4. **Impact:** This inconsistency may undermine the integrity of the Whirlpool protocol by allowing non-transferable tokens to participate in liquidity provision, potentially leading to unexpected behavior or user loss if downstream systems assume transferability.\n",
+            "severity": "informational",
+            "location": [
+                "token.rs#276-288",
+                "token.rs#278-282"
+            ],
+            "files": [
+                "programs/whirlpool/src/util/v2/token.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Migration Edge Case in MigrateRepurposeRewardAuthoritySpace",
+            "description": "1. **Description:** The MigrateRepurposeRewardAuthoritySpace instruction uses reward_infos[2].extension == [0u8; 32] as a flag to detect whether a Whirlpool has already been migrated. However, this assumes no existing account has a zeroed reward_infos[2].extension, which may not hold if SetRewardAuthority was used previously to zero it out.\n2. **Cause:** The migration logic relies on an assumption about the initial state of reward_infos[2].extension without enforcing it in code. The SetRewardAuthority instruction allows manual zeroing of this field, creating a scenario where the migration check could incorrectly skip necessary updates.\n3. **Exploitation:** If a Whirlpool had its reward_infos[2].extension manually set to zero before migration, the migration function would falsely认为 it was already migrated, leaving reward_infos[1].extension in an inconsistent state.\n4. **Impact:** This could result in a permanently inconsistent state for certain Whirlpool accounts, preventing proper reward authority management. Since the SuperAuthority cannot update reward_infos[1] post-migration, this issue cannot be fixed through normal means after deployment.\n",
+            "severity": "informational",
+            "location": [
+                "migrate_repurpose_reward_authority_space.rs#11-27",
+                "set_reward_authority.rs#18-23",
+                "set_reward_authority_by_super_authority.rs#22-26",
+                "whirlpool.rs#209-216"
+            ],
+            "files": [
+                "programs/whirlpool/src/state/whirlpool.rs"
+            ]
+        }
+    ]
+}

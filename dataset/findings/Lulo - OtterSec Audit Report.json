@@ -1,0 +1,312 @@
+{
+    "path": "reports-without-source/Lulo - OtterSec Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/lulo-labs/flexlend"
+        ],
+        "commit_id": [
+            "fd28989",
+            "144e1ce957fb9d5e4ef64a5cf5b2e7de2ea426d8",
+            "9c8cf5f602b95d2d03ef56df1e80c4ebee9c291c",
+            "a728b796016beb615771a23880040522084d136",
+            "3f5e7c9f12bea908ab5ce602247d0e4ad0c24e0c",
+            "be6e66dab2a50db1aa580f0673f9e8623cf390c3",
+            "4b1a060fa63697ab59ee8abff286d75c5150c483",
+            "5d4a2899da852a503d74068715fe92ae13eaecdb"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-11-13",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Unconstrained Allocation-Based Withdrawals",
+            "description": "The vulnerability in the withdraw_allocation function arises from insufficient validation when handling withdraw_all requests. If the withdraw_all flag is set to true, users can withdraw more of an asset than they originally deposited, bypassing allocation checks. This occurs because the function permits withdrawals exceeding deposited_supply when withdraw_all is true, without enforcing a strict equivalence between withdrawal amount and deposit. An attacker could exploit this by depositing a small amount of one stablecoin, minting PUSD, and then withdrawing a much larger amount of a different stablecoin, effectively stealing from the shared pool. This leads to token shortages, imbalance in the protocol's reserves, and potential arbitrage opportunities that undermine the system's solvency.\n",
+            "severity": "critical",
+            "location": [
+                "flexlend/src/utils/math.rs::withdraw_allocation"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "Fund Drainage Due to Missing Pending Withdrawals",
+            "description": "The pool can be drained because pending_withdrawals are not accounted for during the validation phase of initiate_regular_pool_withdraw. The function regular_withdraw_allowed checks available liquidity but fails to subtract pending withdrawals, allowing multiple users to initiate withdrawals simultaneously that collectively exceed the available LUSD. These pending withdrawals are only deducted later in complete_regular_pool_withdraw, which does not re-validate the remaining liquidity. As a result, an attacker can trigger a race condition where multiple large withdrawals are approved despite insufficient funds, ultimately draining the pool. Additionally, this flaw affects PUSD deposits, as protected_deposit_allowed does not consider pending regular withdrawals, potentially destabilizing the system by allowing deposits based on outdated liquidity states.\n",
+            "severity": "critical",
+            "location": [
+                "flexlend/src/utils/checks.rs::regular_withdraw_allowed",
+                "flexlend/src/utils/checks.rs::initiate_regular_pool_withdraw",
+                "flexlend/src/utils/checks.rs::complete_regular_pool_withdraw"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Failure to Segregate Referral Supply Across Allocations",
+            "description": "The vulnerability stems from the centralized accounting of referral_supply in the UserAccount structure without distinguishing between different allocations (e.g., USDC and PYUSD). Each allocation has its own referral exchange rate based on varying APYs, but the system uses a single referral_supply variable across all. This allows a referrer to claim rewards from an allocation with a more favorable exchange rate than the one in which the referral was generated. For example, a referrer earning referral_supply from a USDC deposit can claim rewards in PYUSD at a higher rate, effectively inflating their rewards. This manipulation enables disproportionate reward extraction, leading to unfair distribution and financial loss to the protocol due to unearned fee payouts.\n",
+            "severity": "critical",
+            "location": [
+                "flexlend/src/state/user.rs::calculate_claimable_referral_rewards"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Manipulation of Referrer Metrics",
+            "description": "The vulnerability lies in update_referrer_on_withdraw, which adjusts a referrer's referred_amount and referral_supply even when the withdrawn funds were not originally referred by that referrer. Users can deposit without a referrer and later assign one during a subsequent deposit, causing the protocol to incorrectly associate all future withdrawals with that referrer. An attacker can exploit this by repeatedly depositing and withdrawing funds without contributing to the referrer's metrics, thereby reducing the referrer's referred_amount and preventing them from claiming rewards. This attack drains the referrer's accrued rewards without any actual referral activity, undermining the integrity of the referral system and potentially disincentivizing legitimate referrers.\n",
+            "severity": "high",
+            "location": [
+                "flexlend/src/state/pool/liquidity.rs::update_referrer_on_withdraw"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Repeated Subtraction of Claimable Amount",
+            "description": "The claimable_amount is subtracted twice in the referral reward calculation logic. First, it is added to unclaimed_referral_fees during a withdrawal, and second, it is subtracted from total_referred_amount. Both values are then used in the referral_exchange_rate calculation, which computes total_liquidity as total_referred_amount + accumulated_referral_fees - unclaimed_referral_fees. Because claimable_amount is effectively removed twice from the liquidity pool backing referral shares, the exchange rate becomes inaccurate and systematically reduces the rewards available to referrers. This double-counting can eventually deplete referral rewards entirely, even for legitimate referrers, leading to unfair distribution and loss of trust in the referral mechanism.\n",
+            "severity": "high",
+            "location": [
+                "flexlend/src/state/pool/liquidity.rs::update_referrer_on_withdraw",
+                "flexlend/src/state/pool/liquidity.rs::referral_exchange_rate"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Static Nature of Configured Weights",
+            "description": "The protocol calculates max_exposure as a weighted average of regular and protected max exposures based on current liquidity. However, once protocol weights (e.g., for Drift) are set, they are not dynamically updated to reflect changes in liquidity distribution. If the composition of deposits shifts—such as a large influx of PUSD—the actual max_exposure decreases, but existing weights remain unchanged. This allows protocols like Drift to maintain allocations above the newly recalculated max_exposure, resulting in overexposure beyond the protocol’s risk coverage. In adverse market conditions, this could lead to insolvency, as the protected liquidity may be insufficient to cover losses from high-risk allocations.\n",
+            "severity": "high",
+            "location": [
+                "flexlend/src/utils/math.rs::calculate_max_exposure"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Risk of Outdated Allocation Data",
+            "description": "The initiate_regular_withdraw instruction does not call error_if_stale_refresh, which is responsible for updating allocation data with the latest rewards. As a result, allocation.protected_amount and allocation.regular_amount may be stale, leading to inaccurate exchange rate calculations. This can cause the system to burn more PUSD than necessary during withdrawals, unfairly penalizing users. Furthermore, stale data disrupts the PUSD/LUSD ratio checks, as unaccounted rewards may skew the balance between protected and regular amounts. This imbalance could falsely invalidate legitimate withdrawals or allow unsafe allocations to persist, undermining both user experience and protocol stability.\n",
+            "severity": "high",
+            "location": [
+                "flexlend/src/instructions/withdraw.rs::initiate_regular_withdraw"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Inaccuracies in Exchange Rate Calculation",
+            "description": "The exchange rate is calculated using partially updated state variables, particularly when determining referral collateral amounts. The issue arises from the order of operations in state updates, where some variables are refreshed before others, leading to temporary inconsistencies. For instance, if protected_rewards are updated but regular_rewards are not, the calculated exchange rate will reflect an inaccurate ratio between the two pools. This discrepancy affects the fairness of fund distribution, especially in referral reward calculations, where users may receive more or less than they are entitled to. Over time, these inaccuracies accumulate, leading to financial imbalances and potential exploitation by arbitrageurs.\n",
+            "severity": "high",
+            "location": [
+                "flexlend/src/state/pool/liquidity.rs::calculate_accumulated_split"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Inconsistent State During Exchange Rate Calculation",
+            "description": "The vulnerability arises in the `update_referrer_on_withdraw` function where the exchange rate for `referral_c_amount` is calculated using a mix of updated and outdated state variables. Specifically, `unclaimed_referral_fees` is updated before the exchange rate calculation, while `total_referred_amount` and `total_referral_supply` are updated afterward. This leads to a mid-state inconsistency where the exchange rate is computed using a partially updated state, making it neither reflective of the prior nor the final state.\n\nThe root cause is the non-atomic update of state variables involved in the exchange rate calculation. The function updates one variable (`unclaimed_referral_fees`) before computing the rate, while deferring updates to others. This creates a window where the state is inconsistent.\n\nAn attacker could potentially exploit this by timing withdrawals or referrals to benefit from an inaccurate exchange rate, leading to either over- or under-payment of referral rewards depending on the direction of the inconsistency.\n\nThe impact is inaccurate reward distribution, which could result in financial loss for either the protocol or legitimate referrers, undermining the fairness and economic integrity of the referral system.\n",
+            "severity": "medium",
+            "location": [
+                "flexlend/src/state/pool/liquidity.rs::update_referrer_on_withdraw"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Validation Failure Due to Rounding Error",
+            "description": "The function `math::calculate_accumulated_split` computes rewards for protected and regular pools as fractions of `accumulated_net`, rounding each to the nearest whole number. Due to rounding, the sum of `protected_rewards` and `regular_rewards` may not equal `accumulated_net`, causing the `require_eq!` assertion to fail.\n\nThe root cause is the use of strict equality to validate the sum of rounded values, which fails to account for inevitable rounding discrepancies when dividing integer amounts into proportional shares.\n\nAn attacker cannot directly exploit this for profit, but could trigger a denial of service by causing the `refresh_tvl` instruction to fail when rounding errors occur, preventing legitimate state updates.\n\nThe impact is a potential denial of service in the TVL refresh mechanism, disrupting protocol operations and potentially delaying critical updates.\n",
+            "severity": "medium",
+            "location": [
+                "flexlend/src/utils/math.rs::calculate_accumulated_split"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "Improper Oracle Address Check",
+            "description": "The `liquidity::update_oracle_price` function incorrectly compares the stored oracle key (`self.oracle`) with the `write_authority` of the provided `PriceUpdateV2` account. This is overly restrictive because the `write_authority` is not required to be the same as the oracle's address, and in most cases, they are different.\n\nThe root cause is a misunderstanding of the Pyth oracle account structure, where `write_authority` is a separate field from the oracle's address. The function enforces an unnecessary and incorrect constraint.\n\nThis leads to valid oracle updates being rejected when the `write_authority` differs from the oracle address, which is the common case. As a result, the protocol may fail to update prices even when valid data is provided.\n\nThe impact is a denial of service in price updates, which could lead to stale prices and incorrect valuation of assets within the protocol.\n",
+            "severity": "medium",
+            "location": [
+                "flexlend/src/state/pool/liquidity.rs::update_oracle_price"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Utilization of Shared Pool PDA as Signer",
+            "description": "The protocol uses a single PDA (`PDA[\"pool\", 0]`) as the signer for cross-program invocations (CPIs) to multiple integrated protocols such as MarginFi and Drift. This creates a shared trust model where the same signing authority is used across all integrations.\n\nThe root cause is the lack of isolation in signing authorities for different protocols. A single PDA is reused instead of deriving protocol-specific PDAs.\n\nIf one of the integrated protocols is compromised or malicious, it could potentially misuse the shared signer to perform unauthorized actions in other protocols, leading to a chain of trust failure.\n\nThe impact is a critical security risk where a compromise in one protocol could lead to the compromise of all connected protocols, undermining the entire security model of the system.\n",
+            "severity": "medium",
+            "location": [],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1025"
+                ]
+            },
+            "title": "Incorrect Oracle Staleness Check",
+            "description": "The function `pool::error_if_stale_refresh` incorrectly uses `elapsed_time` (time since the pool's last update) to check the staleness of the oracle data, instead of using `oracle_elapsed` (time since the oracle's last update). This results in an incorrect staleness check for oracle data.\n\nThe root cause is a logic error in variable usage: `elapsed_time` is used in the condition where `oracle_elapsed` should be used.\n\nThis allows stale oracle data to be accepted if the pool itself has been recently updated, even if the oracle data is outdated. Conversely, it may reject valid oracle data if the pool hasn't been updated recently.\n\nThe impact is incorrect price validation, potentially leading to the use of stale prices in critical operations, which could result in unfair trades or loss of funds.\n",
+            "severity": "medium",
+            "location": [
+                "flexlend/src/state/pool/pool.rs::error_if_stale_refresh"
+            ],
+            "files": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "Inconsistencies in Conversion of Protocol Identifiers",
+            "description": "The `try_into` implementation for `Protocol` attempts to copy 10 bytes from a string into an 8-byte array using `copy_from_slice(&str_bytes[..10])`, which will panic if the string is less than 10 bytes long. Additionally, truncating longer names to 8 bytes can cause collisions between different protocol names.\n\nThe root cause is an incorrect slice range and lack of bounds checking. The code assumes at least 10 bytes are available, which is unsafe. Furthermore, the truncation logic does not ensure uniqueness.\n\nThis can lead to runtime panics during protocol identifier conversion or, worse, two different protocols being treated as the same due to hash collision on the first 8 bytes.\n\nThe impact is a denial of service via panic or logic errors due to protocol identifier collisions, potentially disrupting protocol operations or leading to incorrect routing of funds.\n",
+            "severity": "medium",
+            "location": [
+                "flexlend/src/protocols/mod.rs::try_into"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Transaction Failure Due to Drift Withdrawal Limit",
+            "description": "The function `update_spot_balances_and_cumulative_deposits_with_limits` enforces Drift's daily withdrawal limits. If a spot market has reached its daily cap, any further withdrawal attempts through `complete_regular_withdraw` will fail.\n\nThe root cause is the lack of pre-checking or user notification regarding the remaining withdrawal capacity in Drift's spot markets.\n\nUsers may repeatedly attempt withdrawals that are guaranteed to fail, leading to wasted transaction fees and poor user experience.\n\nThe impact is a denial of service for legitimate withdrawals when market limits are reached, resulting in user frustration and unnecessary gas costs.\n",
+            "severity": "low",
+            "location": [
+                "flexlend/src/state/pool/liquidity.rs::update_spot_balances_and_cumulative_deposits_with_limits",
+                "flexlend/src/instructions/pool/complete_regular_withdraw"
+            ],
+            "files": []
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Unfavorable Rounding Direction",
+            "description": "The `liquidity_to_collateral` function rounds down the calculated collateral amount during withdrawals. This means users receive slightly more value than they should, as fewer c-tokens are burned than required.\n\nThe root cause is the use of `.to_floor()` which truncates the fractional part, favoring the user at the expense of the pool.\n\nWhen repeated across many withdrawals, this rounding error accumulates, causing a gradual depletion of collateral in the pool. The discrepancy is absorbed by the protocol, harming liquidity providers.\n\nThe impact is a gradual erosion of pool collateral, leading to potential insolvency over time and unfair redistribution of value from LPs to withdrawing users.\n",
+            "severity": "low",
+            "location": [
+                "flexlend/src/state/pool/liquidity.rs::liquidity_to_collateral"
+            ],
+            "files": []
+        }
+    ]
+}

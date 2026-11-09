@@ -1,0 +1,143 @@
+{
+    "project": "2025-01-pump-science.md.json",
+    "files": [
+        "dataset/contracts/2025-01-pump-science.md.json/programs/pump-science/src/instructions/curve/swap.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.16666666666666666,
+        "recall": 0.16666666666666666,
+        "f1": 0.16666666666666666
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-693",
+        "CWE-1284",
+        "CWE-360",
+        "CWE-20",
+        "CWE-345"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-755",
+        "CWE-682",
+        "CWE-703",
+        "CWE-754",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Trade Event Emission Uses Redundant Clock Calls and Lacks Block Time Validation",
+            "description": "The swap handler emits `TradeEvent` and `CompleteEvent` using separate `Clock::get()` calls, leading to redundant syscalls and potential timestamp inconsistency within the same transaction. The timestamp is fetched multiple times instead of being cached, and no validation is performed to ensure the block time is reasonable or unmanipulated. A validator could manipulate clock values slightly between calls, or natural timing differences could result in inconsistent timestamps across events from the same transaction. Indexing systems may record inconsistent or inaccurate event timelines, and redundant syscalls increase computational overhead, affecting efficiency and data reliability.\n"
+        },
+        {
+            "title": "Lack of Maximum Input Amount Validation in Swap Function Could Lead to Unnecessary Transaction Failures",
+            "description": "The swap function in the Pump Science protocol validates the minimum input amount but does not enforce an upper limit on the input amount. This omission allows users to submit swap transactions with amounts that exceed available liquidity or their token balance. The `validate()` function only checks that `exact_in_amount > 0` but does not validate maximum bounds based on either the user's token balance (for token sales) or the bonding curve’s `real_sol_reserves` (for token purchases). An attacker or misinformed user could submit a swap transaction with an amount exceeding available reserves or their own balance. The transaction will proceed until it fails during execution (e.g., during token transfer or within `apply_buy()`), after which the gas has already been consumed. Users experience unnecessary transaction failures and waste gas fees due to late-stage reverts, leading to a poor user experience and increased cost of interaction with the protocol.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The swap flow is generally well-structured with Anchor constraints tying the bonding curve PDA to the mint and using ATA constraints for token accounts. However, several security-relevant arithmetic and validation issues exist.\n\nThe most significant root cause is unchecked arithmetic on u64 amounts (subtraction and addition). In `buy`, `buy_amount_applied = exact_in_amount - fee_lamports` is performed without a checked subtraction or a bound check that `fee_lamports <= exact_in_amount`. In `sell`, `sell_amount_minus_fee = sell_result.sol_amount - fee_lamports` is also unchecked. If the fee calculation ever returns a value larger than the amount (whether due to misconfiguration, edge-case slot-based fee logic, or future code changes), these subtractions can underflow and wrap in release builds, producing a very large number. That can (a) incorrectly pass the slippage check, and (b) attempt to transfer an impossible lamport amount, causing transaction failure/DoS.\n\nAdditionally, the code uses `checked_add(...).unwrap()` when checking the user's lamports, which can panic on overflow and crash the instruction (again DoS). This is an exceptional-condition handling issue.\n\nFinally, some critical accounts are declared as `/// CHECK` and are not fully validated. While PDAs prevent arbitrary address substitution, the code still does not assert that `bonding_curve_sol_escrow` is system-owned with zero data. If the escrow account is ever created/initialized incorrectly (or remains from a prior program version), sells can become permanently non-functional because `system_instruction::transfer` from a non-system-owned source will fail. This is an example of insufficient upstream validation of structured account state.\n",
+            "findings": [
+                {
+                    "title": "Unchecked fee subtraction can underflow/wrap, breaking slippage logic and causing DoS",
+                    "description": "The code subtracts fees from amounts using plain `-` on `u64` without checking that the fee is not greater than the amount:\n- Buy path: `buy_amount_applied = exact_in_amount - fee_lamports;`\n- Sell path: `sell_amount_minus_fee = sell_result.sol_amount - fee_lamports;`\n\nIf `calculate_fee()` ever returns a value greater than the corresponding amount, the subtraction can underflow. In Rust release builds this wraps to a very large value, which can:\n- Incorrectly satisfy `sell_amount_minus_fee >= min_out_amount` (slippage check bypass in the local control flow),\n- Cause subsequent SOL transfers to attempt an enormous amount and fail, reverting the instruction (DoS / non-functional swaps at edge cases).\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Overflow-triggered panic due to checked_add(...).unwrap() in SOL balance check",
+                    "description": "In the buy path, the user balance check uses:\n`ctx.accounts.user.get_lamports() >= exact_in_amount.checked_add(min_rent).unwrap()`\n\nIf `exact_in_amount + min_rent` overflows `u64`, `checked_add` returns `None` and `unwrap()` panics, aborting the program. This is a denial-of-service vector on that instruction (panic instead of returning a controlled error).\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Insufficient validation of bonding_curve_sol_escrow account properties (owner/data), risking permanent transfer failures",
+                    "description": "`bonding_curve_sol_escrow` is declared as `AccountInfo` with `/// CHECK` and only constrained by PDA seeds/bump.\nThe program later uses `system_instruction::transfer` to transfer lamports *from* this escrow (sell path).\n\nA system transfer requires the source account to be system-owned. If the escrow account is incorrectly initialized (e.g., wrong owner, non-zero data) due to deployment/upgrade issues or earlier initialization code, all sells will fail because transferring from a non-system-owned source via system program will be rejected.\n\nThis stems from not validating structured account state beyond its address.\n",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Incorrect rent/balance pre-check may not cover actual costs (ATA init + transfers), leading to avoidable failures",
+                    "description": "The buy path checks `minimum_balance(0)` (rent for a zero-data system account) rather than the actual costs the user will incur, including potentially creating the user's ATA (`init_if_needed`) and paying both the escrow transfer and fee transfer.\n\nWhile this likely results in instruction failure (not direct fund loss), it is an incorrect calculation used in a resource-management decision (pre-validation) and can create avoidable DoS-like behavior for users at tight balances.\n",
+                    "category": "CWE-682",
+                    "severity": "low",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The code contains multiple arithmetic and exceptional-condition handling issues that can be triggered by user-controlled inputs and/or edge-case fee calculations. In particular:\n- Several `u64` subtractions are performed without checked arithmetic. If `fee_lamports > amount`, the subtraction will underflow and wrap in release builds, which can bypass slippage checks and lead to attempted transfers of extremely large lamport amounts (ultimately failing and reverting, but enabling grief/DoS and incorrect behavior prior to failure).\n- A `checked_add(...).unwrap()` is reachable with attacker-controlled `exact_in_amount`, allowing a panic instead of a graceful error return.\n- The code assumes certain accounts (notably the SOL escrow PDA) exist and are in an expected state, but does not validate these unusual/exceptional conditions before attempting transfers, leading to avoidable transaction failures.\n",
+            "findings": [
+                {
+                    "title": "Unchecked subtraction underflow in buy path when applying fees",
+                    "description": "In the buy branch, the code computes:\n`buy_amount_applied = exact_in_amount - fee_lamports;`\nwithout `checked_sub`. If `calculate_fee(exact_in_amount, slot)` returns a fee greater than `exact_in_amount` (e.g., due to rounding/minimum fee logic), this subtraction will underflow and wrap to a very large `u64` in release builds.\n\nImpact:\n- Can cause nonsensical `buy_amount_applied` to be passed into `apply_buy`, potentially triggering further overflows or invalid state transitions (even if reverted later on failure).\n- Can produce misleading behavior and consistent transaction failure (grief/DoS), depending on downstream checks.\n\nRecommended fix:\n- Use `exact_in_amount.checked_sub(fee_lamports).ok_or(ContractError::...) ?` and ensure fee is bounded (`fee_lamports <= exact_in_amount`).\n",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unchecked subtraction underflow in sell path can bypass slippage check and attempt oversized SOL transfer",
+                    "description": "In `complete_sell`, the code computes:\n`let sell_amount_minus_fee = sell_result.sol_amount - fee_lamports;`\nwithout checked arithmetic. If `fee_lamports > sell_result.sol_amount`, the subtraction underflows and wraps to a very large value.\n\nImpact:\n- The slippage check `sell_amount_minus_fee >= min_out_amount` can incorrectly pass due to wraparound.\n- The subsequent `system_instruction::transfer` will attempt to transfer an extremely large lamport amount from the escrow PDA, causing the instruction to fail and revert. This creates a denial-of-service/griefing vector for edge-case trades where fee can exceed proceeds.\n\nRecommended fix:\n- Use `checked_sub` and explicitly error if `fee_lamports > sell_result.sol_amount`.\n",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Panic via checked_add(...).unwrap() allows attacker-triggered abort instead of returning an error",
+                    "description": "In the buy branch, the code performs:\n`exact_in_amount.checked_add(min_rent).unwrap()`\ninside a `require!`. If `exact_in_amount` is chosen such that the addition overflows `u64`, `checked_add` returns `None` and `unwrap()` panics.\n\nBecause `exact_in_amount` is user-controlled input, an attacker can reliably trigger this panic (e.g., `u64::MAX`), causing an unexpected abort rather than a controlled program error.\n\nImpact:\n- Transaction failure via panic (DoS/griefing) and loss of clean error handling.\n\nRecommended fix:\n- Replace with checked handling:\n  `let needed = exact_in_amount.checked_add(min_rent).ok_or(ContractError::...)?;`\n",
+                    "category": "CWE-755",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Missing validation of unusual/exceptional account state for SOL escrow PDA (existence/ownership/rent)",
+                    "description": "`bonding_curve_sol_escrow` is a `CHECK` account with PDA seeds, but this instruction does not validate unusual/exceptional conditions such as:\n- whether the escrow account is initialized/existing (has lamports allocated),\n- whether it is system-owned (expected for a native SOL holding account),\n- whether it maintains required rent-exempt balance (if intended).\n\nIf the escrow account does not exist or is in an unexpected state, the subsequent SOL transfers will fail, causing avoidable transaction failures.\n\nRecommended fix:\n- Add explicit checks (owner == system program, data length == 0 if expected, and existence/lamports/rent requirements) or initialize the escrow account deterministically before use.\n",
+                    "category": "CWE-754",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-393",
+            "CWE-116",
+            "CWE-1339",
+            "CWE-369",
+            "CWE-170",
+            "CWE-240",
+            "CWE-397",
+            "CWE-191",
+            "CWE-1335",
+            "CWE-228",
+            "CWE-463",
+            "CWE-1426",
+            "CWE-172",
+            "CWE-190",
+            "CWE-20",
+            "CWE-755",
+            "CWE-193",
+            "CWE-754",
+            "CWE-128",
+            "CWE-135",
+            "CWE-138",
+            "CWE-74"
+        ]
+    ]
+}

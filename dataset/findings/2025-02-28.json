@@ -1,0 +1,66 @@
+{
+    "path": "reports/2025-02-28.pdf",
+    "project_info": {
+        "url": "https://github.com/orca-so/whirlpools/pull/768",
+        "commit_id": "26057c46bc614f26aa01792315f3d9a50e565a3d",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-02-28",
+        "project_path": "contracts/2025-02-28.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ],
+                "3": [
+                    "CWE-271"
+                ],
+                "4": [
+                    "CWE-272"
+                ]
+            },
+            "title": "Remove the freeze authority when locking positions permanently",
+            "description": "The position account acts as both the mint and freeze authority for the position mint account during initialization. After minting the position token, the mint authority is removed to ensure only one token exists per position. However, while the mint authority is removed, the freeze authority is retained even after locking the position.\n\nThe root cause is a design decision to keep the freeze authority (held by the Position PDA) for potential future features, such as transferring locked positions under contract control. Although the freeze authority cannot be restored once removed, the current implementation chooses to retain it.\n\nAn attacker could potentially exploit this if there were a critical bug in the contract logic that allows unauthorized invocation of the freeze authority, though this risk is mitigated by the fact that the authority is a PDA and requires a signature from it.\n\nThe impact is limited because the freeze authority is a PDA, making unauthorized access highly unlikely. However, retaining the freeze authority introduces a small risk surface for future misuse or unintended behavior if new features are added without proper safeguards.\n",
+            "severity": "informational",
+            "location": [
+                "token_2022.rs#94-110",
+                "token_2022.rs#204-251",
+                "open_position.rs#24-29"
+            ],
+            "files": [
+                "programs/whirlpool/src/util/token_2022.rs",
+                "programs/whirlpool/src/instructions/open_position.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Set mint freeze authority if token based locking will be supported",
+            "description": "The current implementation sets the freeze authority to None when initializing a position mint for non-Token2022 positions. This decision prevents the possibility of supporting token-based locking in the future, as the freeze authority cannot be re-assigned once set to None.\n\nThe cause is the use of Anchor's mint::authority syntax in the open_position instruction, which results in the freeze authority being set to None by default in the token program. This behavior is inherited from the SPL Token program's process_initialize_mint2 logic.\n\nIf the project later decides to support locking for standard token-based positions, it would be impossible to freeze those accounts due to the missing freeze authority. This limits future extensibility and creates a permanent divergence between lockable (Token2022) and non-lockable (standard token) positions.\n\nThe impact is a loss of design flexibility. While the team has decided to limit locking to Token2022-based positions, this decision permanently excludes older or non-extended token positions from future locking mechanisms, potentially fragmenting user experience or limiting upgrade paths.\n",
+            "severity": "informational",
+            "location": [
+                "open_position.rs#24-29"
+            ],
+            "files": [
+                "programs/whirlpool/src/instructions/open_position.rs"
+            ]
+        }
+    ]
+}

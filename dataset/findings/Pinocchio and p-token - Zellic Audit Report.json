@@ -1,0 +1,395 @@
+{
+    "path": "reports/zellic/Pinocchio and p-token - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/anza-xyz/pinocchio",
+            "https://github.com/solana-program/token"
+        ],
+        "commit_id": [
+            "887a1150bba40c5c77373da90b76557d8c73b747",
+            "4c3fabd685e30b27bbc8f5d515626177dd720a02"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-05-27",
+        "project_path": "contracts/Pinocchio and p-token - Zellic Audit Report.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Dangerous use of ?Sized bound on copy_val leads to out-of-bounds read",
+            "description": "The copy_val function in the Pinocchio SDK allows generic type T with a ?Sized bound, meaning T may not have a fixed size at compile time. This can result in two instances of T having different sizes. The function uses core::mem::size_of_val(dst) to determine how many bytes to copy from src, which may lead to reading past the end of src if src is smaller than dst. This out-of-bounds read can access uninitialized memory or adjacent data, potentially leaking sensitive information or causing undefined behavior. The root cause is the unsafe use of raw pointers combined with the ?Sized bound, which undermines memory safety guarantees. An attacker could exploit this by crafting inputs where src is smaller than dst, triggering an out-of-bounds read during memcpy. The impact includes potential data leakage and undefined behavior, which could compromise program integrity and lead to crashes or exploitable conditions.\n",
+            "severity": "critical",
+            "location": [
+                "sdk/pinocchio/src/memory.rs"
+            ],
+            "files": [
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/sdk/pinocchio/src/memory.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-351"
+                ]
+            },
+            "title": "Missing Copy bound on copy_val function",
+            "description": "The copy_val function performs a byte-wise copy of a value from src to dst without requiring T to implement the Copy trait. In Rust, types that do not implement Copy often have invariants that would be violated by a bitwise copy, such as unique ownership or drop semantics. By allowing such copies, the function can duplicate non-Copy types, breaking their internal invariants. The root cause is the absence of a Copy trait bound on the generic type T, which fails to enforce memory safety for types with custom destructors or uniqueness constraints. An attacker could exploit this to clone values that are meant to be unique, potentially leading to double-free scenarios or logical errors. The impact includes violation of type invariants, which may result in undefined behavior or critical logic flaws in the program.\n",
+            "severity": "high",
+            "location": [
+                "sdk/pinocchio/src/memory.rs"
+            ],
+            "files": [
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/sdk/pinocchio/src/memory.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-657"
+                ]
+            },
+            "title": "The Transmutable trait is missing unsafe due to memory safety requirements",
+            "description": "The Transmutable trait is used to mark types that can be safely cast from raw bytes, requiring implementers to ensure proper alignment, absence of padding, and validity of arbitrary byte representations. However, the trait is not marked as unsafe, despite the fact that incorrect implementations can lead to undefined behavior. The root cause is the lack of an unsafe designation, which fails to signal to developers that implementing this trait has memory safety implications. An attacker could exploit a type that incorrectly implements Transmutable to trigger undefined behavior via invalid memory access. The impact is potential undefined behavior, including crashes, data corruption, or exploitable memory conditions, due to improper casting of untrusted byte data.\n",
+            "severity": "high",
+            "location": [
+                "interface/src/state/mod.rs"
+            ],
+            "files": [
+                "4c3fabd685e30b27bbc8f5d515626177dd720a02/token/interface/src/state/mod.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-758"
+                ]
+            },
+            "title": "Log trait missing unsafe",
+            "description": "The Log trait allows implementers to write data into a buffer of MaybeUninit<u8> and return the number of bytes written. If the returned length exceeds the actual number of initialized bytes, subsequent code may read uninitialized memory, resulting in undefined behavior. The root cause is that the trait does not require unsafe implementation, even though correct implementation depends on memory safety guarantees. This omission fails to enforce discipline around initialization invariants. An attacker could exploit a malformed implementation to cause the logger to read uninitialized stack or heap data, potentially leaking sensitive information. The impact includes undefined behavior and potential information disclosure due to reading uninitialized memory in safe Rust contexts.\n",
+            "severity": "high",
+            "location": [
+                "sdk/log/crate/src/logger.rs"
+            ],
+            "files": [
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/sdk/log/crate/src/logger.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-758"
+                ]
+            },
+            "title": "Undefined behavior due to invalid reference casting in AccountInfo::assign",
+            "description": "The assign method in AccountInfo casts an immutable reference to a mutable raw pointer using (*self.raw).owner as *const _ as *mut Pubkey and performs a volatile write. In Rust, casting &T to &mut T or *mut T is undefined behavior, even if the underlying memory is mutable, because it violates aliasing rules. The root cause is improper use of pointer casting without ensuring unique access. The #[allow(invalid_reference_casting)] attribute suppresses compiler warnings but does not eliminate the underlying UB. An attacker could potentially exploit this in combination with other memory operations to trigger unpredictable behavior. The impact is undefined behavior, which may lead to crashes, incorrect state modifications, or exploitable conditions in the program.\n",
+            "severity": "medium",
+            "location": [
+                "sdk/pinocchio/src/account_info.rs"
+            ],
+            "files": [
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/sdk/pinocchio/src/account_info.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-439"
+                ]
+            },
+            "title": "Incorrectly requiring accounts to be a signer",
+            "description": "The new implementation of the system program's AllocateWithSeed and AssignWithSeed instructions incorrectly marks both the derived account and the base account as signers. In the original Solana system program, only the base account is required to be a signer, while the derived account is not. The root cause is a deviation from the expected account signer semantics in the instruction construction. This change breaks compatibility with existing programs that rely on the original signer requirements. An attacker could potentially exploit this by crafting transactions that fail under the new rules but would have succeeded otherwise, leading to denial of service or interoperability issues. The impact is reduced compatibility and potential disruption of dependent programs due to incorrect transaction validation.\n",
+            "severity": "low",
+            "location": [
+                "System program"
+            ],
+            "files": [
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/programs/system/src/instructions/allocate_with_seed.rs",
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/programs/system/src/instructions/assign_with_seed.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-908"
+                ],
+                "4": [
+                    "CWE-457"
+                ]
+            },
+            "title": "Undefined behavior due to MaybeUninit initialization invariant",
+            "description": "The token program uses MaybeUninit<u8> to initialize instruction data buffers, but fails to fully initialize all bytes before reading them in unsafe code. Specifically, in functions like initialize_mint, if the freeze_authority is not present, bytes 35–67 remain uninitialized but are included in the data slice passed via from_raw_parts. Reading uninitialized memory through a raw pointer in safe code context causes undefined behavior. The root cause is improper handling of MaybeUninit, violating its initialization invariant. An attacker could potentially influence the uninitialized memory contents (e.g., via memory reuse) and cause the program to behave unpredictably. The impact is undefined behavior due to reading uninitialized memory, which may lead to crashes, incorrect program state, or exploitable conditions.\n",
+            "severity": "low",
+            "location": [
+                "Token program"
+            ],
+            "files": [
+                "4c3fabd685e30b27bbc8f5d515626177dd720a02/token/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ],
+                "3": [
+                    "CWE-1111"
+                ]
+            },
+            "title": "Missing alignment safety message",
+            "description": "The new_unchecked function in InstructionContext assumes that the input pointer is eight-byte aligned because it reads a u64 (the number of accounts) from the first 8 bytes. However, the safety comment does not mention this alignment requirement, only stating that the buffer must be \"valid\". The root cause is incomplete documentation of preconditions, which may mislead implementers about what constitutes valid input. An unaligned pointer could lead to undefined behavior on architectures requiring aligned access. An attacker could provide an unaligned buffer pointer, potentially causing a crash or undefined behavior. The impact is potential undefined behavior due to unaligned memory access, especially on strict alignment architectures, though Solana's SVM may mitigate this in practice.\n",
+            "severity": "low",
+            "location": [
+                "sdk/pinocchio/src/entrypoint/lazy.rs"
+            ],
+            "files": [
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/sdk/pinocchio/src/entrypoint/lazy.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-188"
+                ]
+            },
+            "title": "AccountInfo raw pointer has an unclear provenance invariant",
+            "description": "The AccountInfo::data_ptr method derives a pointer to account data by offsetting from the raw Account pointer. This assumes that the original allocation includes both the Account metadata and the trailing data buffer, so that the derived pointer remains within the same allocation. The root cause is the lack of explicit documentation or enforcement of this provenance requirement. While currently safe because the entire input buffer is allocated together, future changes could violate this invariant and introduce undefined behavior due to pointer arithmetic across allocations. An attacker could potentially exploit a future unsafe implementation that violates provenance. The impact is future risk of undefined behavior if the provenance invariant is violated, though no immediate exploit exists.\n",
+            "severity": "informational",
+            "location": [
+                "sdk/pinocchio/src/account_info.rs"
+            ],
+            "files": [
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/sdk/pinocchio/src/account_info.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-439"
+                ]
+            },
+            "title": "The invoke_signed function now enforces account order",
+            "description": "The `invoke_signed` function in the new implementation requires that the `AccountInfo` slice be passed in the correct order corresponding to the instruction accounts, unlike the original Solana behavior which was order-agnostic. The new implementation performs a direct index-by-index comparison between `account_infos[index].key()` and `instruction.accounts[index].pubkey`, enforcing positional matching. Programs relying on the original flexible ordering of accounts may fail unexpectedly when calling `invoke_signed`, potentially leading to failed transactions or incorrect CPI calls. This behavioral divergence can break compatibility with existing programs expecting order-independent account resolution, leading to operational failures in dependent code.\n",
+            "severity": "low",
+            "location": [
+                "invoke_signed#const ACCOUNTS: usize"
+            ],
+            "files": [
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/sdk/pinocchio/src/cpi.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Less robust Pubkey definition",
+            "description": "The `Pubkey` type has been redefined as a type alias for `[u8; 32]` instead of a transparent wrapper struct, weakening type safety. This change abandons the \"New Type\" pattern, removing compile-time guarantees and methods associated with the original `Pubkey` type. While not directly exploitable, this increases the risk of logic errors where raw byte arrays are mistakenly used where a `Pubkey` is expected, potentially leading to incorrect address comparisons or derivations. Reduced type safety increases the likelihood of subtle bugs in client code, undermining Rust’s safety guarantees and making the codebase more error-prone.\n",
+            "severity": "low",
+            "location": [],
+            "files": [
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/sdk/pinocchio/src/pubkey.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Statically compute max_digits in log macro",
+            "description": "The `impl_log_for_unsigned_integer` macro uses hardcoded values for `$max_digits`, representing the maximum number of decimal digits for each integer type. These values are manually specified (e.g., 3 for u8, 20 for u64) instead of being computed at compile time, requiring manual updates and cfg attributes for platform-specific types like `usize`. Incorrect values could lead to buffer overflows or formatting errors in logging, though no immediate exploit is evident. Hardcoded values are error-prone and require maintenance across architectures; a compile-time calculation would be safer and more maintainable.\n",
+            "severity": "low",
+            "location": [
+                "log crate::impl_log_for_unsigned_integer macro"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ]
+            },
+            "title": "Message difference in process_initialize_immutable_owner",
+            "description": "The `process_initialize_immutable_owner` function previously emitted a user-facing message advising an upgrade to SPL Token 2022, but now only includes it as a comment. The `msg!()` macro call was removed and replaced with a comment in the new implementation. No direct exploitation path exists, but users may miss important upgrade guidance. Loss of runtime feedback may reduce user awareness of recommended upgrades, though there is no security impact.\n",
+            "severity": "informational",
+            "location": [
+                "process_initialize_immutable_owner"
+            ],
+            "files": [
+                "4c3fabd685e30b27bbc8f5d515626177dd720a02/token/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "The withdraw_excess_lamports function does not prevent self-transfers",
+            "description": "The `withdraw_excess_lamports` function lacks a self-transfer check, unlike the `process_transfer` function which explicitly prevents transfers between the same account. No comparison is performed between source and destination accounts before proceeding with the transfer logic. An attacker could trigger a self-transfer via this function, potentially exploiting edge-case behaviors in balance accounting or bypassing certain checks. If self-transfers are intended to be disallowed or handled differently, their allowance could lead to inconsistent state or unintended behavior.\n",
+            "severity": "low",
+            "location": [
+                "withdraw_excess_lamports"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "The Default trait implementation for Rent sysvar differs from solana-program",
+            "description": "The `Rent` struct in Pinocchio uses `#[derive(Default)]`, initializing all fields to zero, whereas the canonical `solana-program` implementation uses meaningful default constants. The derived `Default` trait sets `lamports_per_byte_year`, `exemption_threshold`, and `burn_percent` to 0, deviating from the expected network parameters. Code that relies on `Rent::default()` for configuration may operate with incorrect economic parameters, potentially leading to miscalculated rent or exemption logic. This discrepancy can cause incorrect behavior in programs that depend on accurate rent defaults, leading to potential denial of service or economic inefficiencies.\n",
+            "severity": "medium",
+            "location": [
+                "Rent::default()"
+            ],
+            "files": [
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/sdk/pinocchio/src/sysvars/rent.rs"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ]
+            },
+            "title": "Missing unsafe in validate_owner function",
+            "description": "The `validate_owner` function performs an unsafe load of a `Multisig` struct using `load::<Multisig>` without being marked as `unsafe`. The function contains a `unsafe` block that relies on the caller to guarantee no mutable borrows exist, a precondition that affects memory safety but is not enforced by the type system. If called incorrectly while a mutable borrow is active, it could result in undefined behavior due to concurrent access to account data. Failure to mark the function as `unsafe` may mislead callers into believing it is safe to use without careful consideration of borrow rules, increasing the risk of memory safety violations.\n",
+            "severity": "high",
+            "location": [
+                "validate_owner"
+            ],
+            "files": [
+                "4c3fabd685e30b27bbc8f5d515626177dd720a02/token/p-token/src/processor/mod.rs",
+                "4c3fabd685e30b27bbc8f5d515626177dd720a02/token/program/src/processor.rs"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-758"
+                ]
+            },
+            "title": "Missing mut in Pinocchio tests",
+            "description": "Tests in `sdk/pinocchio/src/account_info.rs` construct a `Ref` with an immutable `state` field, which is later mutated in the `Drop` implementation, resulting in undefined behavior. The `state` field is not declared as `mut`, violating Rust’s aliasing rules when modified during drop. While the issue is confined to test code and does not appear exploitable in production, it demonstrates incorrect usage of Rust’s borrowing model. This undermines confidence in the test suite and could mask real bugs; however, it does not directly affect runtime security.\n",
+            "severity": "low",
+            "location": [
+                "sdk/pinocchio/src/account_info.rs"
+            ],
+            "files": [
+                "887a1150bba40c5c77373da90b76557d8c73b747/pinocchio/sdk/pinocchio/src/account_info.rs"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-282"
+                ],
+                "3": [
+                    "CWE-283"
+                ]
+            },
+            "title": "Accounting error in batched instructions",
+            "description": "During batch processing of instructions in p-token, ownership checks are only performed for self-transfers or zero-amount transfers, but not for native token transfers involving attacker-controlled accounts. The code skips full ownership validation when modifying lamports directly, relying on runtime checks that can be bypassed if the final account state matches the initial state. An attacker could batch a transfer involving a non-owned account, manipulate its lamports, and restore the final state to bypass runtime ownership verification. This could lead to unauthorized modifications of account balances or accounting errors, potentially resulting in fund loss or inflation.\n",
+            "severity": "critical",
+            "location": [
+                "process_transfer",
+                "withdraw_excess_lamports"
+            ],
+            "files": [
+                "4c3fabd685e30b27bbc8f5d515626177dd720a02/token/p-token/src/processor/shared/transfer.rs"
+            ]
+        }
+    ]
+}

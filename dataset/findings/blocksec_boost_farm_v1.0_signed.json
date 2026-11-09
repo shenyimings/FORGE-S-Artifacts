@@ -1,0 +1,213 @@
+{
+    "path": "reports/blocksec_boost_farm_v1.0_signed.pdf",
+    "project_info": {
+        "url": "https://github.com/ref-finance/boost-farm",
+        "commit_id": "fc0cada65253eb1d49bcf4855c92c4ff0791239c",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-07-26",
+        "project_path": "contracts/blocksec_boost_farm_v1.0_signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Lost of Farmer’s Reward",
+            "description": "The callback function `callback_post_withdraw_reward` does not validate the existence of the `farmer_id` account before proceeding. This lack of validation can lead to a panic if the account does not exist, causing the cross-contract call (e.g., ft_transfer) to fail silently. The root cause is the absence of an account existence check in the callback handler. An attacker could potentially trigger this by initiating a withdrawal for a non-existent farmer, leading to a loss of state recovery. The impact is that rewards intended for a farmer may be permanently lost if the account is not properly registered, resulting in financial loss for users.\n",
+            "severity": "low",
+            "files": [
+                "contracts/boost-farming/src/actions_of_farmer_reward.rs"
+            ],
+            "location": [
+                "actions_of_farmer_reward.callback_post_withdraw_reward"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "No Privileged Function for Withdrawal of Beneficiary",
+            "description": "The contract allows the beneficiary to receive unclaimed rewards upon farm finalization, as shown in the `finalize` function, but does not provide a privileged function for the beneficiary to withdraw these funds. The root cause is the missing withdrawal functionality for the beneficiary despite the allocation logic being present. An attacker or malicious actor cannot directly exploit this, but the system design flaw allows funds to become permanently locked in the contract if no withdrawal mechanism exists. The impact is that unclaimed rewards are trapped in the contract, reducing capital efficiency and potentially leading to loss of funds for the intended beneficiary.\n",
+            "severity": "low",
+            "files": [
+                "contracts/boost-farming/src/seed_farm.rs"
+            ],
+            "location": [
+                "actions_of_seed.finalize#165-170"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "Improper Allowed State for System Configuration",
+            "description": "Privileged functions like `modify_daily_reward` can only be called when the contract is in the Running state, which restricts the administrator's ability to adjust critical parameters during emergency situations when the contract might be paused. The root cause is the strict state requirement in the access control logic, which does not account for emergency configuration changes. An attacker could exploit this limitation by forcing the system into a vulnerable state during a pause, where fixes cannot be applied. The impact is reduced system resilience and inability to respond to attacks or bugs during paused states, increasing the window of exposure.\n",
+            "severity": "low",
+            "files": [
+                "contracts/boost-farming/src/management.rs"
+            ],
+            "location": [
+                "management.modify_daily_reward"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "User Controllable Reward with the Change of booster_info",
+            "description": "The `modify_booster` function allows updating `booster_info`, which affects `seed_power` and thus reward calculations, but the updated power is not applied retroactively until the user claims rewards. The root cause is the delayed update of dependent state variables after a configuration change. This allows users to strategically time their reward claims to maximize gains based on old or new booster values. An attacker could exploit this by monitoring booster changes and claiming at optimal times to receive disproportionately high rewards. The impact is unfair advantage for active users and potential economic imbalance in reward distribution.\n",
+            "severity": "low",
+            "files": [
+                "contracts/boost-farming/src/booster.rs"
+            ],
+            "location": [
+                "booster.modify_booster#20-33"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ]
+            },
+            "title": "Unfair Reward Distribution in Certain Situations",
+            "description": "If the administrator fails to deposit rewards on time, the `distributed_at` timestamp is set only when the first deposit occurs, causing retroactive reward accrual from the farm's start time. The root cause is the initialization of `distributed_at` at deposit time rather than farm creation time. An attacker could exploit this by staking after a delayed deposit, receiving rewards for a period they were not active. For example, a user staking 2 days after a farm starts but 1 day after a late deposit could receive 11 days of rewards due to miscalculation. The impact is inflationary reward distribution and unfair gains for late stakers at the expense of the protocol and honest users.\n",
+            "severity": "low",
+            "files": [
+                "contracts/boost-farming/src/seed_farm.rs"
+            ],
+            "location": [
+                "seed_farm.add_reward#155-163"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Improved Sanity Checks for System Parameters",
+            "description": "The `modify_default_slash_rate` function allows setting a `slash_rate` without verifying it is below `BP_DENOM`, which could result in slash rates exceeding 100%. The root cause is the lack of input validation on critical risk parameters. An attacker with operator privileges could set an excessive slash rate, leading to more tokens being slashed than were originally staked. The impact is unfair penalties on users, potential loss of user funds, and erosion of trust in the protocol's fairness.\n",
+            "severity": "n/a",
+            "files": [
+                "contracts/boost-farming/src/management.rs"
+            ],
+            "location": [
+                "management.modify_default_slash_rate#49-58"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-252"
+                ]
+            },
+            "title": "Improved Sanity Checks When Removing Operators",
+            "description": "The `remove_operators` function does not verify whether the operator being removed actually exists, leading to silent failures. The root cause is the absence of a check on the return value or existence of the operator in the removal process. This could mislead the owner into believing an operator was removed when no action occurred. While not directly exploitable by attackers, it increases operational risk and could result in unauthorized access if a removal is assumed successful. The impact is reduced accountability and potential persistence of unauthorized operator privileges.\n",
+            "severity": "n/a",
+            "files": [
+                "contracts/boost-farming/src/owner.rs"
+            ],
+            "location": [
+                "owner.remove_operators"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Potential Elastic Supply Token Problem",
+            "description": "The contract does not support elastic supply tokens (e.g., rebasing, deflationary), which modify balances post-transfer. The root cause is reliance on the transferred amount in `ft_on_transfer` without confirming the actual received amount after token-side adjustments. If such a token is used, the contract may credit users based on an incorrect amount, leading to discrepancies in accounting. An attacker could exploit this by using a deflationary token to deposit less than recorded, then withdraw full value. The impact includes financial loss due to inflated credit and potential system insolvency.\n",
+            "severity": "n/a",
+            "files": [
+                "contracts/boost-farming/src/token_receiver.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Improper Attached Gas",
+            "description": "The `migrate` function does not validate that sufficient gas is attached for successful execution. The root cause is the lack of a gas requirement check before performing potentially expensive operations. An attacker could trigger the function with minimal gas, causing it to fail mid-execution and potentially leave the system in an inconsistent state. The impact is denial of service for migration operations and possible disruption of contract upgrades or data transfers.\n",
+            "severity": "n/a",
+            "files": [
+                "contracts/boost-farming/src/owner.rs"
+            ],
+            "location": [
+                "owner.migrate"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ]
+            },
+            "title": "Potential Centralization Problem",
+            "description": "The contract relies on a single `owner_id` for critical operations, creating a single point of failure. The root cause is the centralized access control model without multi-signature or DAO-based governance. An attacker who compromises the owner's private key could take full control of the contract, including draining funds or altering logic. The impact is high-risk exposure to key compromise, leading to total loss of funds or governance takeover. While the project plans to use a DAO, the current implementation remains centralized.\n",
+            "severity": "n/a",
+            "files": [
+                "contracts/boost-farming/src/owner.rs"
+            ],
+            "location": []
+        }
+    ]
+}

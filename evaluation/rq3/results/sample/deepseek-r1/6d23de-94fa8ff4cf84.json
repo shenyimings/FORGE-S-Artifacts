@@ -1,0 +1,231 @@
+{
+    "project": "sec3_invariant_report.pdf.json",
+    "files": [
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/create_fee_tier.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/initialize_oracle.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/transfer_position_ownership.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/swap.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/util.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/instructions/change_fee_receiver.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/math.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/lib.rs",
+        "dataset/contracts/sec3_invariant_report.pdf.json/programs/invariant/src/structs/position.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.42857142857142855,
+        "recall": 0.17647058823529413,
+        "f1": 0.25
+    },
+    "cwe_ground_truth": [
+        "CWE-669",
+        "CWE-665",
+        "CWE-707",
+        "CWE-664",
+        "CWE-697",
+        "CWE-190",
+        "CWE-682",
+        "CWE-909",
+        "CWE-456",
+        "CWE-435",
+        "CWE-1284",
+        "CWE-691",
+        "CWE-1164",
+        "CWE-710",
+        "CWE-1041",
+        "CWE-20",
+        "CWE-834"
+    ],
+    "cwe_detected": [
+        "CWE-128",
+        "CWE-190",
+        "CWE-682",
+        "CWE-691",
+        "CWE-284",
+        "CWE-703",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incorrect pool key after pool ownership transfer",
+            "description": "This issue arises from a copy-paste error in the transfer_position_ownership instruction where the new position's pool field is incorrectly set to the recipient's key instead of the original pool key. The cause is a simple programming mistake at line 67, where *self.recipient.key is assigned instead of removed_position.pool. This leads to corruption of the pool reference in the transferred position, making it point to an invalid or non-existent pool. An attacker could potentially exploit positions with incorrect pool keys to disrupt accounting or cause failed transactions. The impact is medium as it corrupts state integrity and may lead to loss of access or incorrect behavior, though it does not directly enable fund theft.\n"
+        },
+        {
+            "title": "Arithmetic overflows",
+            "description": "Multiple variables across the codebase are susceptible to arithmetic overflow due to insufficient type safety and lack of runtime overflow checks. The root causes include using narrow integer types (e.g., u32 for head counters, u128 for position_iterator) and performing unchecked arithmetic operations on values like timestamps, tick indices, and fee accumulators. For example, decrementing owner_list.head without underflow protection or incrementing position_iterator without bounds checking could lead to wraparound. An attacker could exploit these overflows to manipulate state, bypass logic, or cause unexpected behavior. The impact is low because the protocol uses runtime checks in some places and the likelihood of hitting exact overflow conditions may be low, but the potential for state corruption exists.\n"
+        },
+        {
+            "title": "Not resetting the last position after moving",
+            "description": "In the transfer_position_ownership instruction, when moving the last position into the slot of the removed one, the original last position is not reset to a default or empty state. The cause is the omission of a reset step (e.g., *last_position = Default::default()) after transferring its data. This leaves stale data in the last position account, which could be misinterpreted as a valid position in future operations. An attacker might exploit this by triggering edge cases where the stale position is accessed, potentially leading to incorrect state transitions or double usage. The impact is low as it affects internal state consistency but does not directly enable fund loss.\n"
+        },
+        {
+            "title": "Inconsistent tick checks",
+            "description": "There is inconsistency in how tick bounds are validated across the codebase. Some functions allow tick == MAX_TICK while others enforce strict inequality (tick < MAX_TICK). The root cause is a lack of unified validation logic and unclear specification on whether MAX_TICK is a valid state. This can lead to unpredictable behavior when positions are created or modified at boundary ticks. An attacker could potentially exploit the discrepancy to create edge-case positions that behave differently than expected during swaps or fee calculations. The impact is low as it primarily affects edge-case correctness rather than core functionality.\n"
+        },
+        {
+            "title": "Missing checks on tick_spacing",
+            "description": "The create_fee_tier instruction does not validate that tick_spacing is non-zero, despite tick_spacing being used in arithmetic operations like division and bit shifting. The root cause is the absence of a basic input validation check. A zero tick_spacing would lead to division-by-zero errors or infinite loops in tick-related calculations. An attacker could create a fee tier with tick_spacing = 0, causing subsequent operations (e.g., pool creation, swaps) to fail or panic. The impact is low as it leads to denial of service for specific pools rather than global fund loss.\n"
+        },
+        {
+            "title": "Inconsistent access control in change_protocol_fee",
+            "description": "The change_protocol_fee instruction uses an access control check that depends on the current fee_receiver being the admin. However, if the fee_receiver has been changed to a non-admin account via change_fee_receiver, the access control will permanently fail. The root cause is a flawed dependency between two independent state-changing functions. This creates a situation where the protocol fee cannot be updated after a fee receiver change, effectively locking the fee at its current value. The impact is low as it results in a loss of protocol governance flexibility but does not compromise fund security.\n"
+        },
+        {
+            "title": "Inconsistent amount_out and amount_in in swap",
+            "description": "In the swap logic, when the output amount exceeds the specified limit, amount_out is clamped to the limit, but amount_in is not adjusted accordingly. The root cause is incomplete logic in the swap amount capping mechanism. This leads to inconsistency between input and output amounts, potentially causing incorrect slippage calculations or user confusion. While the protocol may still function safely, the discrepancy could affect accounting accuracy or frontend interpretations. The impact is informational as it does not break core functionality or lead to fund loss.\n"
+        },
+        {
+            "title": "Redundancies in PDA seeds and account checks",
+            "description": "The code contains redundant checks and seed constructions. For example, in the swap instruction, checking reserve_x.owner and reserve_x.mint is redundant if reserve_x is already verified via PDA derivation. Similarly, including the program_id in PDA seeds is unnecessary since it is already part of the address derivation. The root cause is over-cautious or copy-pasted validation logic. While safe, these redundancies increase code complexity and gas costs slightly. The impact is informational as they do not introduce vulnerabilities but represent suboptimal design.\n"
+        },
+        {
+            "title": "Swap exceeds computation limit",
+            "description": "The swap instruction contains a loop that iterates through ticks until remaining_amount is zero, which can exceed Solana's compute limit under certain conditions. The root cause is the unbounded loop and lack of early termination when liquidity reaches zero. As shown in the PoC, the loop continues even when liquidity is zero, leading to unnecessary iterations and potential out-of-memory errors. An attacker could craft a scenario with many ticks and zero liquidity to force transaction failure, causing denial of service. The impact is informational as it affects reliability but not security per se.\n"
+        },
+        {
+            "title": "Oracle can be set but is not used",
+            "description": "The initialize_oracle instruction allows setting an oracle address, but the oracle is not used anywhere in the current code. The root cause is an incomplete or placeholder feature. This raises questions about future plans and potential attack surfaces if the oracle is later activated without proper safeguards. The impact is informational as it does not affect current functionality but may indicate technical debt or undocumented design choices.\n"
+        },
+        {
+            "title": "Redundant account and access control",
+            "description": "The change_fee_receiver instruction includes a program_authority account that is not used in the handler logic, making it redundant. Additionally, the #[access_control] macro duplicates a constraint already enforced by the account validation. The root cause is inconsistent code design and overuse of access control patterns. While not insecure, it increases complexity and gas usage. The impact is informational as it reflects poor code hygiene but no direct risk.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The analysis focused on the provided CWE categories. Several vulnerabilities were identified:\n1. The transfer_position_ownership handler doesn't validate owner_list.head before decrementing, risking underflow.\n2. The swap handler's loop lacks iteration limits, risking denial-of-service via large compute usage.\n3. The check_tick function may panic on zero tick_spacing due to unchecked division.\n4. Clock::get() unwraps could panic on syscall failure.\n5. The cross_tick function performs unchecked liquidity subtraction, risking underflow panics.\n6. Fee tier creation allows zero tick_spacing which cascades to division panics.\n7. InitializeOracle lacks authorization checks, allowing arbitrary oracle initialization.\n",
+            "findings": [
+                {
+                    "title": "Unchecked Decrement Leading to Underflow",
+                    "description": "In transfer_position_ownership.rs, the handler decrements owner_list.head without verifying \nit's greater than zero. This could cause an underflow panic when the list is empty.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unbounded Loop in Swap Function",
+                    "description": "In swap.rs, the swap handler uses a while loop without iteration limits. An attacker could \ncreate a pool with many ticks to exhaust compute units and cause transaction failure.\n",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Division by Zero in Tick Validation",
+                    "description": "In util.rs, check_tick performs division by tick_spacing without checking for zero. This could \ncause a panic if a zero tick_spacing is used elsewhere.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unhandled Clock Syscall Failure",
+                    "description": "In util.rs, get_current_timestamp and get_current_slot use unwrap() on Clock::get() results, \nwhich could panic if the syscall fails unexpectedly.\n",
+                    "category": "CWE-703",
+                    "severity": "low",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unchecked Liquidity Subtraction",
+                    "description": "In util.rs, cross_tick subtracts liquidity without overflow checks. If tick.liquidity_change \nexceeds pool.liquidity, this could panic due to underflow.\n",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Zero Tick Spacing Allowed in Fee Tier Creation",
+                    "description": "create_fee_tier.rs allows creating fee tiers with tick_spacing=0, which cascades to division \npanics in util.rs's check_tick function when used.\n",
+                    "category": "CWE-703",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unauthorized Oracle Initialization",
+                    "description": "initialize_oracle.rs lacks authorization checks, allowing any user to initialize the oracle \naccount for a pool if not already initialized.\n",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The analysis revealed multiple potential security vulnerabilities across the codebase:\n1. In `transfer_position_ownership.rs`, unchecked decrement and increment operations on list heads could lead to wrap-around errors.\n2. In `util.rs`, liquidity adjustments during tick crossing lack overflow/underflow checks.\n3. In `math.rs`, the fee subtraction in swap calculations may underflow if the fee exceeds 10^12.\n4. In `math.rs`, fee growth calculations are vulnerable to underflow due to improper handling of differences.\n5. In `position.rs`, fee calculation could overflow when multiplying large liquidity values.\n",
+            "findings": [
+                {
+                    "title": "Unchecked Head Decrement/Increment Leading to Wrap-Around Error",
+                    "description": "In `transfer_position_ownership.rs`, the operations `owner_list.head -= 1` and `recipient_list.head += 1` \nare performed without checking for underflow/overflow. If `owner_list.head` is 0, decrementing will cause \nan underflow (wrap around to u32::MAX). Similarly, incrementing `recipient_list.head` at u32::MAX will overflow.\nThis could lead to invalid account derivation and potential loss of funds.\n",
+                    "category": "CWE-128",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Liquidity Adjustment Vulnerable to Wrap-Around Error in Tick Crossing",
+                    "description": "In `util.rs`'s `cross_tick` function, liquidity adjustments (`pool.liquidity + tick.liquidity_change` or `pool.liquidity - tick.liquidity_change`)\nlack overflow/underflow checks. If `tick.liquidity_change` exceeds `pool.liquidity` during subtraction, it underflows. \nSimilarly, large additions could overflow. Both scenarios would corrupt the pool state.\n",
+                    "category": "CWE-128",
+                    "severity": "critical",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Fee Subtraction Underflow in Swap Calculation",
+                    "description": "In `math.rs`'s `compute_swap_step` function, `amount_after_fee = amount.big_mul(FixedPoint::from_integer(1u8) - fee)` \nmay underflow if the fee (set in `create_fee_tier`) exceeds 10^12 (1.0 in FixedPoint terms). This occurs because \n`FixedPoint::from_integer(1u8) - fee` becomes negative, wrapping to a large positive value. The fee parameter \nlacks validation during fee tier creation, allowing this scenario.\n",
+                    "category": "CWE-191",
+                    "severity": "critical",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Fee Growth Calculation Underflow in Position Update",
+                    "description": "In `math.rs`'s `calculate_fee_growth_inside` function, the operation `fee_growth_global_x.get() - fee_growth_below_x - fee_growth_above_x` \n(and similarly for Y) can underflow if the sum of the below/above fees exceeds the global fee growth. This would result in \nincorrect fee accounting due to wrap-around behavior.\n",
+                    "category": "CWE-191",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Potential Overflow in Fee Calculation",
+                    "description": "In `position.rs`'s `update` function, `self.0.checked_mul(liquidity.v)` (u128 multiplication) may overflow during fee calculation \nif both fee growth and liquidity values are very high. The `checked_mul` will panic on overflow, causing transaction failure.\n",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The codebase was analyzed for integer overflows in memory allocation calculations (CWE-680). All account allocations are fixed-size and handled by Anchor, with no manual buffer size calculations based on user input. Arithmetic operations use checked methods or operate within safe bounds, preventing overflows that could lead to buffer allocation issues. No instances of CWE-680 were found.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-191",
+            "CWE-768",
+            "CWE-1335",
+            "CWE-1339",
+            "CWE-670",
+            "CWE-362",
+            "CWE-705",
+            "CWE-193",
+            "CWE-190",
+            "CWE-430",
+            "CWE-662",
+            "CWE-799",
+            "CWE-841",
+            "CWE-128",
+            "CWE-135",
+            "CWE-369",
+            "CWE-431",
+            "CWE-834",
+            "CWE-1265"
+        ],
+        [
+            "CWE-680"
+        ]
+    ]
+}

@@ -1,0 +1,188 @@
+{
+    "project": "tensor_foundation_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/tensor_foundation_audit_final.pdf.json/amm/program/src/instructions/sell_nft_token_pool.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.07142857142857142,
+        "recall": 0.5,
+        "f1": 0.125
+    },
+    "cwe_ground_truth": [
+        "CWE-669",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-664",
+        "CWE-697",
+        "CWE-404",
+        "CWE-682",
+        "CWE-691",
+        "CWE-435",
+        "CWE-666",
+        "CWE-284",
+        "CWE-221",
+        "CWE-668",
+        "CWE-703",
+        "CWE-400",
+        "CWE-501"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Unfair Rent Distribution in order_vault",
+            "description": "The order_vault account's source_ta token account holds a rent-exempt reserve funded by the maker when creating an order. However, upon closing the order, the rent from this account is transferred to the taker regardless of who funded it. This occurs due to incorrect logic in the `return_rent` function, which calculates and transfers excess rent without considering the original funder. An attacker could exploit this by repeatedly taking expired or canceled orders to collect rent paid by makers. The impact is a loss of SOL for makers, though limited to rent amounts, resulting in unfair economic behavior and erosion of trust in the system.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After thorough analysis of the Solana smart contract code for selling NFTs into a token pool, I have identified several security issues stemming from the provided CWE root causes:\n\n1. **CWE-284 (Improper Access Control)**: The `owner` account is marked as `UncheckedAccount` with only a comment indicating \"has_one = owner in pool\". However, the actual constraint validation is missing in the account struct. While there's a `has_one = whitelist` constraint on the pool, there's no explicit `has_one = owner` constraint verified in the Accounts struct. This could potentially allow operations with mismatched owner accounts if the pool's owner field doesn't match the provided owner account.\n\n2. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: In the `verify_whitelist` function, when `mint_proof` is provided, the code truncates the proof vector with `proof.truncate(mint_proof.proof_len as usize)`. If `proof_len` is larger than the actual proof vector length, this could cause a panic or undefined behavior. There's no validation that `proof_len` is within bounds before truncation.\n\n3. **CWE-682 (Incorrect Calculation)**: The fee calculation and distribution logic has potential for incorrect calculations. Specifically, the `left_for_seller` is decremented multiple times using `checked_sub`, but if any of these operations fail (return None), the `unwrap_int!` macro will panic. While checked arithmetic is used, the error handling could lead to transaction failures in edge cases where fees exceed the current price due to rounding or calculation errors.\n\n4. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The pool's lamport balance tracking has a critical issue. The code calculates `lamports_taken` by subtracting final balance from initial balance, then updates `pool.amount`. However, this calculation doesn't account for rent exemption changes or other lamport movements that might occur during the transaction (like ATA creation/closure). The sanity check at the end tries to catch this, but the logic could still result in incorrect pool.amount values if multiple operations affect the pool's balance in unexpected ways.\n\n5. **CWE-691 (Insufficient Control Flow Management)**: The two-step NFT transfer process (seller -> pool -> owner) creates a temporary state where the NFT is in the pool's ATA. If the second transfer fails after the first succeeds, the NFT would be stuck in the pool's ATA. While the code closes the pool ATA afterward, there's no explicit error handling or rollback mechanism if the second transfer fails, potentially leaving the NFT in an inconsistent state.\n\n6. **CWE-435 (Improper Interaction Between Multiple Correctly-Behaving Entities)**: The interaction between the shared escrow withdrawal and the subsequent fee transfers could lead to issues. The code withdraws `current_price` from the shared escrow to the pool, then immediately starts transferring fees out. If the pool's initial balance plus the withdrawn amount is less than the sum of all fees and the seller payment, the transaction will fail. There's no pre-validation that sufficient funds exist before starting the withdrawal and transfer sequence.\n\n7. **CWE-697 (Incorrect Comparison)**: The `min_price` check occurs after the event is logged and after the NFT has already been transferred. This means if the price check fails, the NFT has already moved but the payment hasn't been completed, creating an inconsistent state. The comparison should occur before any state-changing operations.\n",
+            "findings": [
+                {
+                    "title": "Missing Owner Account Validation Constraint",
+                    "description": "The `owner` account is declared as `UncheckedAccount` with a comment indicating 'has_one = owner in pool', but no actual constraint is enforced in the account struct to verify that the provided owner account matches the pool's stored owner. This could allow operations with mismatched owner accounts, potentially sending NFTs to unintended recipients.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unbounded Proof Length Truncation",
+                    "description": "In the `verify_whitelist` function, the code truncates the merkle proof vector using `proof.truncate(mint_proof.proof_len as usize)` without validating that `proof_len` is within the bounds of the actual proof vector length. If `proof_len` exceeds the vector's length, this could cause undefined behavior or panics.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Price Check After State-Changing Operations",
+                    "description": "The `min_price` validation check occurs after the NFT has already been transferred to the owner and after the event has been logged. If the price check fails (current_price < min_price), the NFT has already been transferred but payment hasn't been completed, creating an inconsistent state. The price validation should occur before any state-changing operations.",
+                    "category": "CWE-697",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Insufficient Control Flow for Two-Step NFT Transfer",
+                    "description": "The NFT transfer process involves two steps: seller -> pool -> owner. If the second transfer fails after the first succeeds, the NFT would be stuck in the pool's ATA. While the code attempts to close the pool ATA afterward, there's no explicit error handling or rollback mechanism if the second transfer fails, potentially leaving the NFT in an inconsistent state or the pool ATA unclosed.",
+                    "category": "CWE-691",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Incorrect Pool Balance Tracking",
+                    "description": "The pool's lamport balance tracking calculates `lamports_taken` by subtracting the final balance from the initial balance, but this doesn't properly account for all lamport movements during the transaction (such as ATA creation/closure rent). The calculation could result in incorrect `pool.amount` values. While a sanity check exists, the logic is fundamentally flawed as it doesn't track individual operations' effects on the balance.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Unvalidated Sufficient Funds Before Transfer Sequence",
+                    "description": "When using shared escrow, the code withdraws `current_price` from the escrow to the pool, then immediately starts transferring fees out. There's no pre-validation that the pool's balance (initial + withdrawn) is sufficient to cover all fees and the seller payment before starting the transfer sequence. If insufficient funds exist, the transaction will fail mid-execution after some transfers have already occurred.",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Potential Arithmetic Overflow in Fee Calculations",
+                    "description": "The fee calculation and distribution logic uses `checked_sub` operations with `unwrap_int!` macros. While checked arithmetic prevents silent overflows, if any subtraction fails (returns None due to underflow), the macro will panic and abort the transaction. In edge cases where fees are miscalculated or exceed the current price due to rounding errors, this could cause unexpected transaction failures after partial state changes have occurred.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.72
+                }
+            ]
+        },
+        {
+            "reasoning": "After thorough analysis of the Solana smart contract code for selling NFTs into a token pool, I have identified several security issues stemming from the provided CWE candidates:\n\n1. **CWE-668: Exposure of Resource to Wrong Sphere** - The contract transfers NFTs through an intermediate escrow (pool_ta) before sending to the final owner. This two-step transfer process exposes the NFT to the pool's control sphere temporarily, which could be problematic if the second transfer fails or is interrupted. The NFT would remain in the pool's control rather than reaching the intended owner.\n\n2. **CWE-666: Operation on Resource in Wrong Phase of Lifetime** - The contract closes token accounts (pool_ta and seller_ta) before all fee transfers are complete. While the comment states this is intentional to avoid unbalanced accounts, this represents operating on resources (closing accounts) while they may still be needed for subsequent operations. If any fee transfer fails after account closure, the state becomes inconsistent.\n\n3. **CWE-400: Uncontrolled Resource Consumption** - The contract accepts an unbounded number of creator accounts through `remaining_accounts` for royalty distribution. An attacker could craft metadata with an excessive number of creators, causing the transaction to consume excessive compute units and potentially fail or DOS the pool.\n\n4. **CWE-665: Improper Initialization** - The contract uses `init_if_needed` for both `owner_ta` and `pool_ta` accounts. If initialization fails partway through (e.g., due to insufficient funds from seller), the contract state becomes inconsistent. The seller pays for initialization but may not complete the sale.\n\n5. **CWE-501: Trust Boundary Violation** - The contract mixes trusted data (pool configuration, whitelist) with untrusted data (seller-provided authorization_data, optional_royalty_pct) in the same transaction flow without sufficient validation. The `optional_royalty_pct` parameter allows sellers to potentially manipulate royalty calculations.\n\n6. **CWE-404: Improper Resource Shutdown or Release** - If the two-step NFT transfer process fails after the first transfer (to pool_ta) but before the second transfer (to owner_ta), the pool_ta account is closed, but the NFT may be in an inconsistent state. The error handling doesn't properly clean up all resources in failure scenarios.\n\n7. **CWE-221: Information Loss or Omission** - The contract logs events via self-CPI before validating the price mismatch check. If the transaction fails due to `PriceMismatch`, the logged event becomes misleading as it records a trade that never completed.\n",
+            "findings": [
+                {
+                    "title": "NFT Exposure Through Intermediate Escrow Transfer",
+                    "description": "The contract implements a two-step NFT transfer process where the NFT is first sent to pool_ta (pool's token account) and then to owner_ta (owner's token account). This exposes the NFT to the pool's control sphere as an intermediate step. If the second transfer fails or is interrupted, the NFT remains in the pool's control rather than reaching the intended buyer (owner). This violates the principle of minimizing resource exposure across trust boundaries.",
+                    "category": "CWE-668",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Token Account Closure Before Fee Transfer Completion",
+                    "description": "The contract closes both pool_ta and seller_ta token accounts before all fee transfers are completed. While intended to avoid unbalanced account errors, this represents operating on resources (closing accounts) during an inappropriate phase of their lifecycle. If any subsequent fee transfer fails after account closure, the transaction state becomes inconsistent and recovery is impossible.",
+                    "category": "CWE-666",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Unbounded Creator Accounts Leading to Resource Exhaustion",
+                    "description": "The contract accepts an unlimited number of creator accounts through remaining_accounts for royalty distribution via transfer_creators_fee(). An attacker could craft NFT metadata with an excessive number of creators, causing the transaction to consume excessive compute units. This could lead to transaction failure or denial of service for the pool, as each creator account requires iteration and lamport transfers.",
+                    "category": "CWE-400",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Inconsistent State from Conditional Account Initialization",
+                    "description": "The contract uses init_if_needed for owner_ta and pool_ta accounts, with the seller as the payer. If account initialization fails partway through (e.g., insufficient lamports from seller), the contract state becomes inconsistent. The seller may pay rent for partial initialization without completing the sale, and there's no mechanism to recover or rollback the partial state.",
+                    "category": "CWE-665",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Untrusted Royalty Percentage Parameter",
+                    "description": "The contract accepts an optional_royalty_pct parameter from the caller without sufficient validation against trusted sources. This mixes untrusted user input with trusted pool configuration in royalty calculations via calc_creators_fee(). A malicious seller could potentially manipulate this parameter to reduce royalty payments to creators, violating the trust boundary between user input and protocol-enforced royalties.",
+                    "category": "CWE-501",
+                    "severity": "high",
+                    "confidence": 0.82
+                },
+                {
+                    "title": "Incomplete Resource Cleanup on Transfer Failure",
+                    "description": "If the two-step NFT transfer fails after the first transfer to pool_ta but before the second transfer to owner_ta, the pool_ta account is closed via close_pool_ata_ctx(). However, this doesn't properly handle the NFT state - the NFT may be lost or in an inconsistent state. The error handling lacks proper resource cleanup and recovery mechanisms for partial transfer failures.",
+                    "category": "CWE-404",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Premature Event Logging Before Transaction Validation",
+                    "description": "The contract logs the BuySellEvent via self-CPI before performing the price mismatch validation (current_price < min_price). If the transaction subsequently fails due to PriceMismatch, the logged event becomes misleading as it records trade details for a transaction that never completed. This results in information loss about the actual transaction outcome and could mislead off-chain systems monitoring these events.",
+                    "category": "CWE-221",
+                    "severity": "low",
+                    "confidence": 0.88
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-410",
+            "CWE-487",
+            "CWE-118",
+            "CWE-501",
+            "CWE-911",
+            "CWE-610",
+            "CWE-704",
+            "CWE-400",
+            "CWE-673",
+            "CWE-668",
+            "CWE-404",
+            "CWE-666",
+            "CWE-913",
+            "CWE-1329",
+            "CWE-580",
+            "CWE-662",
+            "CWE-496",
+            "CWE-669",
+            "CWE-372",
+            "CWE-922",
+            "CWE-1229",
+            "CWE-495",
+            "CWE-706",
+            "CWE-665",
+            "CWE-221"
+        ]
+    ]
+}

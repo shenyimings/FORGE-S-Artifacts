@@ -1,0 +1,219 @@
+{
+    "project": "2025-01-pump-science.md.json",
+    "files": [
+        "dataset/contracts/2025-01-pump-science.md.json/2025-01-pump-science.md.json/programs/pump-science/src/instructions/curve/create_bonding_curve.rs",
+        "dataset/contracts/2025-01-pump-science.md.json/2025-01-pump-science.md.json/programs/pump-science/src/state/bonding_curve/structs.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2857142857142857,
+        "recall": 0.8,
+        "f1": 0.4210526315789473,
+        "tp_size": 4,
+        "p_size": 14,
+        "r_size": 5
+    },
+    "cwe_ground_truth": [
+        "CWE-1284",
+        "CWE-20",
+        "CWE-228",
+        "CWE-707"
+    ],
+    "cwe_detected": [
+        "CWE-116",
+        "CWE-1286",
+        "CWE-1287",
+        "CWE-1288",
+        "CWE-20",
+        "CWE-228",
+        "CWE-284",
+        "CWE-435",
+        "CWE-664",
+        "CWE-693",
+        "CWE-703",
+        "CWE-707",
+        "CWE-710",
+        "CWE-74"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Bonding Curve Creation Lacks URI Validation in Metadata Leading to Potential Malformed Token Information",
+            "description": "The `initialize_meta` function used during bonding curve creation does not validate the format or content of the metadata URI, which is stored on-chain and used by explorers and wallets. The URI is directly cloned from user input without checks for valid URL structure, allowed protocols (http/https/ipfs), length, or character encoding. A malicious or careless creator can set a malformed, excessively long, or non-standard URI (e.g., using unsupported schemes or non-ASCII characters), which may break metadata rendering in clients. Token metadata may be unreadable or incorrectly displayed in wallets and explorers, leading to a degraded user experience and potential trust issues due to perceived unprofessionalism or malicious intent.\n"
+        },
+        {
+            "title": "Bonding Curve Token Metadata Fields Lack Length Restrictions Leading to Excessive Storage Costs",
+            "description": "The `CreateBondingCurveParams` struct accepts unbounded string lengths for `name`, `symbol`, and `uri`, allowing potentially excessive metadata sizes. No validation is performed on the length of metadata fields during creation, enabling arbitrarily long inputs. A malicious actor could create a bonding curve with extremely long metadata strings (e.g., 1000+ characters), consuming more on-chain storage than necessary. Increased storage costs for the protocol, potential for spam, and degraded user experience in wallets and explorers due to unwieldy display of metadata.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "Reviewing `create_bonding_curve.rs` and `structs.rs` from the listed CWE root causes shows several trust-boundary and account-validation weaknesses typical in Solana/Anchor CPIs. The instruction initializes critical assets (mint + bonding curve state) and performs a CPI into the token-metadata program using multiple `UncheckedAccount` inputs. The main risks are (1) improper access control around who can create curves when whitelist is disabled, (2) improper neutralization/validation of downstream-meaningful structured inputs (metadata account, program IDs, rent/sysvar), (3) improper lifetime control of a SOL escrow PDA that is only seed-checked but not created/owned/allocated here, and (4) exceptional-condition handling gaps for unbounded metadata fields that can lead to CPI failure/DoS. No explicit arithmetic is shown in the snippet, so incorrect-calculation findings are limited to trust in externally-set totals.",
+            "findings": [
+                {
+                    "title": "Permissionless bonding curve creation when whitelist is disabled (potential missing access control)",
+                    "description": "When `global.whitelist_enabled` is false, there is no other restriction on `creator` beyond being a signer. Any signer can create a new mint/bonding curve pair under the program and set arbitrary `name/symbol/uri` and optional `start_slot` (within bounds).\n\nThis may be intended, but if the protocol assumes only authorized creators can deploy curves, the current logic is insufficient: `validate()` only checks whitelist membership conditionally. This can enable spam creation of curves, state bloat, and misleading/impersonation-style deployments (especially because metadata fields are user-controlled).\n\nIf access control is required, enforce an allowlist/role check unconditionally, or add other gating (fee, admin approval, creator registry).\n",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Metadata account is unchecked and not derived/validated against the mint (CPI trust-boundary issue)",
+                    "description": "`metadata: UncheckedAccount` is only documented as \\\"Using seed to validate metadata account\\\" but there is no actual constraint in the account definition validating that:\n- `metadata.key()` equals the canonical Metaplex metadata PDA for the given mint, and\n- the account is owned by the token-metadata program.\n\nThe program then passes this unverified account into `create_metadata_accounts_v3` CPI. While the Metaplex program will perform its own checks, relying solely on downstream validation is fragile and can lead to:\n- unexpected CPI failures (DoS) by supplying a wrong metadata account,\n- integration hazards if the downstream program behavior changes, and\n- harder-to-audit assumptions about which account is being written.\n\nRecommended: add Anchor constraints to derive and verify the metadata PDA:\n`seeds = [\"metadata\", token_metadata_program.key().as_ref(), mint.key().as_ref()]` (per Metaplex conventions) and enforce `owner == token_metadata_program.key()`.\n",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Critical program/sysvar accounts are UncheckedAccount (program-ID spoofing / protection mechanism failure)",
+                    "description": "The instruction treats `system_program`, `associated_token_program`, `token_metadata_program`, and `rent` as `UncheckedAccount` (and `token_metadata_program` is not a `Program<...>` typed account).\n\nWithout explicit address constraints (e.g., `address = system_program::ID`, `address = mpl_token_metadata::ID`, `address = anchor_spl::associated_token::ID`, and `rent = sysvar::rent::ID`), a caller could supply incorrect accounts. In many cases the CPI will fail, but this is still a protection-mechanism failure because the instruction does not enforce the intended protection boundary and instead relies on downstream failures.\n\nRecommended: use `Program<'info, System>` / `Program<'info, AssociatedToken>` / `Program<'info, Metadata>` where possible, or add `#[account(address = ...)]` constraints for each.\n",
+                    "category": "CWE-693",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "SOL escrow PDA account is only seed-checked and not created/owned/allocated here (resource lifetime/control ambiguity)",
+                    "description": "`bonding_curve_sol_escrow: AccountInfo` is seed-checked but not `init`'d, not required to be system-owned, and not required to have any particular lamport balance or data length. As written, this instruction does not establish or verify control of that resource at creation time.\n\nDepending on how later instructions use `bonding_curve_sol_escrow` (e.g., transferring SOL to/from it), this can create lifetime/control issues:\n- the account may not exist yet (0-lamport, not rent-exempt) and later logic may fail unexpectedly,\n- if later code assumes ownership/emptiness/rent-exemption without checking, funds handling can be brittle,\n- if later code allows initialization or assignment in an unsafe way, it can lead to escrow confusion.\n\nRecommended: initialize the escrow PDA deterministically during creation (e.g., `init` with system program, or at least assert `bonding_curve_sol_escrow.owner == system_program::ID` and `data_is_empty()`), and document/enforce invariants for its lifetime.\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unbounded metadata strings can trigger CPI failures (exceptional-condition handling / DoS)",
+                    "description": "`params.name`, `params.symbol`, and `params.uri` are passed directly into Metaplex `DataV2` without local bounds checking. Token-metadata enforces maximum lengths (name/symbol/uri limits); overly long inputs will cause CPI failure.\n\nWhile failing is correct, the program does not proactively validate and return a clear, contract-specific error before doing other work. This can be used for inexpensive transaction-level DoS/spam and leads to poor error hygiene.\n\nRecommended: add explicit length checks in `validate()` and return a custom error before CPIs/other state changes.\n",
+                    "category": "CWE-703",
+                    "severity": "low",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Update authority set to bonding_curve PDA may unintentionally lock metadata management (interaction/lifecycle concern)",
+                    "description": "`create_metadata_accounts_v3(..., update_authority = bonding_curve PDA, ..., is_mutable = true)` sets the update authority to the bonding curve PDA. Immediately after, the code revokes mint authority and locks the ATA via the locker.\n\nIf there is no subsequent instruction that allows the program (via PDA signing) to update metadata in a controlled way, metadata may become effectively unmanageable, or updates may depend on other components behaving exactly as expected. This is an integration hazard between correctly-behaving entities (token minting, metadata program, and internal locker rules).\n\nRecommended: explicitly define and enforce the metadata update lifecycle (e.g., immutable metadata, or an admin-controlled update path) and ensure the PDA signer seeds are usable for future updates if intended.\n",
+                    "category": "CWE-435",
+                    "severity": "low",
+                    "confidence": 0.55
+                },
+                {
+                    "title": "Coding-standard / safety hygiene: overuse of UncheckedAccount where stronger types exist",
+                    "description": "Multiple accounts are declared as `UncheckedAccount` with only comments describing expectations. In Anchor, using stronger account types and `address`/`owner` constraints is a key defensive coding standard.\n\nThis does not automatically produce an exploit, but it increases audit surface and the chance of missing a critical constraint elsewhere.\n",
+                    "category": "CWE-710",
+                    "severity": "info",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The code’s main risk surface is untrusted user-provided metadata fields (name/symbol/uri) and unchecked accounts used for CPI into the Token Metadata program. From the listed CWEs, the strongest issues are improper input validation (CWE-20) and improper handling of syntactically invalid structure (CWE-228): `params.name/symbol/uri` are passed directly into Metaplex metadata creation without enforcing length/format constraints, which can cause unexpected failures/DoS and malformed metadata. Additionally, the `metadata` and `token_metadata_program` accounts are `UncheckedAccount` with no explicit key/address verification in this instruction, so the program can be induced to CPI into an arbitrary program or write to an arbitrary account (relying on downstream program checks), which is an input-validation weakness (CWE-20) and can also be framed as special-element neutralization/injection into a downstream structured record (CWE-74/CWE-116) because user-controlled strings are embedded into an on-chain structured record consumed by other components. No clear evidence of CWE-170, CWE-172, CWE-240, CWE-463, or CWE-1426 is present in the provided snippet.",
+            "findings": [
+                {
+                    "title": "Unvalidated token metadata fields (name/symbol/uri) passed to Metaplex CPI",
+                    "description": "`CreateBondingCurveParams` contains user-controlled `name`, `symbol`, and `uri`. These values are copied directly into `mpl_token_metadata::types::DataV2` and sent via `create_metadata_accounts_v3` with no local validation of:\n- maximum lengths (Metaplex enforces limits; oversized strings will fail),\n- URI scheme/format expectations (e.g., `https://`, `ipfs://`, JSON pointer expectations by indexers),\n- character set restrictions (control characters/newlines can lead to parsing/display ambiguity in downstream indexers/clients).\n\nImpact:\n- A creator (or any caller if permissionless) can repeatedly submit syntactically invalid/oversized metadata to intentionally trigger CPI failures, causing a denial-of-service for their own bonding curve creation attempts and wasting compute/fees; depending on how this instruction is composed in higher-level flows, it can also disrupt UX or automation.\n- Malformed metadata can propagate to downstream consumers (wallets/indexers/marketplaces) with unexpected parsing behavior.\n\nRecommendation:\nEnforce strict bounds and format checks before CPI, e.g., `name.len() <= 32`, `symbol.len() <= 10`, `uri.len() <= 200` (or Metaplex limits), reject control characters, and optionally validate URI scheme/ASCII.\n",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Improper handling of syntactically invalid metadata structure/limits",
+                    "description": "The instruction does not proactively handle syntactically invalid metadata inputs (oversized strings, invalid URI formats) and instead relies on the downstream Token Metadata program to reject them.\n\nWhile the CPI will likely fail safely, failing to validate syntactic well-formedness locally creates:\n- predictable failure modes (DoS-by-invalid-input),\n- brittle integrations if upstream components assume successful creation once accounts are initialized.\n\nRecommendation:\nValidate syntactic constraints (lengths, allowed characters, URI format) before initializing accounts / before CPI to avoid partial work and unexpected failures.\n",
+                    "category": "CWE-228",
+                    "severity": "low",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unchecked `token_metadata_program` and `metadata` accounts allow unsafe downstream interaction",
+                    "description": "In `CreateBondingCurve`, both `token_metadata_program` and `metadata` are declared as `UncheckedAccount` and there is no explicit constraint that:\n- `token_metadata_program.key()` equals the canonical Metaplex Token Metadata program id, and\n- `metadata` is the correct PDA derived from `(\\\"metadata\\\", token_metadata_program_id, mint)` (or equivalent Metaplex derivation).\n\nThe code comments say “Using seed to validate metadata account”, but no such seed constraint is present. As a result, an attacker can supply:\n- a different program as `token_metadata_program`, causing the instruction to CPI into arbitrary code, and/or\n- an arbitrary writable `metadata` account, potentially enabling unexpected writes/allocations by the callee.\n\nEven if the real Metaplex program would reject incorrect metadata addresses, failing to enforce these invariants locally is an input-validation flaw and increases the blast radius if the program id is spoofed.\n\nRecommendation:\n- Constrain `token_metadata_program` to the known id.\n- Constrain `metadata` to the expected PDA for the mint and Metaplex program id via Anchor `seeds`/`constraint`.\n",
+                    "category": "CWE-20",
+                    "severity": "high",
+                    "confidence": 0.82
+                },
+                {
+                    "title": "User-controlled strings embedded into a downstream structured record without neutralization",
+                    "description": "`name`, `symbol`, and `uri` are inserted into Metaplex metadata (a structured record consumed by wallets/indexers) without sanitization/escaping (e.g., rejecting control characters, enforcing URI normalization).\n\nThis can lead to downstream parsing ambiguities or display manipulation in clients that do not robustly sanitize metadata fields (e.g., newlines, RTL markers, unusual unicode).\n\nRecommendation:\nApply a conservative allowlist for characters and normalize/validate URIs before sending to the metadata program.\n",
+                    "category": "CWE-74",
+                    "severity": "low",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Missing output encoding/escaping guarantees for metadata fields consumed by other components",
+                    "description": "The contract emits `CreateEvent` containing raw `params.name/symbol/uri` and also writes them into token metadata. If downstream consumers assume particular encoding (ASCII/UTF-8 without controls) and the program does not enforce it, the intended structure/presentation can be altered.\n\nRecommendation:\nValidate UTF-8 (Rust `String` is UTF-8, but still allows control chars), reject control characters, and consider normalizing unicode where appropriate.\n",
+                    "category": "CWE-116",
+                    "severity": "info",
+                    "confidence": 0.55
+                }
+            ]
+        },
+        {
+            "reasoning": "Reviewing the instruction from the provided CWE root causes, the main risk area is insufficient validation of user-controlled inputs in `CreateBondingCurveParams` (strings + optional start slot) and insufficient validation of critical accounts (especially `metadata` and program accounts marked as CHECK/Unchecked). The code validates `start_slot` bounds and (optionally) whitelist membership, but does not validate the syntactic correctness/length of metadata strings, does not ensure the `metadata` account is the canonical PDA for the mint, and does not constrain the passed `token_metadata_program`/`system_program`/`rent` accounts to the expected program IDs. These gaps can lead to DoS (oversized/invalid strings causing serialization/CPI failures), or to misdirection of CPI calls / incorrect metadata account creation attempts, depending on how Anchor resolves CPI targets and how downstream programs validate accounts.",
+            "findings": [
+                {
+                    "title": "Unvalidated metadata account address (not checked to be the canonical Metaplex metadata PDA)",
+                    "description": "`metadata` is declared as `UncheckedAccount` with only a comment “Using seed to validate metadata account”, but there is no actual constraint ensuring it equals the Metaplex metadata PDA for the given mint (e.g., `['metadata', mpl_program_id, mint]`).\n\nAs a result, a caller can supply an arbitrary account as `metadata`. While the Metaplex program typically enforces PDA derivation internally, the contract should still validate consistency between inputs (mint ↔ metadata address) at the instruction boundary to prevent:\n- unexpected CPI failures/DoS due to wrong `metadata` account passed\n- reliance on downstream validation behavior (future program changes or alternative metadata program IDs could weaken assumptions)\n",
+                    "category": "CWE-1288",
+                    "severity": "medium",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Program accounts are not constrained to expected IDs (system/token-metadata/rent/associated token)",
+                    "description": "Multiple critical accounts are accepted as `UncheckedAccount` without address constraints:\n- `system_program` (UncheckedAccount)\n- `token_metadata_program` (UncheckedAccount)\n- `associated_token_program` (UncheckedAccount)\n- `rent` (UncheckedAccount)\n\nThe instruction performs CPI to `token_metadata_program` via `create_metadata_accounts_v3`. Without constraining these accounts to the canonical program IDs, the instruction can be invoked with unexpected program addresses. This is an input-type/identity validation issue: these accounts are expected to be specific programs/sysvars but the contract does not enforce that expectation.\n\nEven if downstream CPI fails for non-matching programs, the result is at minimum a user-triggerable DoS and at worst could interact with a malicious program if the CPI target is not strongly typed/validated at runtime.\n",
+                    "category": "CWE-1287",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "No validation of syntactic correctness/size limits for name/symbol/uri strings used in metadata CPI",
+                    "description": "`CreateBondingCurveParams` contains user-controlled `name`, `symbol`, and `uri` strings. These are forwarded directly into Metaplex `DataV2` without validating:\n- maximum lengths expected by token-metadata (name/symbol/uri have practical limits)\n- basic syntactic correctness (e.g., URI format, disallowing control characters)\n\nThis can cause:\n- CPI failures (DoS) if strings exceed allowed lengths or violate downstream expectations\n- unexpected metadata contents if control characters or malformed strings are accepted upstream\n\nThe contract should enforce length/format constraints before invoking CPI.\n",
+                    "category": "CWE-1286",
+                    "severity": "low",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Missing validation that `start_slot` is consistent with bonding curve state fields beyond simple bounds",
+                    "description": "The code validates `start_slot` only against `clock.slot` and `clock.slot + MAX_START_SLOT_DELAY`. It does not validate consistency with other configuration/state that may be set in `update_from_params` (not shown), such as ensuring `start_slot` is nonzero only when expected, or ensuring it matches global timing rules beyond the simple window check.\n\nIf `update_from_params` uses `start_slot` to derive other fields, incomplete consistency checks at the boundary can allow inconsistent state initialization.\n",
+                    "category": "CWE-1288",
+                    "severity": "low",
+                    "confidence": 0.45
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-228",
+            "CWE-170",
+            "CWE-138",
+            "CWE-172",
+            "CWE-74",
+            "CWE-463",
+            "CWE-240",
+            "CWE-1426",
+            "CWE-116",
+            "CWE-20"
+        ],
+        [
+            "CWE-1284",
+            "CWE-1285",
+            "CWE-1286",
+            "CWE-1287",
+            "CWE-1288",
+            "CWE-1289",
+            "CWE-166",
+            "CWE-167",
+            "CWE-168",
+            "CWE-229",
+            "CWE-233",
+            "CWE-237",
+            "CWE-241",
+            "CWE-179",
+            "CWE-1173"
+        ]
+    ]
+}

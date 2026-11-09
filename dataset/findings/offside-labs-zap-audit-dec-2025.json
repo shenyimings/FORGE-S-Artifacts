@@ -1,0 +1,229 @@
+{
+    "path": "reports/offside-labs-zap-audit-dec-2025.pdf",
+    "project_info": {
+        "url": "https://github.com/MeteoraAg/zap-program",
+        "commit_id": "3162ebb129e9cfd50fba4300758288c118ce4d33",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-11-20",
+        "project_path": "contracts/offside-labs-zap-audit-dec-2025.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-369"
+                ]
+            },
+            "title": "Missing Validation in find_x0_and_delta_x of CurveHandler and BidAskHandler",
+            "description": "The vulnerability exists in the `find_x0_and_delta_x` functions of both CurveHandler and BidAskHandler, where there is no validation to check if `min_delta_id` equals `max_delta_id`. This lack of input validation leads to a division-by-zero error during computation when `b == c`, as the subtraction `b.safe_sub(c)?` results in zero. An attacker could exploit this by providing equal values for `min_delta_id` and `max_delta_id`, causing the transaction to fail with a division-by-zero exception. This prevents the Curve and BidAsk strategies from supporting cases where the delta range is zero, leading to a denial of service for specific legitimate use cases.\n",
+            "severity": "low",
+            "location": [
+                "CurveHandler.find_x0_and_delta_x#325-327",
+                "BidAskHandler.find_x0_and_delta_x#320-320"
+            ],
+            "files": [
+                "programs/zap/src/ultils/dlmm_utils.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Precision Loss May Lead to Inaccurate Results in CurveHandler.find_x0_and_delta_x",
+            "description": "In the `find_x0_and_delta_x` function, the variable `c` is accumulated in a loop where each iteration computes `c_delta` using integer division that rounds down. This repeated rounding down causes cumulative precision loss over the loop's execution, proportional to the number of iterations (`max_delta_id - min_delta_id`). As a result, the final value of `c` is smaller than mathematically correct, which skews the calculation of `x0` and `delta_x`. This inaccuracy could lead to suboptimal or incorrect liquidity positioning or price estimation, reducing the effectiveness and reliability of the zap functionality for users relying on precise calculations.\n",
+            "severity": "low",
+            "location": [
+                "CurveHandler.find_x0_and_delta_x#314-323"
+            ],
+            "files": [
+                "programs/zap/src/ultils/dlmm_utils.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-636"
+                ]
+            },
+            "title": "Possible Unexpected swap_amount in calculate_swap_amount",
+            "description": "The `calculate_swap_amount` function uses a binary search to determine the optimal swap amount but breaks the loop prematurely if `calculate_swap_result` or `validate_swap_result` returns an error, returning the current (possibly non-zero) `swap_amount` without propagating the error. This flawed error handling allows an intermediate, imprecise value to be used as the final swap amount. An attacker or malicious actor could potentially manipulate conditions to trigger such errors and force an inaccurate swap, resulting in leftover tokens and failure to achieve the intended liquidity zap. This undermines the core functionality of the zap-in mechanism by reducing its precision and reliability.\n",
+            "severity": "low",
+            "location": [
+                "calculate_swap_amount#439-450"
+            ],
+            "files": [
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Rounding-Down Division May Allow Larger Price Diff",
+            "description": "In the `zap_in_damm_v2` instruction, `price_diff_bps` is calculated using floor division, which truncates the result downward. This rounding down allows a `price_diff` that exceeds the intended limit to still pass the slippage check when compared to `max_sqrt_price_change_bps`. For example, a `price_diff` of 19 might be accepted even when only 10 is allowed due to the flooring effect. This creates a vulnerability where larger-than-expected price movements are permitted, increasing slippage risk beyond user expectations and potentially leading to significant economic loss during volatile market conditions.\n",
+            "severity": "low",
+            "location": [
+                "zap_in_damm_v2#490-492",
+                "ix_zap_in_damm_v2#215-218"
+            ],
+            "files": [
+                "programs/zap/src/instructions/ix_zap_in_damm_v2.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Possible Integer Overflow in calculate_swap_amount",
+            "description": "The `calculate_swap_amount` function computes the midpoint in a binary search using `max_swap_amount.safe_add(min_swap_amount)?.safe_div(2)?`. While safe math functions are used, the addition `max + min` could still overflow even if the final result fits in the type, especially when both values are large. This could lead to an incorrect midpoint being calculated, distorting the binary search and potentially causing incorrect swap amounts or failure to converge. Although the use of safe math prevents panic, the logical overflow could still result in unexpected behavior. A safer approach would be to compute the midpoint as `min + (max - min) / 2` to avoid overflow entirely.\n",
+            "severity": "informational",
+            "location": [
+                "calculate_swap_amount#391-391"
+            ],
+            "files": [
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Missing Parameter Validation in zap_in_dlmm_for_*_position IX",
+            "description": "The instructions `zap_in_dlmm_for_initialized_position` and `zap_in_dlmm_for_uninitialized_position` do not validate that `min_delta_id ≤ max_delta_id`. If a user provides invalid parameters where `min_delta_id > max_delta_id`, subsequent calculations may result in a division-by-zero error or type conversion failure, leading to transaction failure. This lack of input validation exposes the system to avoidable runtime errors. It is recommended to add a precondition check to ensure the validity of the delta ID range before proceeding with any computation, improving robustness and user experience.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "programs/zap/src/instructions/zap_in_dlmm/ix_zap_in_dlmm_for_initialized_position.rs",
+                "programs/zap/src/instructions/zap_in_dlmm/ix_zap_in_dlmm_for_uninitialized_position.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Possible Missing Validation on ZapInDlmmForUninitializedPositionCtx.position",
+            "description": "In the `ZapInDlmmForUninitializedPositionCtx`, there is a check to ensure `position ≠ owner`, but no similar validation for `position ≠ rent_payer`, even though `rent_payer` is also a signer. This omission could allow a user to set the position account to be the same as the rent payer, which might lead to confusion or unintended behavior in account management. While not immediately critical, this weakens the integrity of account separation. Adding a check to ensure `position ≠ rent_payer` would improve code clarity and prevent potential misuse.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "programs/zap/src/instructions/zap_in_dlmm/ix_zap_in_dlmm_for_uninitialized_position.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1078"
+                ],
+                "4": [
+                    "CWE-1099"
+                ]
+            },
+            "title": "Typo",
+            "description": "The codebase contains several typographical errors in comments and filenames, such as \"damm_v2_ultils.rs\" instead of \"damm_v2_utils.rs\", and misspellings like \"advoid\" (avoid), \"becase\" (because), \"equa\" (equal), \"possitive\" (positive), and \"x0\" (delta_x). Additionally, unit annotations for compute unit (CU) consumption are missing. While these do not directly impact security, they reduce code readability and professionalism, potentially leading to misunderstandings during maintenance or review.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "programs/zap/src/ultils/",
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Unsupported BaseFeeMode in damm_v2_utils",
+            "description": "In the `get_fee_handler` function within `damm_v2_utils`, if the `base_fee_mode` conversion fails, the code defaults to using `cliff_fee_numerator` without raising an error. This means that an unsupported or unknown fee mode is silently handled with potentially incorrect fee logic, which could lead to miscalculated fees and unintended economic behavior. Instead, the function should reject unknown fee modes with an explicit error to ensure only supported configurations are processed, maintaining system integrity and predictability.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "programs/zap/src/ultils/damm_v2_ultils.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing Type Validation for UpdateLedgerBalanceAfterSwapCtx.token_account",
+            "description": "The `update_ledger_balance_after_swap` instruction accepts a `token_account` as an `UncheckedAccount`. This allows any account with data in the expected offset (`AccountInfo.data[64..72]`) to be processed, even if it is not a valid SPL Token Account. This lack of type validation could allow malicious actors to pass arbitrary accounts, potentially leading to incorrect state updates or parsing of invalid data. It is recommended to enforce type safety by using an Anchor constraint to require the account to be of type `TokenAccount`, ensuring proper validation and preventing misuse.\n",
+            "severity": "informational",
+            "location": [],
+            "files": [
+                "programs/zap/src/instructions/ledger_instructions.rs"
+            ]
+        }
+    ]
+}

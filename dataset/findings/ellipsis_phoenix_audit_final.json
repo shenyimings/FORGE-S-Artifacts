@@ -1,0 +1,122 @@
+{
+    "path": "reports/ellipsis_phoenix_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/Ellipsis-Labs/phoenix-v1",
+        "commit_id": "ee9cc03",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2023-02-08",
+        "project_path": "contracts/ellipsis_phoenix_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Invalid DoubleEndedIterator Trait Implementations",
+            "description": "1. **Description:** The critbit, AVL tree, and red-black tree data structures in the Sokoban library do not correctly implement Rust\u2019s DoubleEndedIterator trait. This causes the iterator's next and next_back methods to cross each other, leading to double-counting of elements.\n2. **Cause:** The implementation of the DoubleEndedIterator trait fails to ensure that forward and backward iteration do not overlap, violating the Rust iterator contract.\n3. **Exploitation:** An attacker or malicious user could exploit this by using iter_mut to obtain multiple mutable references to the same value, which violates Rust's memory safety guarantees and could lead to undefined behavior.\n4. **Impact:** This could result in memory safety issues, including data corruption or potential privilege escalation in contexts where the library is used independently of Phoenix.\n",
+            "severity": "high",
+            "files": [
+                "src/state/markets/fifo.rs"
+            ],
+            "location": [
+                "RedBlackTree.iter_mut",
+                "AVLTree.iter_mut",
+                "Critbit.iter_mut"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-394"
+                ]
+            },
+            "title": "SDK Transaction Spoofing",
+            "description": "1. **Description:** The Phoenix SDK processes inner instructions from transactions without checking whether the transaction itself failed (i.e., the is_err field is ignored). This allows spoofed log events to be processed.\n2. **Cause:** The SDK iterates over inner instructions regardless of the transaction's success status, failing to validate transaction integrity before parsing.\n3. **Exploitation:** An attacker could manually invoke the Phoenix program from another on-chain program within a failing transaction, causing the SDK to incorrectly parse and act on non-existent or invalid events.\n4. **Impact:** This could lead to incorrect state interpretation in the SDK, potentially resulting in denial of service or incorrect user balances, especially when combined with unsafe truncation issues.\n",
+            "severity": "high",
+            "files": [
+                "src/program/event_recorder.rs"
+            ],
+            "location": [
+                "sdk_client.rs#parse_phoenix_events"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Account Creation DOS",
+            "description": "1. **Description:** The phoenix program fails to create accounts if they already contain lamports, which can be exploited to block seat creation.\n2. **Cause:** The use of system_instruction::create_account, which enforces that the target account must be empty, without first checking or handling pre-funded accounts.\n3. **Exploitation:** An attacker can send lamports to a would-be seat account in advance, causing subsequent seat creation attempts to fail with an error.\n4. **Impact:** This results in a denial of service for legitimate users attempting to create seats, disrupting access to the orderbook.\n",
+            "severity": "medium",
+            "files": [
+                "src/program/processor/manage_seat.rs"
+            ],
+            "location": [
+                "processor/manageseat.rs#create_account"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Explicate Overflow Boundaries",
+            "description": "1. **Description:** Arithmetic operations in the matching engine, particularly in calculating adjusted quote lot budgets, are susceptible to overflow due to use of u64 without sufficient bounds checking.\n2. **Cause:** The calculation involves multiplication of multiple large values (tick size, price in ticks, base lots), which can exceed the u64 limit under certain market configurations.\n3. **Exploitation:** An attacker could configure or manipulate market parameters such that the product of these values exceeds 2^64, causing the operation to abort and disrupt order processing.\n4. **Impact:** This leads to a denial of service during normal operation when large trades or price fluctuations occur, potentially halting order matching.\n",
+            "severity": "medium",
+            "files": [
+                "src/state/markets/fifo.rs"
+            ],
+            "location": [
+                "matching_engine.rs#adjusted_quote_lot_budget"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "Seat Eviction DOS",
+            "description": "1. **Description:** The phoenix-seat-manager does not verify that the seat_deposit_collector has sufficient lamports when claiming market authority, which can cause future EvictSeat calls to fail.\n2. **Cause:** Missing validation of account balance before allowing authority transfer, leading to insufficient funds for rent-exempt token accounts.\n3. **Exploitation:** An attacker could claim market authority without funding the required accounts, causing subsequent seat evictions to fail due to lack of rent funds.\n4. **Impact:** This results in a denial of service for seat eviction functionality, preventing cleanup of inactive seats and potentially clogging the system.\n",
+            "severity": "low",
+            "files": [
+                "src/program/processor/manage_seat.rs"
+            ],
+            "location": [
+                "process_claim_market_authority"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,1973 @@
+{
+    "path": "reports-without-source/2025-12-15-cyfrin-deriverse-dex-v2.0.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/deriverse/protocol-v1",
+            "https://github.com/deriverse/protocol-v1.git"
+        ],
+        "commit_id": [
+            "4f7bc8ac68325aa93b339ff91c0ac794ea17ffd9",
+            "30b06d2da69e956c000120cdc15907b5f33088d7",
+            "a1b2c3d4e5f6..."
+        ],
+        "address": "n/a",
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-10-29",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-807"
+                ]
+            },
+            "title": "Users can cast vote without actually holding tokens",
+            "description": "Users can vote in governance decisions without actually holding the required DRVS tokens by exploiting the timing of deposits and withdrawals during an active voting period. The root cause lies in the voting mechanism's reliance on stale token balances recorded at the time of the first deposit, without revalidating holdings at the time of voting. A malicious user can deposit tokens before a voting period starts, cast a vote using the full balance, then withdraw all tokens while still retaining voting rights for that period. This allows vote inflation and undermines the integrity of the governance system, leading to potential manipulation of protocol decisions by users with no economic stake.\n",
+            "severity": "high",
+            "location": [
+                "voting.rs",
+                "client_community.rs::update#"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing Version Validation for Private Clients Account in new_private_client",
+            "description": "The new_private_client function fails to validate that the provided private_clients_acc account matches the protocol version specified in root_state. Because different protocol versions use different PDA seeds that include the version number, each version must have isolated accounts. However, the function only checks basic administrative conditions and does not verify that the account owner, discriminator tag, version, or PDA derivation aligns with the expected values for the current version. This allows an operator from one version to pass an account from another version, potentially leading to cross-version manipulation and unauthorized modifications of private client data, breaking version isolation.\n",
+            "severity": "high",
+            "location": [
+                "src/program/processor/new_root_account.rs::new_private_client#291"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Airdrop Implementation Issues: Unvalidated Ratio and Potential Transfer Direction Mismatch",
+            "description": "The airdrop function has two critical issues. First, the ratio parameter used to convert user points into DRVS tokens is not validated—only the data format is checked—allowing users to set arbitrarily high ratios (e.g., 1,000,000.0), which could lead to massive token inflation. Second, the transfer logic sends tokens from the user's associated token account to the program, which contradicts the expected behavior of an \"airdrop\" (which should send tokens to users). This could result in users losing tokens instead of receiving rewards. The impact includes potential supply inflation and user fund loss if the transfer direction is not intentional.\n",
+            "severity": "high",
+            "location": [
+                "AirdropData::new",
+                "airdrop function"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "update_records always resets fees_ratio to 1 whenever a new currency is added",
+            "description": "The update_records function resets the fees_ratio to 1.0 for all ClientCommunityRecord entries whenever a new currency is added, overriding any previously earned fee discounts (e.g., from prepayments). This occurs because the function iterates over all records and unconditionally sets fees_ratio = 1.0. As a result, users who have legitimately earned fee discounts lose them when the admin adds a new currency. The root cause is the lack of scoping to only newly added records. This leads to financial loss for users and undermines trust in the fee discount mechanism.\n",
+            "severity": "high",
+            "location": [
+                "update_records"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Stale Funds Data in Leverage Validation Due to Missing Funding Rate Settlement",
+            "description": "In the perp_change_leverage function, the funding rate is not settled before leverage validation, causing the system to use stale funds data. The check_client_leverage function relies on up-to-date funding payments, but perp_change_leverage omits the required check_funding_rate call. If the funding rate has changed since the last settlement, the user's funds are outdated, leading to incorrect leverage calculations. This allows users to change leverage under false financial conditions, potentially bypassing margin requirements. Other functions like new_perp_order correctly perform this update, highlighting the inconsistency.\n",
+            "severity": "high",
+            "location": [
+                "perp_change_leverage.rs",
+                "perp_order_cancel"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Fee Discount Calculation Ignores Base Currency Value Differences",
+            "description": "The fees_deposit function calculates fee discounts based solely on normalized token amounts without considering the actual market value of different base currencies. It divides the raw amount by the decimal factor but does not apply a value-based normalization (e.g., USD equivalent). This means depositing 1000 low-value tokens (worth $1) grants the same discount as depositing 1000 USDC (worth $1000). As the protocol plans to support more base currencies via governance, this creates an unfair advantage for users using low-value tokens, distorting the incentive model and potentially leading to economic imbalance.\n",
+            "severity": "high",
+            "location": [
+                "fees_deposit"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Missing ps check causes Dividend Loss",
+            "description": "The perp engine's match_ask_orders and match_bid_orders functions allocate a portion of protocol fees to pool_fees based on spot_pool_ratio, even when there are no liquidity providers (ps == 0). This occurs because the code does not check whether ps is zero before performing the allocation. As a result, fees that should be fully distributed as dividends to DRVS holders are partially diverted to a non-existent pool. This reduces dividend payouts and harms token holders. The fix requires conditional logic to set pool_fees to zero when ps == 0.\n",
+            "severity": "high",
+            "location": [
+                "match_ask_orders",
+                "match_bid_orders"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Price manipulation during initial ps minting can cause user losses",
+            "description": "When a new instrument is created with no liquidity (ps == 0), the first liquidity provider's deposit price is derived from last_px, best_bid, and best_ask. A malicious user can manipulate best_bid or best_ask by placing extreme orders (e.g., a very low ask) before the LP joins. The system then computes the price as the minimum of best_ask and maximum of best_bid, resulting in an artificially low price. The LP ends up depositing far more asset tokens than intended, leading to immediate loss. The attacker can later trade at fair price and extract value, exploiting the honest LP.\n",
+            "severity": "high",
+            "location": [
+                "perp engine during initial ps minting"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Incorrect Fee Scaling in spot_lp",
+            "description": "The spot_lp instruction incorrectly calculates fees by dividing last_px by get_dec_factor(asset_token_decs_count), but last_px is stored with a precision of 10^(9 + asset_token_decs_count - crncy_token_decs_count). When crncy_token_decs_count ≠ 9, this leads to incorrect fee scaling. For example, if currency decimals are 6 instead of 9, the fee is overestimated by 1000x. This causes users to pay significantly higher fees than intended. The root cause is the use of the wrong decimal factor in the fee calculation.\n",
+            "severity": "high",
+            "location": [
+                "src/program/processor/spot_lp.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-1325"
+                ]
+            },
+            "title": "DoS attack exhausting account space and halting spot trading",
+            "description": "The temporary spot client ID system reserves space in client_infos_acc and client_infos2_acc when orders are created, but deallocation only happens via specific cleanup functions (e.g., finalize_spot). An attacker can create many small orders across multiple accounts and avoid triggering cleanup, causing indefinite reservation of client IDs. Since Solana accounts have a 10MB limit (~312,500 entries), this can exhaust available space and prevent legitimate users from placing orders, resulting in a denial-of-service for spot trading. The impact is mitigated by the cost of placing many orders, but remains feasible.\n",
+            "severity": "high",
+            "location": [
+                "spot order system",
+                "client_infos_acc",
+                "client_infos2_acc"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Attacker can cause losses to others by partially closing their position at an unfavorable price",
+            "description": "The check_client_leverage_from function is only triggered if leverage increases, position sign changes, or old leverage was at maximum. A user can exploit this by partially closing a position at an extremely unfavorable price (e.g., selling long at near-zero price) without triggering the check. If no opposing liquidity exists, the user can self-trade via another account, realizing a loss that gets socialized across other users. Because the leverage and sign remain unchanged, the validation is skipped. This allows malicious actors to impose losses on the broader user base.\n",
+            "severity": "high",
+            "location": [
+                "perp_change_leverage",
+                "check_client_leverage_from"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ]
+            },
+            "title": "Makers' rebates are not paid in case of swap",
+            "description": "During a swap, when the orderbook is absent or the AMM offers a better price, the system processes trades without passing the client_community context, resulting in fee_rate and ref_discount being set to zero. Consequently, even when makers are filled, they receive no rebates, and the protocol collects no fees. This happens because the fill logic uses fill_static_args.fee_rate == 0.0 as the condition to skip fee and rebate calculations, instead of checking the engine's global fee_rate. This leads to lost revenue and broken incentives for market makers.\n",
+            "severity": "high",
+            "location": [
+                "swap.rs",
+                "engine.rs::match_orders",
+                "engine.rs::fill"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "perp-change-leverage uses stale perp-underlying-px",
+            "description": "The perp_change_leverage function fails to call engine.state.set_underlying_px() before performing margin and leverage checks. This results in the use of a stale perp_underlying_px value, which is only updated by other functions (e.g., new_perp_order). Since this value affects margin call calculations and leverage validation, using outdated data can allow users to change leverage under incorrect market conditions, potentially bypassing safety checks. Other functions correctly update this value, indicating a missing step in this specific flow.\n",
+            "severity": "high",
+            "location": [
+                "perp_change_leverage.rs",
+                "new_perp_order",
+                "perp-withdraw",
+                "perp-order-cancel"
+            ],
+            "files": []
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Shorts can withdraw full available funds instead of being restricted to margin call limits in perp-withdraw",
+            "description": "In perp_withdraw.rs, the margin call detection logic incorrectly calls is_long_margin_call() twice instead of checking both long and short positions. As a result, when a short position is underwater, the margin_call flag evaluates to false because is_long_margin_call() returns false for shorts. This causes the system to bypass rebalancing checks and allow full withdrawal of funds even when the position is in margin call. The impact includes the ability for undercollateralized short positions to withdraw equity, increasing systemic risk.\n",
+            "severity": "high",
+            "location": [
+                "perp_withdraw.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1023"
+                ]
+            },
+            "title": "Margin call detection functions ignore liquidation threshold",
+            "description": "The is_long_margin_call() and is_short_margin_call() functions do not consider the liquidation_threshold parameter when determining margin call status, leading to inaccurate detection of margin calls. This occurs because the functions compare the current price directly against the highest long or lowest short price without applying the threshold buffer. As a result, margin calls may not be detected even when positions are underwater, causing the system to treat distressed positions as healthy. This allows users to withdraw more funds than permitted during active margin calls, bypassing intended restrictions, and can also trigger incorrect rebalancing operations that should be blocked during margin events.\n",
+            "severity": "high",
+            "location": [
+                "is_long_margin_call",
+                "is_short_margin_call"
+            ],
+            "files": []
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Multiple inconsistencies in sell-market-seat",
+            "description": "The sell_market_seat function has two critical inconsistencies: first, it calls change_funding_rate() without updating the underlying price via set_underlying_px(), resulting in the use of stale price data for funding rate calculations. Second, it fails to call check_funding_rate(client_state.temp_client_id) after updating the global funding rate, leaving the exiting client's funding payments unsettled. These issues arise because the function does not ensure price freshness or apply pending funding adjustments before closing a position. An attacker could exploit timing differences to manipulate funding rates or exit positions with incorrect balances. The impact includes incorrect global funding rate application and stale user fund balances, leading to users receiving more or less money than they are entitled to upon position closure.\n",
+            "severity": "high",
+            "location": [
+                "sell_market_seat.rs#89",
+                "change_funding_rate()",
+                "check_funding_rate(client_state.temp_client_id)"
+            ],
+            "files": []
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-248"
+                ]
+            },
+            "title": "Improper header handling in SpotFeesReport logging causes DoS on swap instruction",
+            "description": "In the match_orders function, the SpotFeesReport logging logic uses ok_or to handle the case when client.header is None, which results in an error and transaction failure whenever total_fees > 0. This condition always occurs during swap instructions, making the swap function unusable under normal fee conditions. The root cause is inconsistent error handling: while ref_payment defaults to 0 when header is None, ref_client_id uses ok_or and fails immediately. This creates a denial-of-service vulnerability because any swap with non-zero fees will revert. The impact is severe, as it permanently prevents execution of the swap instruction when fees are present, effectively breaking core functionality.\n",
+            "severity": "high",
+            "location": [
+                "SpotFeesReport",
+                "match_orders"
+            ],
+            "files": []
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-347"
+                ]
+            },
+            "title": "Missing Signer Verification in voting_reset Function Allows Unauthorized Execution",
+            "description": "The voting_reset function only verifies that the admin account's public key matches the stored operator_address but does not check whether the account is actually a signer in the transaction. This allows any user to pass an account with the correct address but without signing, thereby executing the voting reset instruction without authorization. The root cause is the absence of a signer check (e.g., admin.is_signer). An attacker can exploit this by crafting a transaction with a non-signing account matching the operator address, leading to unauthorized reset of critical voting parameters. The impact includes complete loss of governance control, as attackers can manipulate voting configurations without possessing the actual private key.\n",
+            "severity": "high",
+            "location": [
+                "voting_reset.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Using the underlying price instead of the perp price can cause problems",
+            "description": "The system uses the underlying price instead of the perpetual (perp) price when calculating withdrawal limits, leading to incorrect available funds calculations. For example, a user with a leveraged position can withdraw more funds than their position can cover if the index price diverges from the perp price. This happens because withdrawal logic relies on the underlying price, which may differ from the actual perp price used for trading. The root cause is inconsistent price source usage across different functions. An attacker could exploit price discrepancies between the index and perp markets to withdraw excess collateral. The impact is high, as it enables users to extract more funds than they should, potentially leading to protocol insolvency.\n",
+            "severity": "high",
+            "location": [
+                "perp value calculation",
+                "withdrawal flow"
+            ],
+            "files": []
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-348"
+                ]
+            },
+            "title": "Spot price manipulation can lead to unfair liquidations",
+            "description": "When no oracle feed is configured for perpetual instruments, the system uses the spot market's last_px as the perp_underlying_px for liquidation calculations. Since the spot price can be manipulated via order book or AMM trades, attackers can artificially inflate or deflate the price to trigger liquidations of healthy positions. The liquidation logic directly uses this manipulated price to compute margin call thresholds, making it vulnerable to price manipulation. The root cause is reliance on an insecure, manipulatable price source in the absence of an oracle. The impact is high, as it can lead to unfair liquidations, financial losses for users, and profit opportunities for attackers who manipulate the spot market and take opposing perpetual positions.\n",
+            "severity": "high",
+            "location": [
+                "check_long_margin_call",
+                "check_short_margin_call"
+            ],
+            "files": []
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-394"
+                ]
+            },
+            "title": "create_account can be dosed with pre-funding",
+            "description": "The create_account instruction (used in multiple functions) fails if the target PDA already exists with non-zero lamports or data. An attacker can precompute the PDA address and send a small amount of SOL to it, causing all future account creation attempts to fail. This affects critical functions like new_holder_account, new_root_account, and others that rely on system_instruction::create_account. The root cause is the use of create_account without handling pre-existing accounts. The impact is a denial-of-service where attackers can permanently block the creation of essential program-derived accounts, disrupting protocol initialization and user onboarding.\n",
+            "severity": "medium",
+            "location": [
+                "new_holder_account.rs",
+                "new_root_account.rs",
+                "create_client_account.rs",
+                "candles.rs",
+                "instrument.rs",
+                "perp_trade_header.rs",
+                "spot_account_header.rs",
+                "token.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Fixed token account size causes initialization failures for token accounts whose mints have token 22 extensions are active",
+            "description": "The create_token function uses a hardcoded account size of 165 bytes, which is only sufficient for legacy SPL tokens. For Token 2022 mints with extensions, this size is insufficient, causing initialization to fail with InvalidAccountData. The root cause is the lack of dynamic size calculation based on mint extensions. The impact is that token creation fails for any mint using Token 2022 extensions, limiting compatibility and preventing integration with modern token standards.\n",
+            "severity": "medium",
+            "location": [
+                "token.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Accounts may be created with incorrect rent-exemption due to Rent::default usage",
+            "description": "Several account creation functions use Rent::default() instead of reading the on-chain Rent sysvar, leading to potentially incorrect minimum balance calculations. This can result in accounts being created with insufficient lamports to be rent-exempt, making them vulnerable to deletion by the network. The root cause is the use of a hardcoded Rent instance rather than querying the current cluster rent parameters. The impact is a denial-of-service risk where accounts may be purged if rent parameters change, leading to loss of state and user funds.\n",
+            "severity": "medium",
+            "location": [
+                "Rent::default"
+            ],
+            "files": []
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "change_points_program_expiration is permissionless",
+            "description": "The change_points_program_expiration function checks that the admin account key matches the stored operator_address but does not verify that the account is a signer. This allows any user to pass a correctly addressed but non-signing account and execute the instruction. The root cause is missing signer validation (admin.is_signer). The impact is unauthorized access to an admin-only function, allowing malicious actors to alter program expiration settings without proper authorization.\n",
+            "severity": "medium",
+            "location": [
+                "change_points_program_expiration"
+            ],
+            "files": []
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Anyone can sell anyone else's market seat",
+            "description": "The sell_market_seat function sets check_signer to false when calling ClientPrimaryAccountHeader::from_account_info_unchecked, which skips ownership verification between the transaction signer and the client account's wallet_address. This allows any user to force-sell another user's market seat by passing their own signature and the victim's client account. The root cause is improper use of unchecked account deserialization with signer bypass. The impact is severe, as it enables unauthorized closure of user positions, leading to loss of control over assets and potential financial loss.\n",
+            "severity": "medium",
+            "location": [
+                "sell_market_seat"
+            ],
+            "files": []
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Voting is allowed even after voting period's end time",
+            "description": "The voting() function does not check whether the voting period has ended before accepting votes. It only validates the end time during finalize_voting(), but by then the vote has already been recorded. This allows users to cast votes after the official deadline, as long as they do so before finalization. The root cause is missing time validation at vote submission. The impact includes potential manipulation of governance outcomes by late voters who can observe existing tallies and strategically influence results, undermining the fairness and integrity of the voting process.\n",
+            "severity": "medium",
+            "location": [
+                "voting()"
+            ],
+            "files": []
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Missing Slippage Protection in Market Seat Buy/Sell Operations",
+            "description": "The buy_market_seat() and sell_market_seat() functions calculate prices dynamically using a bonding curve based on perp_clients_count but do not allow users to specify slippage tolerances. The actual execution price can differ significantly from expected due to concurrent transactions changing the client count. The root cause is the absence of price validation against user-defined limits. The impact is unpredictable execution prices, poor user experience, and potential financial loss during high-activity periods, as users cannot protect themselves from adverse price movements.\n",
+            "severity": "medium",
+            "location": [
+                "buy_market_seat()",
+                "sell_market_seat()"
+            ],
+            "files": []
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Missing Quorum Requirement in Governance Voting",
+            "description": "The finalize_voting() function applies governance changes based on relative vote counts without requiring a minimum quorum of total token supply. This allows a small number of tokens to decide protocol parameters if participation is low. The root cause is the lack of a quorum check comparing total votes to voting_supply. The impact is a governance attack vector where malicious actors can push through unfavorable changes during low-activity periods, undermining decentralization and community representation.\n",
+            "severity": "medium",
+            "location": [
+                "finalize_voting()"
+            ],
+            "files": []
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-240"
+                ]
+            },
+            "title": "Inconsistent Token Account Address Requirements Between Deposit and Withdraw",
+            "description": "The deposit() function allows deposits from any token account owned by the signer, while withdraw() requires the destination to be the signer's Associated Token Account (ATA). This asymmetry can lead to fund loss if a user transfers ownership of their ATA after depositing funds. The root cause is inconsistent address validation logic between the two functions. The impact is potential permanent loss of user funds, as users who no longer own their original ATA cannot withdraw even though they deposited from a different account.\n",
+            "severity": "medium",
+            "location": [
+                "deposit()",
+                "withdraw()"
+            ],
+            "files": []
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-390"
+                ]
+            },
+            "title": "Silent Error Handling in clean_generic Introduces Multiple Risks",
+            "description": "The clean_generic() function in ClientPrimaryState uses if let Ok(header) for account parsing, which silently skips malformed or invalid accounts without error. This can lead to incorrect state updates, account desynchronization, and masking of underlying instruction problems. The function assumes account pairs (maps_acc and client_infos_acc) are consumed in steps of two, but silent failures can break this assumption, leading to misaligned processing. The root cause is non-strict error handling that allows partial failures to go unnoticed. The impact includes corrupted state, inconsistent data, and difficulty in debugging transaction failures due to suppressed errors.\n",
+            "severity": "medium",
+            "location": [
+                "clean_generic"
+            ],
+            "files": []
+        },
+        {
+            "id": 30,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-636"
+                ]
+            },
+            "title": "Silent Error Handling Masks Instruction-Level Problems",
+            "description": "The function in question silently continues execution when an account parsing error occurs, instead of failing fast. This behavior masks critical instruction-level issues such as malformed instructions or incorrect account structures. The root cause is the lack of proper error propagation after a parsing failure. An attacker could craft a transaction with intentionally malformed accounts to trigger partial execution of the instruction, leading to inconsistent state transitions. The impact includes violation of instruction integrity, potential processing of invalid account pairs, and increased risk of downstream logic errors or panics due to unexpected account consumption.\n",
+            "severity": "n/a",
+            "location": [
+                "accounts_iter",
+                "next_account_info!(accounts_iter)?"
+            ],
+            "files": []
+        },
+        {
+            "id": 31,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-228"
+                ],
+                "3": [
+                    "CWE-237"
+                ],
+                "4": [
+                    "CWE-240"
+                ]
+            },
+            "title": "Incorrect Assumption About Account Pairing Structure",
+            "description": "The code assumes a fixed account ordering pattern: [bad_maps_acc, good_maps_acc, good_client_infos_acc], but this assumption is fragile and often incorrect in practice. The actual sequence may include a client_infos_acc immediately after a failed maps_acc, breaking the expected pairing logic. This is caused by the function not validating or enforcing the correct account structure after a parsing failure. An attacker could manipulate the account list to force misalignment, causing the function to process incorrect or unintended account pairs. The impact includes incorrect state updates, potential privilege escalation, or loss of data integrity.\n",
+            "severity": "n/a",
+            "location": [
+                "accounts_iter"
+            ],
+            "files": []
+        },
+        {
+            "id": 32,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Iterator-Counter Desynchronization",
+            "description": "When an account fails to parse, the iterator is advanced by next_account_info!, but the counter used to track progress is not incremented, leading to desynchronization. This discrepancy causes the loop to continue beyond the intended bounds, potentially exhausting the iterator and causing a panic on the next call. The root cause is the mismatch between iterator advancement and counter logic during error handling. An attacker could exploit this by providing a malformed account early in the list, forcing subsequent valid accounts to be misinterpreted or skipped. The impact includes out-of-bounds reads, incorrect account processing, and potential denial of service via panic.\n",
+            "severity": "n/a",
+            "location": [
+                "accounts_iter",
+                "counter",
+                "length"
+            ],
+            "files": []
+        },
+        {
+            "id": 33,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "ClientCommunityState::update function does not update the rate before calculating new dividends_value",
+            "description": "The ClientCommunityState::update function calculates dividends using community_state.base_crncy[i].rate without first checking if the rate is up to date. If more than one hour has passed since the last dividend allocation, the rate may be stale. The root cause is the absence of a rate refresh mechanism before dividend computation. An attacker could delay calling the dividend allocation function and then trigger a withdraw or deposit to exploit outdated rates—either receiving fewer dividends (victim) or claiming undeserved dividends (attacker). The impact includes unfair distribution of dividends, financial loss for users, and incentive misalignment.\n",
+            "severity": "n/a",
+            "location": [
+                "ClientCommunityState::update",
+                "community_state.base_crncy[i].rate"
+            ],
+            "files": []
+        },
+        {
+            "id": 34,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Lack of slippage in spot_lp liquidity operations due to relying on the changing header.crncy_tokens and header.asset_tokens",
+            "description": "The spot_lp function calculates required tokens based on the current pool state without allowing users to specify minimum output amounts or acceptable slippage. This exposes users to unfavorable price changes between transaction submission and execution. The root cause is the absence of slippage protection parameters in the SpotLpData structure and lack of validation checks. In volatile conditions, attackers or MEV bots can manipulate pool state, causing users to receive fewer tokens than expected. The impact includes unexpected financial losses during liquidity provision or removal, especially under high volatility or low liquidity.\n",
+            "severity": "n/a",
+            "location": [
+                "spot_lp.rs::spot_lp#189-194",
+                "trade_crncy_tokens",
+                "trade_asset_tokens"
+            ],
+            "files": []
+        },
+        {
+            "id": 35,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-705"
+                ]
+            },
+            "title": "Referral Incentives Disabled for All Legitimate Users During Any Liquidation",
+            "description": "The margin_call flag is set globally whenever any account is under liquidation, and this flag disables referral payouts for all users, even those unrelated to the liquidation. The root cause is the use of a global flag without distinguishing between liquidation-triggered trades and normal orders. An attacker could trigger a liquidation (e.g., via price manipulation) to block referral rewards for all traders. The impact is systemic: legitimate users lose expected referral incentives during market stress, undermining the incentive model and reducing platform attractiveness.\n",
+            "severity": "n/a",
+            "location": [
+                "new_perp_order.rs::new_perp_order",
+                "perp_engine.rs::match_{ask,bid}_orders",
+                "ref_payment"
+            ],
+            "files": []
+        },
+        {
+            "id": 36,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Slippage Guard Could be Too Loose For Leveraged Perp Markets",
+            "description": "Perpetual market orders use a hard-coded ±12.5% price cap (px >> 3), which is acceptable for spot but dangerously loose for leveraged perp trading. The root cause is the lack of leverage-aware slippage controls or user-configurable limits. Under high leverage, a 12.5% slippage can lead to immediate margin depletion or unintended liquidation. Users cannot tighten this cap without avoiding market orders entirely. The impact is outsized losses for leveraged traders during volatile conditions, reducing capital efficiency and increasing risk of forced exits.\n",
+            "severity": "n/a",
+            "location": [
+                "new_perp_order.rs::PerpParams::get_settings",
+                "px + (px >> 3)",
+                "px - (px >> 3)"
+            ],
+            "files": []
+        },
+        {
+            "id": 37,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Referral discount is not applied when fees_prepayment is zero in PerpEngine::fill",
+            "description": "In PerpEngine::fill, when fees_prepayment is zero, the referral discount is not applied to the fee calculation, even though ref_payment is still sent. The root cause is conditional logic that bypasses discount application in the zero prepayment path. This results in users paying higher fees than expected, despite being eligible for a discount. An attacker could exploit this by structuring transactions to fall into this code path, increasing costs for victims. The impact is direct financial loss to users due to incorrect fee calculation.\n",
+            "severity": "n/a",
+            "location": [
+                "PerpEngine::fill",
+                "fees_prepayment == 0"
+            ],
+            "files": []
+        },
+        {
+            "id": 38,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Operator precedence Issue during points program expiration validation in change_points_program_expiration",
+            "description": "The validation in change_points_program_expiration uses `!data.new_expiration_time < root_state.points_program_expiration`, which is evaluated as `(!data.new_expiration_time) < root_state.points_program_expiration` due to operator precedence. The intended logic was `!(data.new_expiration_time < root_state.points_program_expiration)`. The root cause is missing parentheses around the comparison. This causes the function to incorrectly reject attempts to decrease the expiration time, as the bitwise NOT of a u32 produces a very large number. The impact is loss of functionality: legitimate users cannot reduce the expiration time, limiting protocol configurability.\n",
+            "severity": "n/a",
+            "location": [
+                "change_points_program_expiration",
+                "if !data.new_expiration_time < root_state.points_program_expiration"
+            ],
+            "files": []
+        },
+        {
+            "id": 39,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Attacker can extract value by buying and selling the seat",
+            "description": "The seat price is determined by perp_clients_count, and an attacker can manipulate this by purchasing seats before a user transaction and selling afterward, forcing the user to pay a higher price. The root cause is the lack of price locking or refund mechanisms based on the purchase price. The attacker profits from the price difference without providing any service. No front-running is required, as the attack can be executed in advance. The impact is extraction of user funds by attackers, leading to unfair costs and reduced user trust.\n",
+            "severity": "n/a",
+            "location": [
+                "get_place_buy_price",
+                "perp_clients_count"
+            ],
+            "files": []
+        },
+        {
+            "id": 40,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-437"
+                ]
+            },
+            "title": "Fee Prepayment Locked Due to Asset Record Cleanup after fees_deposit",
+            "description": "After depositing fee prepayment that reduces crncy_tokens to zero, the asset record is cleared by clean_and_check_token_records(). Later, fees_withdraw fails because resolve() with alloc=false cannot find the asset record, even though fees_prepayment is still stored. The root cause is the mismatch between record cleanup and withdrawal logic. Users cannot withdraw prepaid fees unless they make an additional deposit to recreate the record. The impact is temporary or permanent lock-up of user funds, requiring manual intervention and reducing usability.\n",
+            "severity": "n/a",
+            "location": [
+                "fees_deposit",
+                "clean_and_check_token_records()",
+                "fees_withdraw",
+                "resolve(alloc=false)"
+            ],
+            "files": []
+        },
+        {
+            "id": 41,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Decimal Mismatch in Fee Prepayment Accounting Causes Incorrect Balance Tracking",
+            "description": "In fees_deposit, fees_prepayment is incremented with the raw data.amount (in native units), but in fees_withdraw, it is decremented by data.amount / dec_factor (in human-readable units). This inconsistency causes the balance to be incorrectly tracked—for example, depositing 1 token (1,000,000 units) and withdrawing 1 token (1 unit) leaves 999,999 units instead of zero. The root cause is inconsistent unit handling across functions. The impact includes incorrect balance tracking, off-chain event logging errors, and potential financial discrepancies.\n",
+            "severity": "n/a",
+            "location": [
+                "fees_deposit",
+                "fees_withdraw",
+                "data.amount / dec_factor"
+            ],
+            "files": []
+        },
+        {
+            "id": 42,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Users can sell their market seat without paying loss coverage",
+            "description": "The sell-market-seat function calls close_account, which does not check for pending loss coverage stored in taker_info4.loss_coverage. This allows users to exit their position without repaying losses previously covered by insurance funds. The root cause is the use of an incomplete cleanup function instead of try_to_close_perp, which properly handles loss repayment. An attacker can exploit this to avoid repaying protocol-covered losses. The impact is financial loss to the protocol and unfair advantage to malicious users.\n",
+            "severity": "n/a",
+            "location": [
+                "sell_market_seat.rs::sell-market-seat",
+                "close_account",
+                "try_to_close_perp"
+            ],
+            "files": []
+        },
+        {
+            "id": 43,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Users are getting back their soc-loss-funds while selling their market seat",
+            "description": "When a user has negative soc_loss_funds (indicating they contributed to the protocol's loss coverage), selling their seat returns these funds to them and deducts from the insurance fund. This is incorrect because users should not be reimbursed for funds they contributed to cover others' losses. The root cause is improper handling of negative soc_loss_funds in sell-market-seat. An attacker can contribute to soc_loss_funds, wait, then sell their seat to extract protocol funds. The impact is unwarranted payout from protocol reserves, weakening the risk buffer.\n",
+            "severity": "n/a",
+            "location": [
+                "sell_market_seat.rs::sell-market-seat",
+                "soc_loss_funds",
+                "perp_insurance_fund"
+            ],
+            "files": []
+        },
+        {
+            "id": 44,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Users can provide old price feeds to trade in their favor",
+            "description": "The set_underlying_px function accepts price data from an oracle feed but does not validate the timestamp, slot, or confidence interval, only checking the account address. This allows the use of stale or frozen prices. The root cause is missing freshness checks on oracle data. An attacker can use an old price feed to execute trades at outdated rates, either overpaying or underpaying. The impact is unfair trade execution, potential arbitrage losses, and manipulation of market prices.\n",
+            "severity": "n/a",
+            "location": [
+                "instrument.rs::set_underlying_px",
+                "feed_id.data.borrow()[73..81]",
+                "feed_id.data.borrow()[89..93]"
+            ],
+            "files": []
+        },
+        {
+            "id": 45,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Users incur losses when selling seats",
+            "description": "The get_reserve function uses f64 arithmetic that can exceed the maximum i64 value (9223372036854775807), causing clamping when cast back to i64. This leads to incorrect seat price calculations, potentially resulting in zero or negative prices. The root cause is unsafe type casting from f64 to i64 without bounds checking. When perp_clients_count approaches 250,000, this can cause users to lose funds during seat sales. The impact is unexpected financial loss and potential exploitation by attackers near critical supply thresholds.\n",
+            "severity": "n/a",
+            "location": [
+                "get_reserve",
+                "get_place_sell_price",
+                "i64"
+            ],
+            "files": []
+        },
+        {
+            "id": 46,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "perp_statistics_reset can be used by users to skip collactable-losses while selling market seat",
+            "description": "The perp_statistics_reset function sets soc_loss_funds to zero without verifying if the user has incurred losses that should be collected. Later, when selling the seat, the user can claim these zeroed funds as a negative loss, effectively wiping their obligation. The root cause is the lack of validation in perp_statistics_reset before resetting state. An attacker can use this to erase their debt to the protocol before exiting. The impact is evasion of loss repayment, leading to financial loss for the protocol and undermining the risk management system.\n",
+            "severity": "n/a",
+            "location": [
+                "perp_statistics_reset.rs::perp-statistics-reset",
+                "soc_loss_funds = 0",
+                "sell_market_seat.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 47,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Missing Array Synchronization in dividends_claim Prevents Users from Claiming Dividends for Newly Added Base Currencies",
+            "description": "The dividends_claim instruction fails to synchronize the client_community_state.data array with the community_state.base_crncy array before processing dividend claims. This causes the zip iterator to terminate early when the client's array is shorter, which occurs when new base currencies are added but the user hasn't triggered synchronization via other operations. The root cause is the absence of a call to update_records or update in the dividends_claim instruction, unlike other functions such as deposit. An attacker or affected user could exploit this by adding a new base currency and then attempting to claim dividends without prior interaction, resulting in missed dividend payouts. The impact is that users cannot claim dividends for newly added base currencies until they perform a triggering operation like a deposit, leading to a poor user experience and potential financial loss.\n",
+            "severity": "n/a",
+            "location": [
+                "src/program/processor/dividends_claim.rs",
+                "src/state/client_community.rs::update",
+                "src/state/client_community.rs::update_records"
+            ],
+            "files": []
+        },
+        {
+            "id": 48,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "min_qty Bypass via IOC limit order",
+            "description": "Spot orders calculate the minimum order quantity (min_qty) using the user-supplied limit price (px) without clamping, even when the order is an IOC (Immediate or Cancel) type. Although the executable price (ipx) is clamped within ±12.5% of the mark price, the min_qty is derived from the unclamped px, allowing an attacker to set an extremely high price to reduce min_qty to a negligible value. The root cause is the use of the raw px in min_qty(px, dc) instead of the clamped ipx. An attacker can exploit this by submitting IOC orders with a very high limit price, enabling dust-sized trades that bypass minimum size restrictions. The impact is that the minimum order size enforcement is effectively circumvented, allowing spam or manipulation through a large number of tiny trades, potentially degrading system performance or enabling front-running strategies.\n",
+            "severity": "n/a",
+            "location": [
+                "SpotParams::get_settings"
+            ],
+            "files": []
+        },
+        {
+            "id": 49,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Wrong accounting of fee in perp engine",
+            "description": "In the perp engine's fee calculation logic, when a user has partial fee prepayment that does not fully cover the trade fee, the function incorrectly returns discount_sum + extra_fee instead of fees_prepayment + extra_fee. The root cause is a logical error where discount_sum represents the trade value covered by prepayment (calculated as fees_prepayment / fee_rate), not the actual fee amount. This leads to an inflated fee value being returned and recorded by the protocol. An attacker cannot directly exploit this for profit, but any trade with partial prepayment will trigger incorrect fee accounting. The impact is severe: the protocol records a massively inflated fee (e.g., $6,253 instead of $8), which corrupts internal accounting and can affect downstream systems relying on accurate fee data, potentially leading to incorrect profit/loss calculations, reporting errors, or insurance fund miscalculations.\n",
+            "severity": "n/a",
+            "location": [
+                "src/program/perp/perp_engine.rs::fill#1202"
+            ],
+            "files": []
+        },
+        {
+            "id": 50,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "User's chosen leverage is overwritten to max-leverage on every perp operation",
+            "description": "The new_for_perp function in client_primary.rs unconditionally resets a user's leverage to max_leverage whenever leverage is passed as zero, which occurs in most perp operations like deposit, withdraw, and order cancellation. The root cause is the else branch in the leverage setting logic that defaults to max_leverage when leverage == 0, instead of preserving the existing value. An attacker could exploit this by crafting transactions that trigger these operations, but even normal user actions will trigger the reset. For example, a user setting 5x leverage will have it reset to 15x after a deposit. The impact is that users lose control over their leverage settings, leading to unexpectedly high risk exposure and increased likelihood of liquidation without their knowledge, undermining trust and safety.\n",
+            "severity": "n/a",
+            "location": [
+                "src/state/client_primary.rs::new_for_perp#344"
+            ],
+            "files": []
+        },
+        {
+            "id": 51,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Redundant State Updates in fill Function Cause Issues",
+            "description": "The fill function redundantly updates last_asset_tokens and last_crncy_tokens with values from individual orders, overwriting accumulated values. This is problematic because write_last_tokens, which is called afterward, already handles proper accumulation with slot-aware logic. The root cause is the direct assignment of traded_qty and traded_crncy within the fill loop, which discards previous updates. When multiple orders are filled in the same slot, each iteration overwrites the state, preserving only the last order's data. This leads to incorrect totals when write_last_tokens adds the full traded amount to the already overwritten value, causing double counting. The impact is corrupted state data, such as inflated trading volume metrics, which affects analytics, reporting, and potentially oracle or fee distribution systems.\n",
+            "severity": "n/a",
+            "location": [
+                "src/program/perp/perp_engine.rs::fill",
+                "src/program/perp/perp_engine.rs::write_last_tokens"
+            ],
+            "files": []
+        },
+        {
+            "id": 52,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Missing Trade Count Updates in reversed_swap Function for Buy Orders",
+            "description": "The reversed_swap function, used for buy orders in swap operations, fails to return the number of trades executed and does not increment the trade counter during AMM transactions. The root cause is the omission of trade tracking logic that exists in match_orders, such as incrementing the trades variable after each AMM interaction. As a result, the trades variable remains zero when passed to write_last_tokens. This creates a discrepancy between buy and sell order handling, where sell orders correctly update trade counts but buy orders do not. The impact is inaccurate trade statistics, with buy-side volume and trade counts underreported, leading to misleading market data, distorted analytics, and potential issues in incentive distribution systems that rely on trade volume.\n",
+            "severity": "n/a",
+            "location": [
+                "src/program/perp/perp_engine.rs::reversed_swap",
+                "src/program/perp/perp_engine.rs::match_orders"
+            ],
+            "files": []
+        },
+        {
+            "id": 53,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Missing change_funding_rate Call After Price Update in perp_mass_cancel and perp_order_cancel",
+            "description": "The perp_order_cancel and perp_mass_cancel functions update the underlying price via set_underlying_px but fail to call change_funding_rate before invoking check_rebalancing or mass_cancel, which internally call check_funding_rate. The root cause is the omission of the change_funding_rate call, which is necessary to update the global funding rate state based on the new underlying price. Without this, funding rate calculations use stale data, even though the price is current. The impact is that users may be charged incorrect funding fees—either too much or too little—when canceling orders, leading to unfair economic outcomes and potential disputes or loss of trust in the system's fairness.\n",
+            "severity": "n/a",
+            "location": [
+                "src/program/processor/perp_order_cancel.rs",
+                "src/program/processor/perp_mass_cancel.rs",
+                "src/program/perp/perp_engine.rs::change_funding_rate",
+                "src/program/perp/perp_engine.rs::check_funding_rate"
+            ],
+            "files": []
+        },
+        {
+            "id": 54,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Inefficient rebalancing can cause the loss of users",
+            "description": "The rebalancing mechanism is rate-limited to 25 positions per call and can only be triggered every 5 minutes, relying on user activity to initiate check_rebalancing. The root cause is the lack of a dedicated, time-triggered rebalancing function, forcing the system to depend on sufficient user transactions. If user activity is low, thousands of positions may remain unprocessed for extended periods. The impact is delayed or missed rebalancing, leading to improper liquidations (either too early or too late), increased socialized losses, and reduced system solvency. This undermines the protocol's risk management and can erode user confidence, especially during volatile market conditions.\n",
+            "severity": "n/a",
+            "location": [
+                "src/program/perp/perp_engine.rs::check_rebalancing"
+            ],
+            "files": []
+        },
+        {
+            "id": 55,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Incorrect Margin Call State Detection After Liquidation in perp_withdraw",
+            "description": "In perp_withdraw, the margin call state is determined after liquidation checks using is_long_margin_call and is_short_margin_call, which inspect the current highest-risk node. However, if liquidation occurred during check_long_margin_call or check_short_margin_call, the highest-risk node may have been removed or updated, causing these checks to return false even though liquidation took place. The root cause is relying on post-liquidation state inspection instead of the return value of the check functions, which indicate if trades occurred. The impact is incorrect withdrawal amount calculations—users may be allowed to withdraw more than permitted during margin call conditions—and unnecessary calls to check_rebalancing, leading to inconsistent state handling and potential fund loss.\n",
+            "severity": "n/a",
+            "location": [
+                "src/program/processor/perp_withdraw.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 56,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Stale edge price in liquidation tree after perp withdraw call",
+            "description": "After a withdrawal in perp_withdraw, the function does not call change_edge_px to update the liquidation price (edge price) in the long_px and short_px trees. The root cause is the omission of this update despite a change in the user's funds, which directly affects the edge price calculation. The impact is that the liquidation trees retain outdated edge prices, leading to incorrect margin call detection and improper liquidation priority. This can result in users being liquidated too early or too late, causing unfair outcomes and potential disputes over fund handling.\n",
+            "severity": "n/a",
+            "location": [
+                "src/program/processor/perp_withdraw.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 57,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ]
+            },
+            "title": "Missing Update of perp_spot_price_for_withdrowal in perp_withdraw Function",
+            "description": "The perp_withdraw function fails to update the perp_spot_price_for_withdrowal field (and its long/short variants) when there is no margin call, unlike other functions such as new_perp_order and perp_quotes_replace. The root cause is inconsistent state management across functions. This field is critical for get_avail_funds during margin calls. If perp_withdraw is called without a margin call, the spot price remains stale. The impact is that subsequent margin call calculations may use outdated prices, leading to incorrect available funds determinations and potentially allowing over-withdrawals or restricting legitimate withdrawals.\n",
+            "severity": "n/a",
+            "location": [
+                "src/program/processor/perp_withdraw.rs",
+                "src/program/processor/new_perp_order.rs",
+                "src/program/processor/perp_quotes_replace.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 58,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Margin call uses stale edge price",
+            "description": "The check_long_margin_call and check_short_margin_call functions make liquidation decisions based on edge prices retrieved before applying funding rate updates and social loss checks. The root cause is the incorrect order of operations: the liquidation decision uses the stale edge price, while check_funding_rate and check_soc_loss—which can alter the user's funds and thus the correct edge price—are called afterward. The impact is that users may be liquidated based on outdated risk assessments, leading to unfair liquidations even if their position would have been solvent after funding updates, resulting in unnecessary loss of funds and reduced user trust.\n",
+            "severity": "n/a",
+            "location": [
+                "src/program/perp/perp_engine.rs::check_long_margin_call",
+                "src/program/perp/perp_engine.rs::check_short_margin_call",
+                "src/program/perp/perp_engine.rs::change_edge_px"
+            ],
+            "files": []
+        },
+        {
+            "id": 59,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Insurance fund decrease when margin_call_penalty_rate is less than rebates_rate",
+            "description": "When the margin_call_penalty_rate is less than the product of fee_rate and REBATES_RATIO, the insurance fund decreases during margin calls because the net contribution (new_fees - rebates) becomes negative. The root cause is the lack of a validation ensuring that penalty rates sufficiently exceed rebates. During a margin call, new_fees are calculated as traded_crncy * margin_call_penalty_rate, while rebates are traded_crncy * fee_rate * REBATES_RATIO. If the former is smaller, the insurance fund is drained instead of being replenished. The impact is a critical economic flaw: the insurance fund, meant to absorb losses, is depleted during stress events, increasing systemic risk and the likelihood of protocol insolvency.\n",
+            "severity": "n/a",
+            "location": [
+                "src/program/perp/perp_engine.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 60,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Casting from u64 to i64 causes genuine deposit requests to fail in deposit function",
+            "description": "The deposit function in deposit.rs casts a u64 amount to i64 when deposit_all is true. When the amount exceeds i64::MAX (9,223,372,036,854,775,807), the cast wraps to a negative value due to Rust's overflow behavior in release builds. This negative value fails the subsequent range check (1..=SPOT_MAX_AMOUNT), causing the transaction to revert even for legitimate large deposits. The root cause is the unnecessary and unsafe cast to a signed integer type. An attacker cannot directly exploit this for gain, but legitimate users—especially those dealing with high-decimal tokens—may have their transactions reverted, leading to a denial of service for valid operations.\n",
+            "severity": "low",
+            "location": [
+                "deposit.rs::deposit"
+            ],
+            "files": []
+        },
+        {
+            "id": 61,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Expired Private Client Cannot Be Re-added to Queue",
+            "description": "The new_private_client() function checks for duplicate wallet addresses before validating whether an existing record has expired. The check `if record.wallet == *wallet.key && record.creation_time != 0` returns an error immediately upon finding a matching wallet, even if the record is expired. However, the `is_vacant()` method correctly identifies expired records as reusable. Because the duplicate check occurs before expiration validation, expired slots cannot be reused. This creates a logic flaw where expired private client entries block new registrations from the same wallet. The impact is queue slot exhaustion over time, preventing legitimate reuse of expired entries and reducing system usability.\n",
+            "severity": "low",
+            "location": [
+                "src/state/private_client.rs::new_private_client"
+            ],
+            "files": []
+        },
+        {
+            "id": 62,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Account Count Validation Mismatch in new_base_crncy Instruction",
+            "description": "The new_base_crncy instruction declares a MIN_ACCOUNTS constant of 8, but the function logic requires 9 accounts, as documented in comments and confirmed by the use of `next_account_info!` to access a ninth account. The validation check uses MIN_ACCOUNTS (8), allowing transactions with only 8 accounts to pass initial validation. However, the function later attempts to read a ninth account, causing a runtime failure. This mismatch between declared and actual account requirements leads to late-stage transaction failures, increasing user gas costs and reducing UX. The root cause is a hardcoded constant that does not reflect the actual account count needed.\n",
+            "severity": "low",
+            "location": [
+                "new_base_crncy.rs::new_base_crncy",
+                "NewBaseCrncyInstruction::MIN_ACCOUNTS"
+            ],
+            "files": []
+        },
+        {
+            "id": 63,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Inflexible Voting System Prevents Rapid Parameter Adjustments",
+            "description": "The governance system uses a fixed rotation (voting_counter % 6) to determine which parameter can be modified in each 14-day voting period. The voting_counter only increments by 1 per cycle, forcing a strict sequence. This design prevents consecutive adjustments to the same parameter, requiring up to 84 days (6 cycles) between changes. There is no mechanism to skip cycles or allow emergency overrides. The root cause is the rigid modulo-based selection without administrative bypass. This severely limits the protocol's agility in responding to urgent market conditions or iterative parameter tuning, leading to inefficient governance and delayed responses.\n",
+            "severity": "low",
+            "location": [
+                "finalize_voting()::voting_counter % 6",
+                "next_voting()::voting_counter increment logic"
+            ],
+            "files": []
+        },
+        {
+            "id": 64,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Dividend Calculation Uses Stale Token Balance in Subsequent update() Calls After fees_deposit with DRVS",
+            "description": "In the fees_deposit() function, update() is called before sub_crncy_tokens(), causing self.header.drvs_tokens to be set to the pre-withdrawal balance. When update() is called again later (e.g., in deposit or spot_quotes_replace), it calculates dividends using this stale value instead of the actual current balance. This occurs only when depositing DRVS tokens (token_id = 0). The root cause is incorrect ordering of operations. As a result, users receive dividends based on a higher token balance than they actually hold, leading to overpayment and financial loss for the protocol. This is a state inconsistency issue arising from improper sequencing.\n",
+            "severity": "low",
+            "location": [
+                "fees_deposit()::order of update() and sub_crncy_tokens()"
+            ],
+            "files": []
+        },
+        {
+            "id": 65,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Griefing Attack: Malicious Takers Can Force Order Cancellation by Partial Filling Below Minimum Quantity",
+            "description": "A malicious taker can partially fill a maker's order such that the remaining quantity is below the min_qty threshold. The system automatically cancels the order and refunds the remainder, but since it's below min_qty, the maker cannot reuse those funds to place a new order. This allows attackers to grief makers by forcing cancellation and locking small amounts of funds. The root cause is the automatic cancellation on partial fills below min_qty without a mechanism to handle or recycle dust. The impact is a denial-of-service-like attack on trading activity and inefficient fund usage across the system.\n",
+            "severity": "low",
+            "location": [
+                "fill function::spot trading engine",
+                "erase_client_order(order, node, true, side)"
+            ],
+            "files": []
+        },
+        {
+            "id": 66,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Missing last_time Update in spot_lp Causes Incorrect Daily Trade Statistics",
+            "description": "The spot_lp function checks if a day has passed using instr_state.header.last_time compared to fixing_time, but it never updates last_time after the check. Other functions like swap and new_spot_order do update it via engine.write_last_tokens(). As a result, if no regular trades occur, spot_lp will repeatedly reset lp_day_trades to 1 instead of incrementing it, because last_time remains outdated. This leads to incorrect daily LP trade statistics, where all LP trades in a day are counted as the first trade. The root cause is inconsistent state management across similar functions.\n",
+            "severity": "low",
+            "location": [
+                "spot_lp.rs::spot_lp function"
+            ],
+            "files": []
+        },
+        {
+            "id": 67,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ]
+            },
+            "title": "Inconsistent Price Reference Used for Trade Execution Logic in new_spot_order and swap",
+            "description": "The new_spot_order function uses engine.market_px() to get the reference price, while swap and spot_quotes_replace use engine.state.header.last_px. The market_px() function may return best_bid or best_ask if they cross last_px, whereas last_px is a fixed value. This inconsistency means different functions use different price sources for similar logic, potentially leading to divergent behavior in price-dependent operations like drv_update and write_last_tokens. While not directly exploitable, it introduces subtle and unpredictable differences in trade execution and price fixing, reducing code reliability and maintainability.\n",
+            "severity": "low",
+            "location": [
+                "new_spot_order.rs::engine.market_px()",
+                "swap.rs::engine.state.header.last_px",
+                "spot_quotes_replace.rs::engine.state.header.last_px"
+            ],
+            "files": []
+        },
+        {
+            "id": 68,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing Signer and New Account Validation for asset_token_program_acc in new_instrument",
+            "description": "The new_instrument instruction fails to validate that asset_token_program_acc is both a signer and a new account when creating a new token account, unlike new_base_crncy which performs these checks. This omission means that invalid transaction setups may pass initial validation but fail during CPI calls, leading to inconsistent error handling and potentially misleading error messages. The root cause is a missing validation block that exists in similar instructions. This reduces code consistency and shifts error detection from early validation to runtime, increasing debugging difficulty.\n",
+            "severity": "low",
+            "location": [
+                "new_instrument.rs::TokenState::create_token",
+                "new_base_crncy.rs::validation checks"
+            ],
+            "files": []
+        },
+        {
+            "id": 69,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-431"
+                ]
+            },
+            "title": "Referrer cannot be set after account creation",
+            "description": "Users can only set a referrer during their first deposit when the account is created. There is no function to set or update a referrer afterward. This creates two issues: the first user cannot refer anyone (since no one exists to refer them), and users who forget to set a referrer initially are permanently locked out. The root cause is the lack of a dedicated set_referrer instruction. This undermines the referral program's fairness and usability, especially for early adopters and forgetful users, reducing incentive alignment.\n",
+            "severity": "low",
+            "location": [
+                "deposit function::referrer setting logic"
+            ],
+            "files": []
+        },
+        {
+            "id": 70,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Inconsistent Price Calculation for Fee in Spot LP Trading",
+            "description": "The spot_lp instruction uses two different price calculation methods: when adding liquidity, it constrains last_px within [best_bid, best_ask] and applies RDF scaling, but when calculating fees, it uses last_px directly without constraints or unit conversion. If last_px falls outside the valid bid-ask range due to volatility, the fee may be miscalculated, leading to overcharging or undercharging users. The root cause is inconsistent price handling within the same function. This introduces financial inaccuracies and reduces user trust in fee transparency.\n",
+            "severity": "low",
+            "location": [
+                "spot_lp.rs::fee calculation",
+                "spot_lp.rs::liquidity addition price logic"
+            ],
+            "files": []
+        },
+        {
+            "id": 71,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-369"
+                ]
+            },
+            "title": "get_place_buy_price function does not currently support the maximum MAX_SUPPLY value",
+            "description": "The get_place_buy_price function calculates seat price using get_reserve(supply + 1) - get_reserve(supply). At supply = 250,000 (MAX_SUPPLY), get_reserve(supply + 1) returns i64::MAX due to infinite reserve calculation, causing an abnormally high price. This is because difference_to_max becomes zero, leading to division by zero in reserve calculation. The root cause is lack of boundary handling at MAX_SUPPLY. The impact is a massive, unjustified price jump for the last seat, creating a poor user experience and potential economic imbalance.\n",
+            "severity": "low",
+            "location": [
+                "get_place_buy_price(supply, dec_factor)",
+                "get_reserve(supply, df)"
+            ],
+            "files": []
+        },
+        {
+            "id": 72,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "get_current_leverage calculates leverage incorrectly for long positions",
+            "description": "The get_current_leverage function computes leverage using position_size / value, but for long positions, it uses funds in a way that results in incorrect values. In a 10x long position with 1 BTC at $100k and $10k margin, funds become -$90k, leading to a calculated leverage of 9x instead of 10x. The root cause is incorrect margin calculation logic that does not properly reflect the initial margin. However, this does not currently cause issues because the leverage comparison in check_client_leverage_shift still works correctly—increases are detected even with offset values.\n",
+            "severity": "low",
+            "location": [
+                "get_current_leverage()"
+            ],
+            "files": []
+        },
+        {
+            "id": 73,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Margin call limit bypass",
+            "description": "The margin call limit can be bypassed because check_short_margin_call and check_long_margin_call are called sequentially, and each resets the trade counter independently. If check_short_margin_call executes 9 trades (under the MAX_MARGIN_CALL_TRADES limit of 10), check_long_margin_call can still execute up to 10 more, resulting in 19 total trades. The root cause is the lack of a shared, cumulative counter across both functions. This allows the system to exceed its intended trade limit, increasing execution costs and potentially leading to excessive liquidations.\n",
+            "severity": "low",
+            "location": [
+                "check_short_margin_call()",
+                "check_long_margin_call()"
+            ],
+            "files": []
+        },
+        {
+            "id": 74,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Missing Fixing Window Data Accumulation After Daily Reset in drv_update",
+            "description": "When drv_update resets fixing data for a new day, it sets fixing_asset_tokens and fixing_crncy_tokens to zero without checking if the current time is still within the fixing window (SETTLEMENT - FIXING_DURATION..SETTLEMENT). As a result, any trading volume occurring immediately after the reset but within the fixing window is not accumulated, leading to incomplete fixing price calculations. The root cause is the absence of a post-reset accumulation check. This reduces the accuracy of daily fixing prices and undermines the fairness of price discovery.\n",
+            "severity": "low",
+            "location": [
+                "drv_update()::daily reset logic"
+            ],
+            "files": []
+        },
+        {
+            "id": 75,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-193"
+                ]
+            },
+            "title": "get_by_tag tries to access out of bound index",
+            "description": "The get_by_tag function uses a loop condition `while i <= container.candles.len()` instead of `i < container.candles.len()`, causing an out-of-bounds array access when i equals the length. This leads to a program panic instead of a graceful error return when the tag is not found. The root cause is an off-by-one error in the loop boundary. Since the function is used in multiple candle-related operations, all call paths are potentially affected. The impact is a denial of service via panic, which is worse than a controlled error.\n",
+            "severity": "low",
+            "location": [
+                "constants.rs::get_by_tag"
+            ],
+            "files": []
+        },
+        {
+            "id": 76,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ]
+            },
+            "title": "Incorrect Amount Logged in PerpWithdrawReport",
+            "description": "The perp_withdraw function logs the requested amount (data.amount) in the PerpWithdrawReport event instead of the actual withdrawn amount (amount). This discrepancy is significant when data.amount is 0 (withdraw all) or when margin call restrictions reduce the actual withdrawal. The root cause is incorrect event logging. The impact is misleading audit trails and off-chain analytics, as the logged amount does not reflect the real funds transferred. This could affect monitoring, compliance, and user transparency.\n",
+            "severity": "low",
+            "location": [
+                "perp_withdraw function::PerpWithdrawReport event"
+            ],
+            "files": []
+        },
+        {
+            "id": 77,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ],
+                "4": [
+                    "CWE-778"
+                ]
+            },
+            "title": "Logs Do Not Reflect Actual Withdrawals",
+            "description": "1. **Description:** The log entry in the PerpWithdrawReport records `data.amount` instead of the actual `amount` used in the fund transfer, which may differ due to internal calculations.\n2. **Cause:** The log uses the raw input amount (`data.amount`) rather than the final processed amount (`amount`) after adjustments.\n3. **Exploitation:** An attacker or auditor cannot rely on logs to verify actual withdrawal amounts, enabling potential discrepancies to go unnoticed.\n4. **Impact:** Logs do not reflect actual withdrawals, complicating accounting and audit processes, and reducing transparency.\n",
+            "severity": "n/a",
+            "location": [
+                "PerpWithdrawReport::log_type::PERP_WITHDRAW"
+            ],
+            "files": []
+        },
+        {
+            "id": 78,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-392"
+                ]
+            },
+            "title": "Silent Failure in voting_reset",
+            "description": "1. **Description:** The `voting_reset` function fails to propagate errors when upgrading the community account header, returning `Ok(())` even if the upgrade fails due to the account not being writable.\n2. **Cause:** The use of `if let Ok(header) = ...` silently ignores the error instead of using the `?` operator to propagate it.\n3. **Exploitation:** If the `community_acc` is not marked as writable (due to a caller bug or configuration error), the function appears to succeed but does not update any state.\n4. **Impact:** The voting parameters are not reset, but the caller receives no indication of failure, leading to inconsistent state and potential governance issues.\n",
+            "severity": "n/a",
+            "location": [
+                "community_state.header.upgrade()"
+            ],
+            "files": []
+        },
+        {
+            "id": 79,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Incorrect Price Validation in NewInstrumentData",
+            "description": "1. **Description:** The validation in `NewInstrumentData::new` uses an exclusive range (`..`) for price checking, rejecting prices equal to `MAX_PRICE` even though they should be valid.\n2. **Cause:** Rust's `a..b` range excludes `b`, so `MAX_PRICE` is not included unless an inclusive range (`..=`) is used.\n3. **Exploitation:** Legitimate instruments with price equal to `MAX_PRICE` are rejected during creation.\n4. **Impact:** This bug prevents the creation of valid financial instruments at the maximum allowed price, limiting functionality.\n",
+            "severity": "n/a",
+            "location": [
+                "NewInstrumentData::new#..."
+            ],
+            "files": []
+        },
+        {
+            "id": 80,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ]
+            },
+            "title": "Typo in Variable Name mint_token_prgoram_version",
+            "description": "1. **Description:** The variable `mint_token_prgoram_version` contains a typo (\"prgoram\" instead of \"program\"), which is also reflected in the error message.\n2. **Cause:** A spelling mistake in variable and error message declaration.\n3. **Exploitation:** This cannot be exploited but reduces code readability and maintainability.\n4. **Impact:** No functional impact, but harms code clarity and consistency, potentially confusing developers.\n",
+            "severity": "n/a",
+            "location": [
+                "mint_token_prgoram_version"
+            ],
+            "files": []
+        },
+        {
+            "id": 81,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ]
+            },
+            "title": "Transfers are No-op When lamports_diff is Zero",
+            "description": "1. **Description:** The code performs unnecessary CPI transfers to the System Program when `lamports_diff` is zero, which results in no actual transfer but consumes compute units.\n2. **Cause:** Lack of a guard clause checking `lamports_diff > 0` before invoking the transfer instruction.\n3. **Exploitation:** Attackers cannot exploit this directly, but it increases transaction costs unnecessarily.\n4. **Impact:** Wasted computational units (CU) and higher transaction fees, reducing efficiency.\n",
+            "severity": "n/a",
+            "location": [
+                "perp_engine.rs",
+                "new_base_crncy.rs",
+                "new_operator.rs",
+                "engine.rs",
+                "candles.rs",
+                "client_community.rs",
+                "client_primary.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 82,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1285"
+                ],
+                "4": [
+                    "CWE-129"
+                ]
+            },
+            "title": "Entrypoint Panics on Empty instruction_data",
+            "description": "1. **Description:** The `process_instruction` function accesses `instruction_data[0]` without first checking if the array is non-empty, leading to a potential panic.\n2. **Cause:** Missing bounds check before indexing into `instruction_data`.\n3. **Exploitation:** An attacker can trigger a program panic by sending an empty `instruction_data`, causing a denial of service.\n4. **Impact:** Program crash on empty input, leading to failed transactions and reduced reliability.\n",
+            "severity": "n/a",
+            "location": [
+                "process_instruction"
+            ],
+            "files": []
+        },
+        {
+            "id": 83,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Unnecessary Lamports Transfer Without Checking Existing Balance",
+            "description": "1. **Description:** The `new_private_client()` function transfers the full `minimum_balance` without checking if the account already has sufficient lamports.\n2. **Cause:** The function does not calculate the difference (`saturating_sub`) before transferring, unlike other functions in the codebase.\n3. **Exploitation:** Results in overpayment of lamports when the account already has enough funds.\n4. **Impact:** Potential over-payment of lamports, increasing costs unnecessarily and deviating from established patterns.\n",
+            "severity": "n/a",
+            "location": [
+                "new_private_client()"
+            ],
+            "files": []
+        },
+        {
+            "id": 84,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Incomplete Balance Check Missing Transaction Fee and Reserve Balance",
+            "description": "1. **Description:** The `create_client_account()` function only checks if the wallet can cover the rent for two new accounts but does not reserve lamports for transaction fees or future operations.\n2. **Cause:** The balance check does not include a buffer for wallet operational costs.\n3. **Exploitation:** A wallet with exactly the required balance will be drained, making it unable to pay fees for future transactions.\n4. **Impact:** Transaction may fail post-account creation due to insufficient balance for fees, leaving the wallet in an unusable state.\n",
+            "severity": "n/a",
+            "location": [
+                "create_client_account()"
+            ],
+            "files": []
+        },
+        {
+            "id": 85,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Eligible Instruments May Not Be Propagated",
+            "description": "1. **Description:** The `dividends_allocation` function terminates early when an instrument's `distrib_time` has not passed, skipping all subsequent eligible instruments.\n2. **Cause:** The function uses `bail!()` instead of `continue` when an instrument is not yet eligible.\n3. **Exploitation:** A single ineligible instrument in a batch prevents distribution to all valid ones.\n4. **Impact:** Legitimate dividend distributions are skipped, reducing fairness and efficiency.\n",
+            "severity": "n/a",
+            "location": [
+                "dividends_allocation"
+            ],
+            "files": []
+        },
+        {
+            "id": 86,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Insufficient Self-Referral Protection",
+            "description": "1. **Description:** The `deposit()` function only checks for self-referral by comparing the referral account to the client's account, allowing users to self-refer using multiple wallets.\n2. **Cause:** No cross-account or off-chain identity verification is performed.\n3. **Exploitation:** Users can create multiple wallets and refer themselves across accounts to exploit the referral rewards.\n4. **Impact:** Undermines the referral program's goal of user acquisition by enabling abuse.\n",
+            "severity": "n/a",
+            "location": [
+                "deposit()"
+            ],
+            "files": []
+        },
+        {
+            "id": 87,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Attacker Can Exploit Dividend Allocation",
+            "description": "1. **Description:** Attackers can deposit large amounts of DRVS tokens just before dividend allocation, claim rewards, and withdraw immediately, including via flash loans.\n2. **Cause:** The allocation is based solely on snapshot balance without any holding period or anti-sybil mechanism.\n3. **Exploitation:** An attacker can use flash loans or rapid swaps to temporarily boost balance, claim disproportionate dividends, and exit without economic commitment.\n4. **Impact:** Honest long-term depositors receive reduced rewards, undermining fairness and economic model integrity.\n",
+            "severity": "n/a",
+            "location": [
+                "dividends_allocation"
+            ],
+            "files": []
+        },
+        {
+            "id": 88,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ]
+            },
+            "title": "Forced Oldest-Order Eviction Enables Griefing",
+            "description": "1. **Description:** When the spot order book exceeds `MAX_ORDERS`, the oldest order (regardless of size or owner) is evicted, allowing attackers to fill the book with small orders to force cancellation of large legitimate orders.\n2. **Cause:** Global `MAX_ORDERS` limit without per-user quotas.\n3. **Exploitation:** An attacker can grief other traders by flooding the book with tiny orders, triggering eviction of valuable resting orders.\n4. **Impact:** Denial of service for legitimate traders, degradation of market integrity, and manipulation of displayed liquidity.\n",
+            "severity": "n/a",
+            "location": [
+                "add_order",
+                "spot::MAX_ORDERS"
+            ],
+            "files": []
+        },
+        {
+            "id": 89,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-863"
+                ]
+            },
+            "title": "User Cannot Claim Dividends After Withdrawing DRVS Tokens",
+            "description": "1. **Description:** The `dividends_claim` function requires `drvs_tokens > 0` to allow claiming, even if `dividends_value > 0`.\n2. **Cause:** The eligibility check is based on current DRVS balance rather than historical contribution.\n3. **Exploitation:** Users who withdraw their DRVS tokens lose the ability to claim accrued dividends until they re-deposit.\n4. **Impact:** Poor user experience and potential loss of claimed rewards, discouraging participation.\n",
+            "severity": "n/a",
+            "location": [
+                "dividends_claim"
+            ],
+            "files": []
+        },
+        {
+            "id": 90,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing Validation for order_type in NewSpotOrderData",
+            "description": "1. **Description:** The `NewSpotOrderData::new` function does not validate that `order_type` is 0 (Limit) or 1 (Market), allowing invalid types like MarginCall (2) to be accepted and treated as Market orders.\n2. **Cause:** Absence of explicit validation for `order_type` range.\n3. **Exploitation:** Invalid order types can be submitted, leading to incorrect behavior and log inconsistencies.\n4. **Impact:** Data inconsistency in logs and potential confusion in order processing and auditing.\n",
+            "severity": "n/a",
+            "location": [
+                "NewSpotOrderData::new"
+            ],
+            "files": []
+        },
+        {
+            "id": 91,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Rounding Error Accumulation in Partial Order Fills",
+            "description": "1. **Description:** Due to floating-point arithmetic and truncation in `trade_sum`, rounding errors accumulate during partial fills, unfairly charging the final trader.\n2. **Cause:** Use of `rdf` (rounding division factor) in floating-point multiplication and truncation to `i64` introduces precision loss, which accumulates when recalculating `traded_crncy` on partial fills.\n3. **Exploitation:** While not directly exploitable for large gains, it systematically biases cost distribution toward the last fill.\n4. **Impact:** Unfair cost distribution where the final trader pays more than their fair share due to accumulated rounding errors, though the impact is negligible in practice.\n",
+            "severity": "n/a",
+            "location": [
+                "trade_sum",
+                "fill"
+            ],
+            "files": []
+        },
+        {
+            "id": 92,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Returning true when the current time has reached the expiration_time in is_vacant",
+            "description": "1. **Description:** The `is_vacant` function returns false when the current time equals the expiration time, meaning expired records are not considered vacant. This affects logic in `deposit` and `new_private_client` functions.\n2. **Cause:** The function uses a strict greater-than comparison (`current_time > self.expiration_time`) instead of greater-than-or-equal, excluding the exact expiration moment.\n3. **Exploitation:** An attacker could exploit this by depositing as a private client at the exact expiration time, as the system would still treat the record as active.\n4. **Impact:** This allows expired private clients to deposit, and prevents updating records at the index even when expired, leading to incorrect state management.\n",
+            "severity": "n/a",
+            "location": [
+                "is_vacant::current_time#u32"
+            ],
+            "files": []
+        },
+        {
+            "id": 93,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing System Program Check in Instructions like new_operator(Inconsistency)",
+            "description": "1. **Description:** The `new_operator` instruction does not validate that the provided `system_program` account matches the Solana system program ID before using it in a CPI.\n2. **Cause:** The absence of a pre-check (`system_program.key == system_program::ID`) means the program relies on the runtime to catch mismatches during CPI.\n3. **Exploitation:** While not directly exploitable for fund theft, providing a wrong system program causes a CPI panic instead of a clean error, leading to poor error handling.\n4. **Impact:** The program panics instead of returning a well-typed, descriptive error, reducing debuggability and consistency with other handlers like `new_instrument`.\n",
+            "severity": "n/a",
+            "location": [
+                "new_operator::system_program"
+            ],
+            "files": []
+        },
+        {
+            "id": 94,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Inefficient free_index Selection in Assets Array Causes Performance Degradation",
+            "description": "1. **Description:** The `find_or_alloc_asset` function always selects the last vacant slot in the assets array due to overwriting `free_index` on every zero `asset_id`, rather than the first available.\n2. **Cause:** The loop logic continuously updates `free_index` without checking if it's already set, leading to selection of the last vacant slot.\n3. **Exploitation:** This inefficiency increases compute usage over time, potentially leading to compute budget exhaustion on Solana.\n4. **Impact:** Performance degrades as lookups require full O(n) traversal even when early vacant slots exist, increasing transaction costs and failure risk.\n",
+            "severity": "n/a",
+            "location": [
+                "client_primary::find_or_alloc_asset"
+            ],
+            "files": []
+        },
+        {
+            "id": 95,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1229"
+                ]
+            },
+            "title": "Withdraw Instruction Trying to Create New Asset Records for Non-Existent Tokens Instead of Failing",
+            "description": "1. **Description:** The `withdraw` instruction uses `alloc=true` when resolving a token asset, causing creation of a zero-balance record for non-existent tokens before failing.\n2. **Cause:** The `resolve` function is called with allocation enabled, which triggers record creation even when the token doesn't exist.\n3. **Exploitation:** An attacker could force unnecessary account reallocations and waste compute by attempting withdrawals for non-existent tokens.\n4. **Impact:** Wastes account space and compute; violates semantic expectation that withdrawals should only operate on existing assets, leading to inefficient execution.\n",
+            "severity": "n/a",
+            "location": [
+                "withdraw.rs::resolve#alloc=true"
+            ],
+            "files": []
+        },
+        {
+            "id": 96,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Users Cannot Change Their Vote Once Cast in a Voting Period",
+            "description": "1. **Description:** The voting system does not allow users to change or revoke their vote once cast in a voting round.\n2. **Cause:** The `last_voting_counter` is set after voting, and no mechanism exists to update or retract the vote within the same period.\n3. **Exploitation:** Users who make a mistake or change their mind cannot correct their vote, leading to potential dissatisfaction or incorrect outcomes.\n4. **Impact:** Poor user experience; users are locked into potentially erroneous votes, reducing flexibility and fairness in governance.\n",
+            "severity": "n/a",
+            "location": [
+                "voting::last_voting_counter"
+            ],
+            "files": []
+        },
+        {
+            "id": 97,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Using a stale perp_price_delta to calculate the perp_funding_rate",
+            "description": "1. **Description:** The `change_funding_rate` function uses the previous `perp_price_delta` to calculate the funding rate, not the current one.\n2. **Cause:** The function updates `perp_price_delta` after using it in the funding rate calculation, resulting in a one-period delay.\n3. **Exploitation:** Traders can exploit timing to avoid paying or receiving correct funding amounts, especially when entering or exiting positions near price shifts.\n4. **Impact:** Users may receive or pay funding later than expected, leading to unintended losses or profits and weakening the price-correction mechanism of funding rates.\n",
+            "severity": "n/a",
+            "location": [
+                "change_funding_rate::perp_price_delta"
+            ],
+            "files": []
+        },
+        {
+            "id": 98,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ]
+            },
+            "title": "Incorrect Token Program Error Message in Airdrop Flow",
+            "description": "1. **Description:** The airdrop instruction emits an error stating that the original Token program was expected, even though Token-2022 is required.\n2. **Cause:** The error message uses `expected: TokenProgram::Original` despite the code requiring Token-2022 for `transfer_checked`.\n3. **Exploitation:** Misleading error messages can cause operators to misconfigure accounts or waste time debugging.\n4. **Impact:** Operators are misled during diagnosis, increasing operational risk and support burden due to incorrect error reporting.\n",
+            "severity": "n/a",
+            "location": [
+                "airdrop::InvalidTokenProgramId"
+            ],
+            "files": []
+        },
+        {
+            "id": 99,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Incorrect Boundary Condition in check_pool_fees Function Excludes Valid Minimum Token Transactions",
+            "description": "1. **Description:** The `check_pool_fees` function uses a strict `>` comparison instead of `>=`, rejecting transactions where `tokens_qty` equals `min_tokens`.\n2. **Cause:** The logic incorrectly treats the boundary case as invalid due to improper operator usage.\n3. **Exploitation:** Legitimate transactions at the minimum threshold are rejected, reducing pool efficiency.\n4. **Impact:** Valid pool fee conversions are rejected, reducing capital efficiency and user experience.\n",
+            "severity": "n/a",
+            "location": [
+                "spot/engine.rs::check_pool_fees"
+            ],
+            "files": []
+        },
+        {
+            "id": 100,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-393"
+                ]
+            },
+            "title": "wrong error emitted from spot-order-cancel",
+            "description": "1. **Description:** The `spot-order-cancel` instruction emits `InvalidDataLength` when the account count is insufficient, but the correct error should be `InvalidAccountsNumber`.\n2. **Cause:** The wrong error enum is used in the `bail!` macro, inconsistent with other parts of the codebase.\n3. **Exploitation:** Misleading errors make debugging harder and can lead to incorrect assumptions about the root cause.\n4. **Impact:** Confusion during debugging and operational errors due to inconsistent and incorrect error messaging.\n",
+            "severity": "n/a",
+            "location": [
+                "spot_order_cancel.rs#51"
+            ],
+            "files": []
+        },
+        {
+            "id": 101,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ]
+            },
+            "title": "Redundant Flag READY_TO_DRV_UPGRADE Appears Unused",
+            "description": "1. **Description:** The `READY_TO_DRV_UPGRADE` flag is always set with `READY_TO_PERP_UPGRADE` but is never independently checked or used.\n2. **Cause:** No separate DRV upgrade functionality exists, and the flag appears to be leftover code from an unimplemented feature.\n3. **Exploitation:** While not directly exploitable, dead code increases complexity and maintenance burden.\n4. **Impact:** Code bloat and potential confusion for auditors and developers; increases attack surface unnecessarily.\n",
+            "severity": "n/a",
+            "location": [
+                "instr_mask::READY_TO_DRV_UPGRADE"
+            ],
+            "files": []
+        },
+        {
+            "id": 102,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect mask check in check_points function",
+            "description": "1. **Description:** The `check_points` function uses mask `0x7FF` to check milestone completion, but the correct mask should be `0x3E07` to cover bits 0,1,2,9,10,11,12,13.\n2. **Cause:** The incorrect bitmask fails to represent all required milestone bits, leading to incorrect evaluation of completion status.\n3. **Exploitation:** Users may undergo unnecessary checks even after completing all milestones, wasting compute.\n4. **Impact:** Inefficient execution due to incorrect optimization logic, increasing transaction costs and compute usage.\n",
+            "severity": "n/a",
+            "location": [
+                "check_points::mask & 0x7FF"
+            ],
+            "files": []
+        }
+    ]
+}

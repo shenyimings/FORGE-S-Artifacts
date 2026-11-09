@@ -1,0 +1,75 @@
+{
+    "path": "reports-without-source/2026-04-07_GLAM_Security_Enhancements_audit_report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/glamsystems/glam"
+        ],
+        "commit_id": [
+            "79bdd1f9387c96512f18e40079c6577a60dc396d"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2026-04-07",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Duplicate-mint oracle fix remains incomplete for Kamino reserves and aggregate Scope oracles",
+            "description": "The vulnerability arises because the duplicate-mint oracle fix, while correctly implemented for direct oracle paths, remains incomplete for Kamino reserves and aggregate Scope oracles. In these cases, the code uses `find_by_asset(mint)` without considering the associated oracle account, which can result in selecting the first asset metadata entry for a given mint rather than the one tied to the specific oracle. This leads to incorrect validation and potential use of wrong metadata such as `max_age_seconds`. An attacker could exploit this by configuring multiple oracle entries for the same mint in Kamino or Scope oracles, causing the system to validate against an unintended oracle configuration. The impact is low, as it may lead to incorrect pricing metadata being used, potentially affecting AUM/NAV calculations, but does not result in direct fund loss.\n",
+            "severity": "low",
+            "location": [
+                "glam/79bdd1f9/anchor/programs/glam_protocol/src/state/price/oracle.rs:L855"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Cross-denomination normalization preserves confidence in the wrong units",
+            "description": "When converting prices between denominations (e.g., SOL to USD), the code correctly rescales the price value but copies the confidence interval unchanged, without converting it to the target denomination. This violates the assumption that confidence is expressed in the same units as the price, which is relied upon in functions like `validate_age_and_confidence`. The root cause is the failure to scale the confidence value during denomination conversion. An attacker could potentially exploit this if non-zero confidence values were used in non-USD pricing paths, leading to incorrect price validation. However, in the current implementation, this path is only used for SOL-denominated LST pricing with zero confidence, so the immediate impact is negligible. The issue is forward-looking and could become relevant if future changes allow non-zero confidence values in such paths.\n",
+            "severity": "low",
+            "location": [
+                "glam/79bdd1f9/anchor/programs/glam_protocol/src/instructions/jupiter_swap_v2.rs:L64"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Kamino liquidation can realize reserve mints outside the vault pricing set",
+            "description": "The Kamino liquidation wrapper does not enforce mint-level gating on the reserve mints it handles, unlike the borrow wrapper which checks against the vault's borrowable set and Kamino allowlist. As a result, liquidation can credit reserve liquidity or collateral mints that are not in the vault's tracked `{assets U borrowable}` set. These mints may not be included in subsequent pricing passes, leading to underreported AUM/NAV until the state is manually updated. The cause is the absence of mint validation in the liquidation instruction. An attacker could exploit this by triggering liquidations involving untracked mints, potentially causing pricing inconsistencies or delays in accurate valuation. The impact is low, as it does not lead to fund loss but affects pricing accuracy and requires manual state updates to resolve.\n",
+            "severity": "low",
+            "location": [
+                "glam/79bdd1f9/anchor/programs/ext_kamino/src/instructions/lending_liquidate_obligation_and_redeem_reserve_collateral_v2.rs:L104-L109"
+            ],
+            "files": []
+        }
+    ]
+}

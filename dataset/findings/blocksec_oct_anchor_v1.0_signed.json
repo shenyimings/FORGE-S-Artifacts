@@ -1,0 +1,287 @@
+{
+    "path": "reports/blocksec_oct_anchor_v1.0_signed.pdf",
+    "project_info": {
+        "url": "https://github.com/octopus-network/octopus-appchain-anchor",
+        "commit_id": "9b7ed50b9fda8d45c0dfba38a03222a3fc8dc9aa",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-07-10",
+        "project_path": "contracts/blocksec_oct_anchor_v1.0_signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1289"
+                ]
+            },
+            "title": "Case-Sensitive Problem",
+            "description": "The `id_in_appchain` in the `AccountIdInAppchain::new()` function is case-sensitive, while the actual ID in the appchain is case-insensitive. This discrepancy allows two different account IDs (differing only in case) to map to the same appchain ID.\nThe root cause is the lack of case normalization during account ID creation.\nAn attacker could exploit this by creating accounts with similar names differing only in case, potentially leading to confusion or failed assertions when interacting with the contract.\nThe impact includes failed assertions related to `AccountIdInAppchain`, which could prevent legitimate users from claiming rewards or performing other critical actions.\n",
+            "severity": "medium",
+            "files": [
+                "appchain-anchor/src/types.rs"
+            ],
+            "location": [
+                "types.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ],
+                "3": [
+                    "CWE-835"
+                ]
+            },
+            "title": "Potential DoS Problem",
+            "description": "The `go_booting` function may consume more gas than the maximum prepaid gas (300T) allows, particularly during the `complete_switching_era` process. The loop in this function does not break when gas is insufficient, risking an infinite loop.\nThe root cause is the absence of a gas exhaustion check within the loop.\nAn attacker or even normal operation under high validator count could trigger this condition, preventing the contract from progressing past the booting phase.\nThe impact is that the contract owner may be permanently unable to boot the contract, resulting in a denial of service.\n",
+            "severity": "medium",
+            "files": [
+                "appchain-anchor/src/user_actions/appchain_lifecycle.rs"
+            ],
+            "location": [
+                "user_actions/appchain_lifecycle.rs#34-46"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Assertion Missing for Wrapped Appchain NFT Registration",
+            "description": "The `register_wrapped_appchain_nft` function does not verify whether an NFT token for a given `class_id` already exists before registration.\nThis is caused by the lack of an existence check prior to initialization.\nAn attacker could re-initialize an existing NFT token, potentially disrupting state consistency or overwriting critical data.\nThe impact is that wrapped appchain NFT tokens may be re-initialized, leading to unexpected behavior or loss of metadata integrity.\n",
+            "severity": "medium",
+            "files": [
+                "appchain-anchor/src/assets/wrapped_appchain_nfts.rs"
+            ],
+            "location": [
+                "assets/wrapped_appchain_nfts.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Validation Missing for Deserialized LockNftPayload.receiver_id",
+            "description": "The `receiver_id` field in `LockNftPayload` is deserialized as a `String` instead of `AccountId`, bypassing built-in validation.\nThe root cause is the use of `String` type instead of `AccountId`, which would invoke `validate_account_id` during deserialization.\nAn attacker could provide an invalid account ID string, which would be accepted by the contract and used in downstream operations.\nThe impact is that the AppchainAnchor may process an invalid `AccountId` when constructing an `AppchainMessage` for `PayloadType::LockNft`, potentially leading to failed transfers or loss of NFTs.\n",
+            "severity": "low",
+            "files": [
+                "appchain-anchor/src/message_decoder.rs"
+            ],
+            "location": [
+                "message_decoder.rs#153-154"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-362"
+                ]
+            },
+            "title": "Potential over Unlocked Near Fungible Token",
+            "description": "The `locked_balance` of a near-fungible token is only updated in the callback function `resolve_fungible_token_transfer`, after the cross-contract call. If multiple `NearFungibleTokenBurnt` events are processed in the same block with a total exceeding `locked_balance`, over-unlocking can occur.\nThe root cause is the delayed update of `locked_balance`, which creates a race condition during concurrent unlocks.\nAn attacker could exploit this by triggering multiple burn events in a single block, potentially unlocking more tokens than were originally locked.\nThe impact is that the total amount of near-fungible tokens unlocked may exceed the contract's `locked_balance`, leading to a loss of funds.\n",
+            "severity": "medium",
+            "files": [
+                "appchain-anchor/src/assets/near_fungible_tokens.rs"
+            ],
+            "location": [
+                "assets/near_fungible_tokens.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Token Price may be Outdated",
+            "description": "The contract does not track the timestamp when token prices (e.g., `oct_token`, `near_fungible_token`, `wrapped_appchain_token`) are last updated, making it impossible to verify price freshness.\nThe root cause is the absence of a `last_updated_time` field for each token's price.\nAn attacker could exploit stale prices in calculations involving market value, especially if oracle updates are delayed or halted.\nThe impact is that functions relying on token prices (e.g., `total_market_value`, `get_market_value_of`) may use outdated values, leading to incorrect valuations and potential financial loss.\n",
+            "severity": "low",
+            "files": [
+                "appchain-anchor/src/lib.rs",
+                "appchain-anchor/src/assets/near_fungible_tokens.rs"
+            ],
+            "location": [
+                "lib.rs#440-446",
+                "assets/near_fungible_tokens.rs#103-108"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-252"
+                ]
+            },
+            "title": "Callback Functions are Missing",
+            "description": "Several cross-contract calls, such as `ft_transfer` in `withdraw_validator_rewards` and `withdraw_delegator_rewards`, do not implement callback functions to handle failures.\nThe root cause is the omission of `.then()` clauses to define fallback logic in case of transfer failure.\nIf a transfer fails (e.g., due to a deleted account), the contract will not revert state changes, leading to loss of funds without recovery.\nThe impact is that users' funds may be lost if cross-contract invocations fail, as there is no mechanism to roll back the withdrawal operation.\n",
+            "severity": "low",
+            "files": [
+                "appchain-anchor/src/user_actions/staking.rs"
+            ],
+            "location": [
+                "user_actions/staking.rs#564-576",
+                "user_actions/staking.rs#611-623"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Tokens may be Locked When Bridging is Closed",
+            "description": "The `internal_process_near_fungible_token_deposit` and `internal_process_nft_transfer` functions do not check the `bridging_state` before accepting deposits or transfers.\nThe root cause is the missing validation of `near_fungible_token.bridging_state` or `wrapped_appchain_nft.bridging_state`.\nA user could deposit tokens when bridging is closed, expecting them to be bridged, but the appchain will not process the request.\nThe impact is that users' transferred tokens may become locked indefinitely, as they are accepted by the contract but not forwarded to the appchain.\n",
+            "severity": "medium",
+            "files": [
+                "appchain-anchor/src/assets/near_fungible_tokens.rs",
+                "appchain-anchor/src/assets/wrapped_appchain_nfts.rs"
+            ],
+            "location": [
+                "assets/near_fungible_tokens.rs#205-216",
+                "assets/wrapped_appchain_nfts.rs#370-385"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Incorrect Wrapped Appchain Token Management",
+            "description": "There are three issues: (I) `total_supply` is not updated when burning wrapped appchain tokens; (II) `total_supply` is not updated when minting era rewards; (III) `total_supply` is set equal to `premined_balance` during base data sync, which may prevent future minting.\nThe root causes are inconsistent state management and reliance on manual updates rather than automated synchronization.\nThese issues can lead to supply inconsistencies between the anchor and appchain, failed mint operations, or denial of service for legitimate token bridging.\nThe impact includes inconsistent token supply, potential DoS during minting, and inability to bridge tokens due to failed balance checks in the appchain.\n",
+            "severity": "low",
+            "files": [
+                "appchain-anchor/src/assets/wrapped_appchain_token.rs",
+                "appchain-anchor/src/permissionless_actions/distributing_rewards.rs"
+            ],
+            "location": [
+                "assets/wrapped_appchain_token.rs#223-253",
+                "permissionless_actions/distributing_rewards.rs#72-81",
+                "assets/wrapped_appchain_token.rs#67-87"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Potential Precision Loss in Reward Distribution",
+            "description": "1. **Description:** In the function `distribute_reward_in_validator_set`, division is performed before multiplication when calculating validator rewards, which may lead to precision loss due to integer truncation.\n2. **Cause:** The arithmetic operation order\u2014dividing before multiplying\u2014reduces the accuracy of the result, especially when dealing with small or non-divisible values.\n3. **Exploitation:** An attacker could exploit this by manipulating stake amounts to maximize miscalculation in their favor during reward distribution.\n4. **Impact:** This could result in unfair distribution of rewards, potentially leading to economic imbalance or loss for honest participants.\n",
+            "severity": "medium",
+            "files": [
+                "appchain-anchor/src/permissionless_actions/distributing_rewards.rs"
+            ],
+            "location": [
+                "distribute_reward_in_validator_set#254-258"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-269"
+                ]
+            },
+            "title": "Potential Centralization Problem in Ownership Model",
+            "description": "1. **Description:** The contract relies on a single owner (`AppchainAnchor.owner`) for critical operations, creating a single point of failure.\n2. **Cause:** Lack of multi-signature or decentralized governance controls for high-risk functions.\n3. **Exploitation:** If the private key of the owner is compromised, an attacker can take full control of the contract and perform unauthorized changes.\n4. **Impact:** Full compromise of contract security and governance, leading to potential fund loss or malicious configuration changes.\n",
+            "severity": "informational",
+            "files": [
+                "appchain-anchor/src/lib.rs",
+                "appchain-anchor/src/user_actions/owner_actions.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Potential Elastic Supply Token Problem",
+            "description": "1. **Description:** The system does not prohibit elastic supply tokens (e.g., deflationary tokens) from being added to the whitelist, which can cause discrepancies between transferred and received token amounts.\n2. **Cause:** No validation or restriction on token types during whitelist inclusion.\n3. **Exploitation:** An attacker could register a deflationary token where the received amount is less than expected, disrupting accounting logic that assumes 1:1 transfer semantics.\n4. **Impact:** Inaccurate balance tracking, potential loss of funds, or incorrect state transitions in dependent logic.\n",
+            "severity": "informational",
+            "files": [
+                "appchain-anchor/src/lib.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ]
+            },
+            "title": "Errors from the Appchain are Ignored",
+            "description": "1. **Description:** The contract does not implement error handling for `AppchainNotifications` if they are not properly processed by the external appchain.\n2. **Cause:** Absence of error propagation or fallback mechanisms for cross-chain notifications.\n3. **Exploitation:** A failure in the appchain's processing would go undetected, potentially leaving the anchor contract in an inconsistent state.\n4. **Impact:** Silent failures in critical cross-chain operations, leading to state desynchronization or loss of data integrity.\n",
+            "severity": "informational",
+            "files": [
+                "appchain-anchor/src/appchain_messages.rs",
+                "appchain-anchor/src/lib.rs"
+            ],
+            "location": []
+        }
+    ]
+}

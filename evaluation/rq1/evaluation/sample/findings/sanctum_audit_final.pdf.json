@@ -1,0 +1,137 @@
+{
+    "path": "reports/sanctum_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/igneous-labs/S/tree/ottersec-231220",
+        "commit_id": "dd0768d496fdba80a019ccce86d187fbc2355223",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-01-15",
+        "project_path": "contracts/sanctum_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Rounding Error During Swaps",
+            "description": "1. **Description:** The vulnerability arises in the `swap_exact_in` function where the `U64RatioFloor::reverse` method is used during a cross-program invocation to convert SOL value to LST amount. This method rounds up the resulting value, potentially allowing users to receive one more lamport than intended.\n2. **Cause:** The root cause is the use of a rounding-up operation in `U64RatioFloor::reverse`, which introduces a rounding error in favor of the user. This becomes exploitable when protocol fees are zero, as the absence of fees makes the exact output amount critical.\n3. **Exploitation:** An attacker could repeatedly perform small swaps with zero-fee configurations, benefiting from the upward rounding to extract slightly more tokens than deserved, accumulating gains over time.\n4. **Impact:** The impact includes gradual loss of funds from the liquidity pool due to inflated token payouts, undermining the economic model and potentially leading to imbalance or depletion of reserves.\n",
+            "severity": "medium",
+            "files": [
+                "programs/s-controller/src/processor/swap_exact_in.rs"
+            ],
+            "location": [
+                "swap_exact_in#process_swap_exact_in"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing Rebalance Checks",
+            "description": "1. **Description:** The `start_rebalance` instruction fails to validate the destination liquidity pool\u2019s mint account (`dst_lst_mint`) during the rebalance initiation, leaving the system exposed to incorrect or malicious account inputs.\n2. **Cause:** The absence of validation in `process_start_rebalance` means that the destination mint account is not checked against expected properties, such as correctness or ownership.\n3. **Exploitation:** An attacker or misconfigured call could set `dst_lst_mint` to an invalid or wrong mint, causing funds to be routed to an unintended pool or lost entirely during the rebalance.\n4. **Impact:** This could result in permanent loss of funds from the protocol due to misdirected liquidity, especially if the incorrect mint is not detectable until after execution.\n",
+            "severity": "medium",
+            "files": [
+                "programs/s-controller/src/processor/start_rebalance.rs"
+            ],
+            "location": [
+                "start_rebalance#process_start_rebalance"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ]
+            },
+            "title": "Potential Pool Unbalancing",
+            "description": "1. **Description:** The rebalancing mechanism adjusts pool composition based on a fixed amount, but does not account for state changes between transaction submission and execution.\n2. **Cause:** The rebalancing calculation is based on stale data, and no on-chain validation ensures the current state matches the expected conditions at execution time.\n3. **Exploitation:** Arbitrage bots or network latency can cause price shifts between submission and confirmation, leading the rebalance to execute on outdated prices and potentially worsen pool imbalance.\n4. **Impact:** The pool may become significantly unbalanced, reducing capital efficiency and increasing impermanent loss for liquidity providers.\n",
+            "severity": "medium",
+            "files": [
+                "programs/s-controller/src/processor/start_rebalance.rs"
+            ],
+            "location": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-1325"
+                ]
+            },
+            "title": "Denial Of Service",
+            "description": "1. **Description:** The `add_lst` instruction is vulnerable to a denial-of-service attack due to the creation of unnecessary associated token accounts (ATAs) before validating the main logic.\n2. **Cause:** The function calls `create_ata_invoke` twice for `pool_reserves` and `protocol_fee_accumulator` without first checking if the mint has already been added or if the ATA exists.\n3. **Exploitation:** An attacker can repeatedly invoke `create_ata_invoke` for the same mint before `add_lst` is executed, bloating the blockchain with redundant ATAs and consuming storage.\n4. **Impact:** This leads to increased on-chain storage costs and potential performance degradation, constituting a denial-of-service vector against the protocol\u2019s scalability.\n",
+            "severity": "low",
+            "files": [
+                "programs/s-controller/src/processor/add_lst.rs"
+            ],
+            "location": [
+                "add_lst#process_add_lst"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ]
+            },
+            "title": "Protocol Fee Modification Via Frontrunning",
+            "description": "1. **Description:** The admin can front-run liquidity provider deposits or withdrawals by calling `set_protocol_fee` to manipulate fees, potentially setting them to 100%.\n2. **Cause:** The lack of safeguards or time-locked mechanisms in `process_set_protocol_fee` allows immediate and unchecked fee changes.\n3. **Exploitation:** An admin with insider knowledge or priority access can adjust fees right before a large deposit or withdrawal, capturing nearly all value as fees.\n4. **Impact:** Users receive significantly fewer tokens or underlying assets than expected, leading to loss of trust and potential financial loss, especially for large transactions.\n",
+            "severity": "low",
+            "files": [
+                "programs/s-controller/src/processor/set_protocol_fee.rs"
+            ],
+            "location": [
+                "set_protocol_fee#process_set_protocol_fee"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Account Type Validation",
+            "description": "1. **Description:** The `add_lst` and `remove_lst` instructions lack proper validation of account types, particularly the token program and fee account.\n2. **Cause:** `add_lst` does not verify whether the token program is `spl-token` or `spl-token-2022`, and `remove_lst` does not confirm that the account being closed is a valid fee account.\n3. **Exploitation:** An attacker could pass an unauthorized token program or a critical state account as the fee account to be closed, leading to protocol malfunction or fund loss.\n4. **Impact:** This could result in the accidental closure of critical accounts or use of incompatible programs, disrupting protocol operations and potentially leading to fund loss.\n",
+            "severity": "low",
+            "files": [
+                "programs/s-controller/src/processor/add_lst.rs",
+                "programs/s-controller/src/processor/remove_lst.rs"
+            ],
+            "location": []
+        }
+    ]
+}

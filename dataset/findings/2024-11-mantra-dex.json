@@ -1,0 +1,1147 @@
+{
+    "path": "reports/2024-11-mantra-dex.md",
+    "project_info": {
+        "url": "https://github.com/code-423n4/2024-11-mantra-dex",
+        "commit_id": "26714ea59dab7ecfafca9db1138d60adcf513588",
+        "address": [
+            "Address1PublicKey..."
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-01-13",
+        "project_path": "contracts/2024-11-mantra-dex.md.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-665"
+                ],
+                "3": [
+                    "CWE-1419"
+                ]
+            },
+            "title": "Protocol allows creating broken tri-crypto CPMM pools",
+            "description": "The protocol allows the creation of constant product market-maker (CPMM) pools with more than two tokens, despite using the Uniswap-style x * y = k invariant, which is only valid for two-token pools. The root cause is the lack of a validation check during pool creation to restrict CPMM pools to exactly two tokens. This allows users to create multi-token CPMM pools (e.g., tri-crypto) that follow an invalid invariant, leading to incorrect swap calculations and potential arbitrage opportunities. An attacker could exploit this by creating or using such pools to perform economically irrational swaps that drain liquidity or manipulate prices, resulting in financial loss for liquidity providers. The impact is high due to the potential for loss of funds and degradation of protocol trust.\n",
+            "severity": "high",
+            "files": [
+                "contracts/pool-manager/src/manager/commands.rs"
+            ],
+            "location": [
+                "PoolManager.create_pool#75",
+                "helpers.assert_slippage_tolerance"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Logical error in validate_fees_are_paid can cause a DoS or allow users to bypass fees if denom_creation_fee includes multiple coins, including pool_creation_fee, and the user attempts to pay all fees using only pool_creation_fee",
+            "description": "The validate_fees_are_paid function contains a logical flaw when handling fee payments where both denom_creation_fee and pool_creation_fee use the same token. If the user pays a combined amount equal to only one fee, the validation may incorrectly pass both checks when the fee amounts are equal, allowing the user to bypass one of the required payments. Conversely, if the amounts differ and the user combines payments, the strict equality check fails, causing a denial of service. The root cause is the lack of proper accounting for overlapping fee denominations and the absence of cumulative payment validation. This can be exploited by an attacker to either avoid paying one of the fees entirely or cause legitimate transactions to revert, undermining the protocol's fee mechanism. The impact includes potential loss of revenue and disruption of pool creation functionality.\n",
+            "severity": "high",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "helpers.validate_fees_are_paid#561-592"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Multi-token stableswap pools allow 0 liquidity for tokens, creating bricked pools",
+            "description": "The provide_liquidity function for stableswap pools does not enforce that all tokens in the pool must have non-zero initial deposits during the first liquidity provision. While it checks that provided tokens are valid pool constituents, it does not verify that every token in the pool is represented. This allows a user to initialize a multi-token stableswap pool with liquidity for only a subset of tokens, resulting in a pool state where one or more tokens have zero liquidity. Subsequent attempts to add liquidity will fail due to a division by zero in the d_prod calculation during the StableSwap invariant computation. The root cause is the missing validation for complete token coverage during initial liquidity provision. This leads to a bricked pool that cannot accept further liquidity, rendering it unusable and causing a denial of service. The impact is high as it permanently damages pool functionality and may result in trapped assets.\n",
+            "severity": "high",
+            "files": [
+                "contracts/pool-manager/src/liquidity/commands.rs"
+            ],
+            "location": [
+                "liquidity.provide_liquidity#46-74",
+                "liquidity.provide_liquidity#234-239"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ]
+            },
+            "title": "Block gas limit can be hit due to loop depth",
+            "description": "The function in question contains a loop that can be manipulated to execute an excessive number of iterations based on user-controlled input, potentially exceeding the block gas limit and causing the transaction to fail or block the network. The root cause is the lack of bounds checking or limits on the loop iteration count, which depends on dynamic data such as the number of reward epochs or positions. An attacker could exploit this by creating a farm with a large number of epochs or by manipulating the state to trigger a deep loop during critical operations like reward distribution or position updates. This would result in a denial of service, as legitimate transactions would be unable to execute due to gas exhaustion. The impact is high due to the potential for network-level disruption and blocking of essential contract functions.\n",
+            "severity": "high",
+            "files": [
+                "contracts/farm-manager/src/farm/commands.rs"
+            ],
+            "location": [
+                "farm.commands#43-94"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ]
+            },
+            "title": "Out-of-Gas Risk in claim and close_position Functions Due to N^3 Loop Complexity",
+            "description": "The `claim` function implements nested loops that result in O(P*F*E) time complexity, where P is the number of user positions, F is the number of farms per LP token, and E is the number of epochs since the first deposit. This high complexity can lead to transactions exceeding the block gas limit, especially when users have long-standing positions across multiple farms. The root cause is the lack of batch processing or incremental reward claiming mechanisms, forcing the system to recompute rewards across all epochs, farms, and positions in a single transaction. An attacker or regular user with many positions and old deposits could trigger this behavior during a `claim` or `close_position` call, causing the transaction to fail due to out-of-gas conditions. The impact includes inability to claim rewards or close positions, potentially forcing users into emergency withdrawals and loss of both deposits and accumulated rewards.\n",
+            "severity": "high",
+            "files": [
+                "contracts/farm-manager/src/farm/commands.rs",
+                "contracts/farm-manager/src/position/commands.rs"
+            ],
+            "location": [
+                "claim#P*F*E",
+                "close_position#P*F*E"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Farms Can Be Created with Past Start Epochs Leading to Unfair Reward Distribution",
+            "description": "The `validate_farm_epochs` function allows farms to be created with a `start_epoch` in the past because it lacks a validation check ensuring that `start_epoch >= current_epoch + 1`. This enables administrators or malicious actors to retroactively start farms, which distorts the reward accounting for existing users who already claimed rewards for those epochs. The root cause is the missing validation logic in the epoch verification process. An attacker with farm creation privileges could exploit this by setting a past `start_epoch`, thereby diluting previously distributed rewards and causing users to miss out on proportional earnings. The impact is an unfair redistribution of rewards, undermining trust in the system\u2019s consistency and fairness.\n",
+            "severity": "high",
+            "files": [
+                "contracts/farm-manager/src/manager/commands.rs"
+            ],
+            "location": [
+                "validate_farm_epochs#128-175"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Stableswap Pools Do Not Normalize Token Decimals During Deposit, Leading to Incorrect LP Share Calculation",
+            "description": "The `compute_lp_mint_amount_for_stableswap_deposit` function uses raw token amounts without normalizing for decimals when computing the invariant D via `compute_d`. This causes imbalanced share minting when tokens with different decimal precisions (e.g., 6 vs 18) are deposited, as higher-decimal tokens are overvalued in the calculation. The root cause is the absence of decimal normalization before performing stableswap math, unlike in the swap path where such handling exists. An attacker could exploit this by depositing high-decimal tokens in a pool with low-decimal assets, receiving disproportionately large LP shares. The impact is economic unfairness, potential pool imbalance, and loss of value for honest liquidity providers.\n",
+            "severity": "high",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "compute_lp_mint_amount_for_stableswap_deposit",
+                "compute_d#714-716"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-369"
+                ]
+            },
+            "title": "Division by Zero in calculate_rewards Causes Locked Rewards and Prevents Position Closure",
+            "description": "The `calculate_rewards` function performs a division using `checked_mul_floor` with `total_lp_weight` as the denominator without verifying it is non-zero. If a user closes a position, the contract weight for that LP token may drop to zero in subsequent epochs, but the `LAST_CLAIMED_EPOCH` is not cleared if other positions exist, causing future reward claims to iterate over epochs where `total_lp_weight` is zero. The root cause is the lack of a zero-check before division and flawed state cleanup logic in `reconcile_user_state`. An attacker can force this condition by opening and closing positions strategically, leading to a division-by-zero error during claim. The impact is permanent locking of all user rewards and inability to close positions safely, resulting in fund loss.\n",
+            "severity": "high",
+            "files": [
+                "contracts/farm-manager/src/farm/commands.rs",
+                "contracts/farm-manager/src/position/commands.rs"
+            ],
+            "location": [
+                "calculate_rewards#205",
+                "reconcile_user_state#215"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Stableswap Pool Skewing Without Fee Penalty Enables Free Price Manipulation",
+            "description": "The stableswap implementation does not charge dynamic fees based on the degree of imbalance introduced during liquidity additions. Unlike Curve Finance, which computes a `difference` between ideal and actual balances and applies fees proportional to the skew, this code only checks the change in the invariant D without penalizing skewed deposits. The root cause is the missing skew-based fee mechanism in the liquidity addition logic. An attacker can exploit this by adding liquidity in highly imbalanced ratios, shifting the pool price without paying fees, and then profiting from low-slippage swaps or frontrunning others. The impact is increased vulnerability to price manipulation, elevated slippage for honest traders, and potential loss of funds for liquidity providers.\n",
+            "severity": "high",
+            "files": [
+                "contracts/pool-manager/src/liquidity/commands.rs"
+            ],
+            "location": [
+                "provide_liquidity#257-265"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-184"
+                ]
+            },
+            "title": "Attackers can force the rewards to be stuck in the contract with malicious x/tokenfactory denoms",
+            "description": "The vulnerability allows an attacker to prevent users from claiming their rewards and block the contract owner from closing malicious farms. The issue arises because the contract accepts reward tokens created via the x/tokenfactory module, which allows the token creator to forcefully transfer tokens from any account, including the contract.\n\nThe root cause is the lack of protection against tokens with forced transfer capabilities. When a user claims rewards, all rewards are aggregated into a single BankMsg::Send. If an attacker funds a farm with a tokenfactory token and then uses MsgForceTransfer to drain the contract's balance of that token, any reward claim will fail due to insufficient funds.\n\nAn attacker can exploit this by first creating a token via x/tokenfactory, funding a farm with it, and then draining the contract's balance after users have accrued rewards. This causes all reward claims to fail, even for legitimate tokens, because the entire send operation reverts.\n\nThe impact is severe: users lose access to their accrued rewards, and the contract owner cannot close the malicious farm because the close_farms function attempts to refund the farm's asset, which will also fail due to insufficient funds. This results in a permanent denial of service for both reward claiming and farm management.\n",
+            "severity": "high",
+            "files": [
+                "contracts/farm-manager/src/farm/commands.rs",
+                "contracts/farm-manager/src/manager/commands.rs"
+            ],
+            "location": [
+                "farm-manager/src/farm/commands.rs#102-107",
+                "farm-manager/src/manager/commands.rs#212-220"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1023"
+                ],
+                "3": [
+                    "CWE-839"
+                ]
+            },
+            "title": "Incorrect slippage_tolerance handling in stableswap provide_liquidty function",
+            "description": "The vulnerability lies in the incorrect implementation of slippage tolerance checks for stableswap pools. While constant product pools correctly check both token ratios, stableswap pools only perform a one-sided comparison between pool and deposit ratios.\n\nThe root cause is that the slippage check for stableswap pools only verifies if the pool ratio multiplied by (1 - slippage_tolerance) is greater than the deposit ratio. It fails to check the inverse, allowing deposits with highly imbalanced ratios to be accepted even when slippage_tolerance is set to zero.\n\nAn attacker or malicious user can exploit this by depositing liquidity in a skewed ratio that benefits them at the expense of other liquidity providers. For example, a user can deposit tokens in a ratio that is significantly different from the pool's current state, receiving more LP tokens than fair value, effectively stealing value from existing LPs.\n\nThe impact is economic loss for honest liquidity providers due to unfair dilution and increased vulnerability to manipulation. The pool becomes susceptible to low-cost manipulation where users can skew the pool at minimal cost, leading to incorrect price reporting and high slippage for traders.\n",
+            "severity": "high",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "pool-manager/src/helpers.rs#437-438"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Stableswap does disjoint swaps, breaking the underlying invariant",
+            "description": "The vulnerability stems from the stableswap implementation calculating the invariant using only the ask and offer token amounts, ignoring other tokens in the pool. This breaks the fundamental stableswap invariant, which should consider all token balances to maintain price stability across the entire pool.\n\nThe root cause is in the compute_swap and calculate_stableswap_y functions, where only the two involved tokens are used in the sum and product calculations for the invariant (S and D), despite the pool having more than two tokens. This is in contrast to standard implementations like Curve, which include all token balances.\n\nAn attacker can exploit this by performing swaps between two tokens while ignoring the state of other tokens in the pool. For example, in a three-token pool (A, B, C), A-B swaps do not consider the balance of C, allowing arbitrage opportunities when C is imbalanced. This leads to worse slippage profiles and increased manipulability.\n\nThe impact is degraded economic security of the pool, with increased vulnerability to arbitrage and manipulation. Users suffer from worse swap prices, and the pool's ability to maintain stable prices across all assets is compromised, undermining the core value proposition of stableswap pools.\n",
+            "severity": "high",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "pool-manager/src/helpers.rs#117-124",
+                "pool-manager/src/helpers.rs#39-88"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Pool creators can manipulate the slippage calculation for liquidity providers",
+            "description": "The vulnerability allows pool creators to manipulate the slippage calculation by changing the order of token denoms during pool creation. Although the same tokens are used, different ordering leads to incorrect slippage checks, potentially causing loss of funds for liquidity providers.\n\nThe root cause is that while deposit amounts are sorted before slippage checks, the pool's internal token order is determined by the creator's input order. This mismatch means that the slippage check may compare inverted ratios (e.g., token0/token1 vs token1/token0), leading to incorrect enforcement of slippage tolerance.\n\nAn attacker can exploit this by creating a pool with intentionally reversed token order. When users add liquidity, the slippage check uses the wrong ratio comparison, potentially allowing deposits with unfavorable ratios to be accepted. This can lead to value leakage from honest LPs to the attacker.\n\nThe impact is economic loss for liquidity providers who rely on slippage protection. The issue undermines trust in the protocol's safety mechanisms and enables permissionless pool creation to be weaponized for financial gain at the expense of users.\n",
+            "severity": "high",
+            "files": [
+                "contracts/pool-manager/src/manager/commands.rs",
+                "contracts/pool-manager/src/liquidity/commands.rs",
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "pool-manager/src/manager/commands.rs#75",
+                "pool-manager/src/liquidity/commands.rs#271",
+                "pool-manager/src/helpers.rs#452"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1254"
+                ]
+            },
+            "title": "In edge cases, create_pool can either be reverted or allow user underpay fees",
+            "description": "The `create_pool` function is permissionless and requires users to pay both pool creation and token factory fees. However, two vulnerabilities exist in the `validate_fees_are_paid` function. First, a strict equality check (`paid_pool_fee_amount == pool_creation_fee.amount`) is used, which can cause the transaction to revert if the user pays additional fees in the same denomination. Second, the function uses `.any()` instead of `.all()` when checking `denom_creation_fee`, allowing a user to pay only one of the required token factory fees, thus underpaying. This can lead to either denial of service (due to reverts) or loss of protocol revenue from underpaid fees. An attacker could exploit this by carefully structuring their fee payments to bypass full payment requirements.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "pool-manager/src/helpers.rs#563-564",
+                "pool-manager/src/helpers.rs#577"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ]
+            },
+            "title": "Penalty fees can be shared among future farms or expired farms, risks of exploits",
+            "description": "The `withdraw_position` function distributes penalty fees from emergency withdrawals equally among all farm owners with the same `lp_denom`, regardless of whether the farm is active, expired, or in the future. This allows a malicious actor to create a future farm with a popular LP token and receive a share of penalty fees before the farm ever becomes active. The attacker can then close the farm and withdraw all assets, profiting from penalty fees without contributing to the ecosystem. This reduces the rewards for legitimate, active farm operators and enables exploitation through low-effort, high-reward attacks on the fee distribution mechanism.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/farm-manager/src/position/commands.rs",
+                "contracts/farm-manager/src/state.rs"
+            ],
+            "location": [
+                "farm-manager/src/position/commands.rs#366-368",
+                "farm-manager/src/state.rs#124"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-193"
+                ]
+            },
+            "title": "User is unable to claim their reward for the expanded epochs if farm is expanded",
+            "description": "When a farm is expanded after its `preliminary_end_epoch`, users who claimed rewards before the expansion may be unable to claim rewards for the newly added epochs. This occurs because the `LAST_CLAIMED_EPOCH` is updated to the current epoch during the claim, and subsequent claims start from `LAST_CLAIMED_EPOCH + 1`. If the farm is expanded after the user's claim but within the same epoch, the user misses out on rewards for that epoch. For example, a user claiming in epoch 2 (with `preliminary_end_epoch=2`) can only claim up to epoch 1. If the farm is then expanded to epoch 3, the user\u2019s next claim starts from epoch 3, skipping epoch 2 entirely. This results in permanent loss of deserved rewards.\n",
+            "severity": "high",
+            "files": [
+                "contracts/farm-manager/src/manager/commands.rs"
+            ],
+            "location": [
+                "farm-manager/src/manager/commands.rs#240-243"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "withdraw_liquidity lacks slippage protection",
+            "description": "The `withdraw_liquidity` function calculates the refund assets based on the current pool reserves and the user's LP share but does not allow users to specify a minimum amount of tokens they expect to receive. This exposes users to the risk of receiving fewer tokens than anticipated, especially in volatile markets or for `ConstantProduct` pools where impermanent loss is significant. Without slippage protection, an attacker could manipulate pool reserves between transaction submission and execution, causing users to withdraw at unfavorable rates. While impermanent loss is expected, the lack of user-controlled safeguards deviates from industry standards and increases financial risk.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/liquidity/commands.rs"
+            ],
+            "location": [
+                "pool-manager/src/liquidity/commands.rs#412-503"
+            ]
+        },
+        {
+            "id": 17,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Insufficient check on asset decimals input in create_pool allows malicious pool to be created with invalid swap results",
+            "description": "The `create_pool` function accepts `asset_decimals` as user input without validating them against the actual token metadata. This allows a malicious actor to create a stableswap pool with incorrect decimals, leading to miscalculations in asset scaling during swaps and liquidity provision. Since `compute_swap` uses these incorrect decimals to scale `offer_pool`, `ask_pool`, and `offer_amount`, the resulting swap outputs will be invalid. Users cannot rely on slippage protection because it is also based on the same incorrect scaling. Once deployed, such pools cannot be corrected, enabling sandwich attacks and permanent loss for unsuspecting users.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/manager/commands.rs",
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "pool-manager/src/manager/commands.rs#196",
+                "pool-manager/src/helpers.rs#196-198"
+            ]
+        },
+        {
+            "id": 18,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Spread calculation does not account for swap fees",
+            "description": "The spread calculation in the contract does not properly account for swap fees, which are meant to compensate liquidity providers. As a result, the actual return to the user may be lower than expected, and the fee component is not transparently separated from the price impact. This can mislead users about the true cost of a swap and reduce trust in the pricing mechanism. The issue arises because the spread is computed before applying swap fees, leading to an inaccurate representation of execution quality. This could be exploited in high-frequency trading scenarios where fee accumulation becomes significant.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "pool-manager/src/helpers.rs#182-185"
+            ]
+        },
+        {
+            "id": 19,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Spread calculation includes fees, leading to incorrect slippage checks",
+            "description": "The spread amount in the swap computation is calculated without excluding swap fees, causing the `spread_amount` to be higher than the actual slippage experienced by the user. This occurs because the return amount used in the spread calculation already has fees deducted, but the formula does not account for this, leading to an inflated spread value. An attacker could exploit this by executing swaps with high fees under the guise of acceptable slippage, bypassing the `assert_max_spread` check. The impact is that users may experience worse execution prices than expected, and slippage protection becomes less effective, undermining trust in the swap mechanism.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "compute_swap#ConstantProduct",
+                "compute_swap#StableSwap",
+                "assert_max_spread#78-84",
+                "assert_max_spread#166-168"
+            ]
+        },
+        {
+            "id": 20,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "query_reverse_simulation doesn\u2019t account for extra fees when simulating stable reversed swaps",
+            "description": "The `query_reverse_simulation` function, used to calculate the input amount required for a desired output in a reverse swap, fails to include extra fees in its fee calculation for stableswap pools. It only accounts for protocol, swap, and burn fees, omitting the `extra_fees` vector. This causes the pre-fee amount to be underestimated, leading to an incorrect `offer_amount` being returned. An attacker or user relying on this simulation could end up receiving less output than expected when executing the actual swap, causing unexpected reverts in downstream contracts that depend on precise output amounts. The impact includes degraded UX and potential failure of integrations that assume accurate reverse simulation.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/queries.rs"
+            ],
+            "location": [
+                "queries.rs#117-120",
+                "compute_offer_amount#StableSwap"
+            ]
+        },
+        {
+            "id": 21,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "compute_offer_amount floors the offer_amount when simulating constant product reversed swaps, leading to unexpected results",
+            "description": "In constant product pools, the `compute_offer_amount` function floors the calculated input amount during reverse simulation, which can result in the user receiving less output than expected. This occurs because the flooring operation introduces a rounding-down error that accumulates in the calculation, especially in scenarios with high precision or large amounts. When the computed `offer_amount` is used in an actual swap, the return amount may fall short of the desired output, leading to failed assertions or reverts in integrator contracts. The impact is limited to dust amounts, but it breaks the expected behavior of the \"exact output\" use case, reducing reliability for integrators.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "helpers.rs#355-364",
+                "compute_offer_amount#ConstantProduct"
+            ]
+        },
+        {
+            "id": 22,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Single sided liquidity can\u2019t be used to lock LP tokens in the farm manager",
+            "description": "When users attempt to provide single-sided liquidity with an `unlocking_duration`, the transaction fails due to an unauthorized sender check. This happens because single-sided deposits trigger an internal swap, followed by a second `provide_liquidity` call made by the contract itself, making `info.sender` the contract address rather than the original user. The receiver validation enforces `receiver == info.sender`, which fails in this context. As a result, users cannot lock LP tokens in the farm manager when using single-sided deposits, breaking a core functionality. The impact is a denial of service for this specific user flow, reducing usability and limiting access to yield opportunities.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/liquidity/commands.rs"
+            ],
+            "location": [
+                "liquidity/commands.rs#282-286",
+                "provide_liquidity#single_side"
+            ]
+        },
+        {
+            "id": 23,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "When a user single-side deposit into a pool, slippage protection is invalid",
+            "description": "During single-sided liquidity provision, the `belief_price` parameter is hardcoded to `None` in the internal swap call, disabling effective slippage protection. Without `belief_price`, the `assert_max_spread` function falls back to using only `max_spread` based on the pool's actual spread, which does not account for expected price movement. In constant product pools, this allows large price deviations between transaction submission and execution to go unchecked. In stableswap pools with low `amp` or imbalanced reserves, the 1:1 price assumption becomes invalid, making slippage checks ineffective. Attackers can exploit this during volatile periods to execute swaps at unfavorable rates, leading to user losses. The impact is reduced protection against front-running and price manipulation during single-sided deposits.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/swap/perform_swap.rs"
+            ],
+            "location": [
+                "liquidity/commands.rs#164",
+                "perform_swap.rs#166",
+                "assert_max_spread"
+            ]
+        },
+        {
+            "id": 24,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-190"
+                ]
+            },
+            "title": "Insufficient intermediate value precision in StableSwap calculations",
+            "description": "The `calculate_stableswap_y` function uses `Uint256` for intermediate calculations, which can lead to arithmetic overflow when handling large token amounts, especially those with high decimal precision such as 18 decimals. This issue arises because the intermediate multiplication and division operations exceed the maximum value representable by `Uint256`. An attacker could exploit this by initiating a swap with large token amounts (e.g., 100k tokens with 18 decimals), causing the calculation to fail with an overflow error. This would prevent legitimate swaps from executing, leading to denial of service for large transactions and undermining the reliability of the StableSwap pool implementation under realistic economic conditions.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "calculate_stableswap_y#106-152",
+                "compute_y_raw#836-901"
+            ]
+        },
+        {
+            "id": 25,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Wrong simulation function used in reverse operation path",
+            "description": "The `reverse_simulate_swap_operations` function incorrectly uses `query_simulation` instead of `query_reverse_simulation` when calculating multi-hop trades in reverse. This causes users to receive incorrect price quotes when determining how many input tokens are needed for a desired output amount. The root cause is the misuse of the forward simulation function in a context that requires reverse price discovery. An attacker or regular user relying on this function would be misled about required input amounts, and in multi-hop scenarios, the error compounds across hops. This leads to incorrect trade execution, potential financial loss due to overpayment, and reduced trust in the protocol's pricing mechanism.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/queries.rs"
+            ],
+            "location": [
+                "reverse_simulate_swap_operations#275"
+            ]
+        },
+        {
+            "id": 26,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-1329"
+                ]
+            },
+            "title": "Amplifiers can\u2019t be ramped allowing loss of funds from the pool",
+            "description": "The stableswap implementation lacks the ability to modify the amplification coefficient (A) after pool creation, making it static for the pool's lifetime. This is a deviation from established implementations like Curve, which support ramping A to adapt to market conditions. The absence of this feature means the pool cannot adjust its price sensitivity during market stress, such as during a depeg event. For example, if one asset in a stableswap pool begins to lose value rapidly (e.g., UST depeg), the high and unchangeable A value keeps the price artificially stable, allowing arbitrageurs to drain the healthy asset (e.g., USDC) at near-parity. This can result in significant loss of funds from the pool, especially during black swan events, due to the inability to dynamically protect liquidity.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/manager/commands.rs",
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "PoolType.amp#85-94",
+                "compute_lp_mint_amount_for_stableswap_deposit#790-812",
+                "compute_y_raw#836-901"
+            ]
+        },
+        {
+            "id": 27,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Emergency unlocking penalty makes long duration positions economically advantageous",
+            "description": "The farm-manager contract applies a fixed 2% emergency unlock penalty regardless of the position's lock duration, while reward weight multipliers increase significantly with longer locks (up to 16x for one year). This creates an economic imbalance where users are incentivized to create maximum-duration locks to gain boosted rewards and then emergency unlock when liquidity is needed, paying only the minimal fixed penalty. The root cause is the lack of a dynamic penalty that scales with remaining duration and reward weight. Attackers can exploit this by opening large, long-duration positions just before an epoch ends and immediately withdrawing, gaining disproportionate rewards. This undermines the protocol\u2019s intended liquidity stability, encourages gaming of the system, and disadvantages honest long-term stakers.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/farm-manager/src/farm/commands.rs",
+                "contracts/farm-manager/src/position/commands.rs"
+            ],
+            "location": [
+                "calculate_weight#28-65",
+                "emergency_unlock#322"
+            ]
+        },
+        {
+            "id": 28,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Liquidity providers can lose tokens due to disproportionate deposits not being properly handled",
+            "description": "Liquidity providers may lose tokens when depositing disproportionate amounts relative to current pool reserves. The vulnerability arises because the `provide_liquidity` function calculates LP tokens based on the minimum share ratio of the deposited tokens. When tokens are deposited in unequal proportions, the excess from the higher-proportion token is effectively donated to the pool and not redeemable by the depositor. The root cause is the lack of enforcement of proportional deposits for non-initial liquidity providers. An attacker could exploit this by frontrunning large deposits with imbalanced ratios, causing the victim to lose value. The impact includes financial loss for liquidity providers due to unreturned excess tokens, although slippage tolerance limits the severity.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/liquidity/commands.rs"
+            ],
+            "location": [
+                "commands.rs::provide_liquidity#213-231"
+            ]
+        },
+        {
+            "id": 29,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Slippage tolerance vulnerability in StableSwap",
+            "description": "The `assert_slippage_tolerance` function fails to account for the non-linear pricing curve of StableSwap pools, which depend on the amplification factor (A) and the StableSwap invariant (D). Instead, it uses a simple ratio of total deposits and pool tokens, leading to incorrect slippage validation. The root cause is the omission of the StableSwap-specific invariant in the slippage check. An attacker could exploit this by executing trades with high actual slippage (e.g., 5.25%) that pass the check (e.g., 1% tolerance), leading to user losses. The impact is financial loss due to trades being accepted beyond the intended slippage tolerance.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "helpers.rs#423"
+            ]
+        },
+        {
+            "id": 30,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Stablepools return wrong price when they do not converge",
+            "description": "The `compute_d` function in StableSwap pools uses Newton's method to approximate the invariant D but returns the result even if convergence is not achieved. The root cause is the lack of a check to ensure convergence within the iteration loop. An attacker could exploit this by manipulating pool balances to force non-convergence, leading to incorrect pricing and unfair swaps. The impact is potential financial loss due to incorrect price calculations, although the protocol may still function with estimated values. The finding notes debate around whether reverting is necessary, but the risk remains in highly imbalanced pools.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "helpers.rs#751"
+            ]
+        },
+        {
+            "id": 31,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Vulnerable liquidity slippage calculation doesn\u2019t ensure slippage protection due to unscaled assets sum",
+            "description": "The slippage calculation for StableSwap pools uses the sum of unscaled asset amounts, ignoring differences in token decimals. The root cause is the failure to normalize token amounts to a common decimal base before summing. An attacker could exploit this by depositing tokens with different decimal precisions (e.g., 6 vs 18 decimals) in imbalanced ratios that appear balanced due to the flawed sum calculation. This invalidates the slippage check, allowing deposits with higher-than-allowed impact to be accepted. The impact is reduced slippage protection and potential financial loss for liquidity providers.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "helpers.rs#426",
+                "helpers.rs#429"
+            ]
+        },
+        {
+            "id": 32,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Unvalidated genesis epoch update in Epoch Manager allows manipulation of farm rewards",
+            "description": "The `update_config` function allows updating the genesis epoch without validation, violating the protocol's invariant that genesis epoch and duration should not change after setup. The root cause is the absence of checks on the new genesis epoch value during configuration updates. An attacker with admin privileges could exploit this to manipulate farm rewards by setting the genesis epoch to the past (causing incorrect reward calculations) or to the future (freezing rewards). The impact includes disruption of reward distribution, potential reward theft, and violation of protocol invariants.\n",
+            "severity": "low",
+            "files": [
+                "contracts/epoch-manager/src/commands.rs"
+            ],
+            "location": [
+                "epoch-manager/src/commands.rs#19-23"
+            ]
+        },
+        {
+            "id": 33,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Reduced Newton-Raphson iterations easily leads to slightly incorrect results due to potential precision loss",
+            "description": "The implementation reduces Newton-Raphson iterations from 256 (Curve's standard) to 32, which may lead to insufficient convergence in extreme cases. The root cause is the assumption that fewer iterations are sufficient, despite potential for high pool imbalance or large trades. An attacker could exploit this by creating highly imbalanced pools where the approximation fails to converge, resulting in incorrect D or y values. The impact is slightly incorrect pricing, unfair trades, and potential failure of arbitrage, undermining economic efficiency.\n",
+            "severity": "low",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "helpers.rs#15-17"
+            ]
+        },
+        {
+            "id": 34,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Inflation attack protection is not really sufficient",
+            "description": "The protocol attempts to prevent first depositor inflation attacks by minting MINIMUM_LIQUIDITY_AMOUNT LP tokens, but these are sent to the contract instead of being burned. The root cause is deviation from Uniswap's model of burning minimum liquidity. An attacker could exploit this if a future upgrade allows withdrawal of contract-held LP tokens, enabling reuse of the minimum liquidity and re-enabling inflation attacks. The impact is high financial risk if the admin functionality is added, allowing malicious actors to manipulate share prices. However, the current risk is lower as no direct access exists.\n",
+            "severity": "low",
+            "files": [
+                "contracts/pool-manager/src/liquidity/commands.rs"
+            ],
+            "location": [
+                "liquidity/commands.rs#184-213",
+                "liquidity/commands.rs#376-390"
+            ]
+        },
+        {
+            "id": 35,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Refunds of fees being paid should be processed for all assets",
+            "description": "The function `process_farm_creation_fee` handles refunds when a user pays more than the required farm creation fee. However, it only refunds the difference if the fee denomination differs from the farm asset denomination. When both are the same, the function enforces a strict equality between the sum of the farm asset and fee amount and the paid amount, disallowing any overpayment even if it would be refundable.\n\nThe root cause is the lack of a refund mechanism when the fee and asset denoms are identical. This creates an inconsistent user experience and may lead to loss of funds if users accidentally overpay in the same denomination.\n\nAn attacker or user could exploit this by intentionally overpaying in a different denom to receive a refund, while being unable to do so in the same denom, leading to permanent loss of excess funds.\n\nThe impact is user fund loss due to inability to receive refunds when overpaying in the same denomination as the farm asset, reducing usability and trust in the system.\n",
+            "severity": "low",
+            "files": [
+                "contracts/farm-manager/src/helpers.rs"
+            ],
+            "location": [
+                "helpers.rs#L17-L89"
+            ]
+        },
+        {
+            "id": 36,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ],
+                "2": [
+                    "CWE-1254"
+                ]
+            },
+            "title": "Validation of the token factory fee should accept cumulative payments",
+            "description": "The `validate_fees_are_paid` function in the pool manager uses `.any()` to check if the full token factory fee is paid in any single allowed denomination. This means that even if a user provides the total equivalent fee amount split across multiple accepted denominations, the validation fails because no single denom meets the full amount.\n\nThe root cause is the use of `.any()` with a strict equality check per denomination, rather than summing all contributions across allowed denoms to verify the total.\n\nAn attacker cannot directly exploit this for gain, but legitimate users can be blocked from performing transactions despite providing sufficient total value, simply because they split payments across denoms.\n\nThe impact is a denial-of-service-like condition where valid transactions are reverted, degrading user experience and potentially causing missed opportunities or failed operations.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "helpers.rs#L575-L597"
+            ]
+        },
+        {
+            "id": 37,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Having a hardcoded maximum slippage should be rethought",
+            "description": "The Mantra DEX enforces a hardcoded maximum slippage cap of 50% via the constant `MAX_ALLOWED_SLIPPAGE`. This cap is applied regardless of user input, meaning even if a user specifies a higher acceptable slippage (e.g., 75%), it will be capped at 50%.\n\nThe root cause is a static cap implemented in the `assert_max_spread` function that does not account for asset-specific volatility or market conditions.\n\nDuring periods of high volatility, users attempting to execute trades to exit positions may find their transactions reverted because the required slippage exceeds the cap, even though they are willing to accept higher risk.\n\nThe impact is that users cannot execute necessary trades during volatile markets, leading to potential significant financial losses as they are forced to hold depreciating assets.\n",
+            "severity": "high",
+            "files": [
+                "contracts/pool-manager/src/swap/perform_swap.rs"
+            ],
+            "location": [
+                "perform_swap.rs#L133-L134"
+            ]
+        },
+        {
+            "id": 38,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Wrong counter load while creating positions unnecessarily hikes cost for users creating positions with explicit identifiers",
+            "description": "In the `create_position` function, the `POSITION_ID_COUNTER` is loaded and incremented unconditionally before checking whether it is needed. For positions with explicit identifiers, the counter is never used, yet the storage read and increment still occur.\n\nThe root cause is poor code structure\u2014loading the counter outside the conditional branch where it is actually required.\n\nWhile not directly exploitable for financial gain, an attacker could abuse this inefficiency by repeatedly creating positions with explicit IDs, increasing gas costs and network load.\n\nThe impact is unnecessary computational overhead, increased gas consumption, and higher transaction costs for users, reducing efficiency and scalability.\n",
+            "severity": "low",
+            "files": [
+                "contracts/farm-manager/src/position/commands.rs"
+            ],
+            "location": [
+                "commands.rs#L57-L62"
+            ]
+        },
+        {
+            "id": 39,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Stableswap pools are allowed to have an amp value of 0 which would cause a DOS to swaps on pools",
+            "description": "The schema for stableswap pools allows the amplification coefficient (`amp`) to be set to zero, as the minimum value is defined as 0. However, an `amp` value of 0 renders the pool non-functional, causing all swap operations to fail.\n\nThe root cause is incorrect schema validation allowing `amp=0`, despite internal logic requiring a positive amplification factor. This contradicts the test module, which correctly defines `MIN_AMP = 1`.\n\nAn attacker could create a stableswap pool with `amp=0`, effectively DoSing the pool and preventing any future swaps, locking liquidity.\n\nThe impact is a complete denial of service for the affected pool, rendering it unusable and potentially trapping funds.\n",
+            "severity": "critical",
+            "files": [
+                "contracts/pool-manager/schema/pool-manager.json"
+            ],
+            "location": [
+                "pool-manager.json#L588-L612"
+            ]
+        },
+        {
+            "id": 40,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Consider allowing a change in the unlocking duration if within valid range when expanding a position",
+            "description": "The `expand_position` function allows users to add more liquidity to an existing position but does not allow modification of the unlocking duration. This forces users to keep the original lock-up period even if their needs have changed.\n\nThe root cause is the lack of a parameter or logic to update `unlocking_duration` during expansion, despite the function having access to the position state.\n\nWhile not directly exploitable, this limitation reduces user flexibility and may lead to suboptimal capital allocation.\n\nThe impact is reduced user autonomy and potential loss of opportunity, as users cannot adjust lock durations to match current strategies or market conditions.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/farm-manager/src/position/commands.rs"
+            ],
+            "location": [
+                "commands.rs#L111-L171"
+            ]
+        },
+        {
+            "id": 41,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-477"
+                ]
+            },
+            "title": "Consider upgrading to CosmWasm 2.2.0 for enhanced migration capabilities",
+            "description": "The contract uses the legacy migration signature from older CosmWasm versions, missing out on the enhanced `MigrateInfo` struct introduced in CosmWasm 2.2.0. This limits visibility into migration context and reduces auditability.\n\nThe root cause is outdated dependency and migration pattern used across all contracts in the protocol.\n\nWhile not immediately exploitable, this reduces operational safety and maintainability, especially during upgrades.\n\nThe impact is reduced transparency and control during contract migrations, increasing the risk of errors or unintended behavior during upgrades.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/epoch-manager/src/contract.rs"
+            ],
+            "location": [
+                "contract.rs#L78-L85"
+            ]
+        },
+        {
+            "id": 42,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Allow for the reduction of the max_concurrent_farms when updating the config",
+            "description": "The config update logic prevents decreasing the `max_concurrent_farms` parameter, only allowing it to increase or stay the same. This makes the parameter immutable downward, preventing correction of initial misconfigurations.\n\nThe root cause is an `ensure!` check that enforces `max_concurrent_farms >= current_value`, without considering operational flexibility.\n\nThis could be exploited by an admin who sets an excessively high value, permanently increasing resource allocation requirements.\n\nThe impact is inefficient resource usage, inability to adapt to changing conditions, and potential denial of optimal configuration.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/farm-manager/src/manager/commands.rs"
+            ],
+            "location": [
+                "commands.rs#L325-L333"
+            ]
+        },
+        {
+            "id": 43,
+            "category": {
+                "1": [
+                    "CWE-284"
+                ],
+                "2": [
+                    "CWE-285"
+                ],
+                "3": [
+                    "CWE-862"
+                ]
+            },
+            "title": "Consider enforcing first liquidity provider to be pool creator",
+            "description": "Any user can become the first liquidity provider to a pool, which carries risks such as setting incorrect initial prices or being subject to minimum liquidity burns.\n\nThe root cause is lack of access control to ensure only the pool creator can initialize liquidity.\n\nA malicious actor could race to be the first LP and manipulate the initial price, leading to unfair advantages or losses for the intended creator.\n\nThe impact is potential price manipulation and unfair treatment of legitimate pool creators, undermining trust in pool initialization.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/pool-manager/src/liquidity/commands.rs"
+            ],
+            "location": [
+                "commands.rs#L182-L213"
+            ]
+        },
+        {
+            "id": 44,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ]
+            },
+            "title": "Wrong pool asset length should be correctly flagged during slippage tolerance assertion",
+            "description": "The error message in `assert_slippage_tolerance` incorrectly reports `deposits.len()` as the actual value even when `pools.len()` is the one that is invalid, leading to misleading diagnostics.\n\nThe root cause is using `deposits.len()` unconditionally in the error, without checking which length is incorrect.\n\nThis can mislead developers during debugging, causing them to look at the wrong part of the code.\n\nThe impact is increased debugging time and potential misdiagnosis of issues, reducing development efficiency.\n",
+            "severity": "low",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "helpers.rs#L441-L447"
+            ]
+        },
+        {
+            "id": 45,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ]
+            },
+            "title": "Approach of position creation should fail faster when receiver has exceeded their position limit",
+            "description": "The `validate_positions_limit` check is placed near the end of the `create_position` function, after several state reads and computations, instead of failing fast at the beginning.\n\nThe root cause is poor validation ordering, leading to unnecessary computation when the transaction will eventually revert.\n\nAn attacker could exploit this to increase gas costs for the network or target high-frequency users.\n\nThe impact is wasted computational resources and higher transaction fees, reducing system efficiency.\n",
+            "severity": "low",
+            "files": [
+                "contracts/farm-manager/src/position/commands.rs"
+            ],
+            "location": [
+                "commands.rs#L25-L109"
+            ]
+        },
+        {
+            "id": 46,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Fix incorrect documentation for position creation authorization check",
+            "description": "The comment in `create_position` incorrectly states that only the pool manager can create positions on behalf of a user, when in fact the sender can also be the receiver themselves.\n\nThe root cause is outdated or inaccurate inline documentation.\n\nThis can mislead auditors or developers into believing stricter access control exists than is actually the case.\n\nThe impact is confusion during audits or maintenance, potentially leading to incorrect security assumptions.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/farm-manager/src/position/commands.rs"
+            ],
+            "location": [
+                "commands.rs#L41-L56"
+            ]
+        },
+        {
+            "id": 47,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Emergency unlock penalty should not be allowed to be up to 100%",
+            "description": "The `validate_emergency_unlock_penalty` function allows penalties up to 100%, which effectively discourages users from using the emergency unlock feature, as they would lose all funds.\n\nThe root cause is lack of a reasonable upper bound below 100%.\n\nWhile admin-controlled, a malicious or compromised admin could set 100% penalty to trap user funds.\n\nThe impact is reduced utility of the emergency feature and potential user fund loss under adversarial governance.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/farm-manager/src/helpers.rs"
+            ],
+            "location": [
+                "helpers.rs#L177-L187"
+            ]
+        },
+        {
+            "id": 48,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Inaccurate year calculation has been set in as AMM constants",
+            "description": "The `MONTH_IN_SECONDS` constant is set to 2,629,746, which when multiplied by 12 results in 31,556,952 seconds per year, differing from the more accurate 31,557,600 seconds (365.25 days).\n\nThe root cause is an imprecise constant definition, leading to a 648-second annual discrepancy.\n\nOver time, this affects time-based calculations such as reward distributions, fee accruals, and TWAPs.\n\nThe impact is gradual drift in time-sensitive financial calculations, potentially leading to incorrect reward payouts or fee allocations.\n",
+            "severity": "low",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "helpers.rs#L15-L17"
+            ]
+        },
+        {
+            "id": 49,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "Inconsistent farm management permissions in sister operations",
+            "description": "The `close_farm` function allows both the farm owner and the contract owner to close farms, but `expand_farm` only allows the farm owner, creating inconsistent permissions.\n\nThe root cause is asymmetric access control logic between related functions.\n\nIn emergency scenarios, the contract owner may need to expand farms but is unable to, limiting governance capabilities.\n\nThe impact is reduced operational flexibility and potential inability to respond to critical situations.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/farm-manager/src/manager/commands.rs"
+            ],
+            "location": [
+                "commands.rs"
+            ]
+        },
+        {
+            "id": 50,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Consider conjugating the pool asset lengths validation when creating a pool",
+            "description": "The pool creation function performs two separate `ensure!` checks for asset length validation: one for minimum length and matching decimals, and another for maximum length. These could be combined into a single check to reduce gas costs and improve code clarity.\n\nThe root cause is split validation logic leading to redundant length checks and multiple error paths.\n\nThis results in higher gas usage than necessary, especially during pool creation.\n\nThe impact is increased transaction costs and slightly reduced efficiency, though functionality remains correct.\n",
+            "severity": "low",
+            "files": [
+                "contracts/pool-manager/src/manager/commands.rs"
+            ],
+            "location": [
+                "commands.rs#L88-L103"
+            ]
+        },
+        {
+            "id": 51,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "Incorrect comment on position limit validation",
+            "description": "The comment in the `create_position` function incorrectly states that the function checks the maximum allowed closed positions, when it actually checks the maximum allowed open positions.\n\nThe root cause is a documentation error where the comment was not updated to reflect the actual logic of the `validate_positions_limit` function call with the `true` flag, which refers to open positions.\n\nWhile this does not introduce a direct exploit vector, it can mislead developers during maintenance or audits, potentially leading to incorrect assumptions about access control or state management.\n\nThe impact is reduced code clarity and maintainability, increasing the risk of future bugs due to misunderstanding of business logic.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/farm-manager/src/position/commands.rs"
+            ],
+            "location": [
+                "position.commands.create_position#L24-L109"
+            ]
+        },
+        {
+            "id": 52,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant checks in position withdrawal logic",
+            "description": "The position withdrawal logic performs two sequential checks on `expiring_at.is_some()`, one explicitly and another implicitly within the `is_expired` method, resulting in duplicated validation.\n\nThe root cause is the explicit `ensure!` check for `position.expiring_at.is_some()` is redundant because the subsequent `is_expired` function already includes this condition.\n\nAn attacker cannot directly exploit this, but inconsistent error messages (`Unauthorized` vs `PositionNotExpired`) for the same underlying condition could confuse users or frontends.\n\nThe impact is unnecessary gas consumption, code bloat, and potential for inconsistent error handling, reducing code reliability and auditability.\n",
+            "severity": "low",
+            "files": [
+                "contracts/farm-manager/src/position/commands.rs"
+            ],
+            "location": [
+                "position.commands.withdraw_position#L414-L421"
+            ]
+        },
+        {
+            "id": 53,
+            "category": {
+                "1": [
+                    "CWE-697"
+                ]
+            },
+            "title": "Fee validation incorrectly excludes 100%",
+            "description": "The `is_valid` method in the `Fee` struct rejects fees equal to 100%, despite the comment stating that fees up to 100% should be allowed.\n\nThe root cause is the condition uses `>=` instead of `>` when comparing against `Decimal::percent(100)`, making the validation inclusive of the upper bound, which contradicts the intended behavior.\n\nA protocol administrator attempting to set a 100% fee (e.g., for emergency shutdown or testing) would be blocked, potentially limiting operational flexibility.\n\nThe impact is functional deviation from documented intent, possibly preventing valid configuration settings and misleading developers relying on the comment.\n",
+            "severity": "low",
+            "files": [
+                "contracts/pool-manager/src/lib.rs"
+            ],
+            "location": [
+                "amm.fee.is_valid#L25-L32"
+            ]
+        },
+        {
+            "id": 54,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1164"
+                ],
+                "3": [
+                    "CWE-561"
+                ]
+            },
+            "title": "Unused `assert_admin` function",
+            "description": "The `assert_admin` function in `helpers.rs` is defined but never used anywhere in the codebase, while the project already uses `cw-ownable` for ownership management.\n\nThe root cause is redundant code was introduced without being integrated into the control flow, and no cleanup was performed.\n\nIf developers mistakenly believe this function is in use, they may rely on it in future changes, leading to security gaps. Additionally, unused code increases audit surface and maintenance burden.\n\nThe impact is increased code complexity, potential confusion, and risk of future misuse. It also contradicts best practices for minimal and auditable code.\n",
+            "severity": "informational",
+            "files": [
+                "contracts/pool-manager/src/helpers.rs"
+            ],
+            "location": [
+                "pool-manager.helpers.assert_admin#L462-L476"
+            ]
+        },
+        {
+            "id": 55,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ]
+            },
+            "title": "Missing core documentation files",
+            "description": "Critical documentation files such as SECURITY.md, CONTRIBUTING.md, and CODE_OF_CONDUCT.md contain only 'todo' placeholders and are not implemented.\n\nThe root cause is these files were created as templates but never completed before the audit.\n\nThe absence of a SECURITY.md file makes it difficult for external researchers to report vulnerabilities responsibly, increasing the risk of unreported bugs in production.\n\nThe impact is poor operational readiness, reduced transparency, and potential reputational or security risks due to lack of clear disclosure channels and community guidelines.\n",
+            "severity": "low",
+            "files": [
+                "docs/SECURITY.md",
+                "docs/CONTRIBUTING.md",
+                "docs/CODE_OF_CONDUCT.md"
+            ],
+            "location": []
+        }
+    ]
+}

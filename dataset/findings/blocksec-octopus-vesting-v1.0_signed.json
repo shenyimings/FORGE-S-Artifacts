@@ -1,0 +1,126 @@
+{
+    "path": "reports/blocksec-octopus-vesting-v1.0_signed.pdf",
+    "project_info": {
+        "url": "https://github.com/octopus-network/nep141-token-vesting",
+        "commit_id": "3001151eba0b41f8baa6fbe8eac2cc6b39c0c5ec",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-10-25",
+        "project_path": "contracts/blocksec-octopus-vesting-v1.0_signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Non-refundable Storage Fee",
+            "description": "The contract does not refund the storage fee when a vesting is removed or when changing a beneficiary with a shorter AccountId, leading to permanent loss of deposited storage fees. \nThis occurs because the contract fails to implement a mechanism to release and return the storage stake upon deletion or modification of state entries. \nAn attacker cannot directly exploit this, but malicious or negligent owners could trap user funds in unrecoverable storage deposits. \nThe impact is financial loss for users who deposit storage fees that are never returned upon removal or change of vesting entries.\n",
+            "severity": "low",
+            "files": [
+                "nep141-token-vesting-contract/src/beneficiary.rs",
+                "nep141-token-vesting-contract/src/owner.rs"
+            ],
+            "location": [
+                "beneficiary.rs#83-92",
+                "owner.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Inconsistent Amount between Claimed Tokens and Transferred Tokens",
+            "description": "In the claim_callback function, the contract transfers an amount equal to claimable_amount, but the user may have requested a smaller amount via the claim function. \nThe root cause is that the vesting.claim() function returns claimable_amount unconditionally, even if the requested amount is less. \nAn attacker could exploit this by calling claim with a small amount but receiving the full claimable amount due to incorrect handling in the callback. \nThis discrepancy allows draining of the contract's token balance, leading to significant financial loss.\n",
+            "severity": "high",
+            "files": [
+                "nep141-token-vesting-contract/src/beneficiary.rs"
+            ],
+            "location": [
+                "beneficiary.rs#99",
+                "mod.rs#89"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-372"
+                ]
+            },
+            "title": "Unexpected Removal of Vestings with Unclaimed Tokens",
+            "description": "The contract removes a vesting immediately when the release period finishes, without verifying if all tokens have been claimed by the beneficiary. \nThis is caused by checking only the release finish status (is_release_finish) instead of whether all tokens are claimed (is_vesting_finish). \nAn attacker could force early removal of vestings (e.g., via timestamp manipulation in certain environments) or the system could auto-remove active vestings, leading to loss of unclaimed funds. \nThe impact is permanent loss of vested tokens for legitimate beneficiaries.\n",
+            "severity": "high",
+            "files": [
+                "nep141-token-vesting-contract/src/vesting/traits.rs"
+            ],
+            "location": [
+                "beneficiary.rs#106",
+                "traits.rs#52-55"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ],
+                "3": [
+                    "CWE-460"
+                ]
+            },
+            "title": "Incomplete State Rollback",
+            "description": "If the ft_transfer() call fails during a claim operation, the claimed_token_amount is not reverted, leaving the state inconsistent. \nThis happens because the callback function ft_transfer_resolved() does not roll back the claimed amount upon failure. \nAn attacker could trigger a failed transfer (e.g., by targeting a contract that reverts on receive) to increment the claimed amount without actual token transfer. \nThis leads to inflation of claimed tokens and potential loss of funds for other users or the contract itself.\n",
+            "severity": "low",
+            "files": [
+                "nep141-token-vesting-contract/src/beneficiary.rs",
+                "nep141-token-vesting-contract/src/fungible_token.rs"
+            ],
+            "location": [
+                "beneficiary.rs",
+                "fungible_token.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "Lack of Check while Removing Vestings",
+            "description": "The owner can terminate a vesting at any time without ensuring that all claimable tokens have been transferred to the beneficiary. \nThis is due to the terminate_vesting function directly removing the vesting entry without checking or transferring pending tokens. \nA malicious or compromised owner could exploit this to prematurely terminate vestings and withhold user funds. \nThe impact is unfair deprivation of entitled tokens from beneficiaries, undermining trust in the vesting mechanism.\n",
+            "severity": "medium",
+            "files": [
+                "nep141-token-vesting-contract/src/owner.rs"
+            ],
+            "location": [
+                "owner.rs#83-92"
+            ]
+        }
+    ]
+}

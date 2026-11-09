@@ -1,0 +1,122 @@
+{
+    "path": "reports-without-source/sec3_kamino_limo.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/kamino-labs/kamino-limit-orders"
+        ],
+        "commit_id": [
+            "01348b5fee5b5bf1870ab16e5f8055dd65400ae9"
+        ],
+        "address": [
+            null
+        ],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-01-29",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Potential DoS in \"take_order\" with wSOL-SOL conversion",
+            "description": "The \"take_order\" instruction implements a feature to automatically convert wSOL to SOL by creating an intermediary token account, transferring wSOL into it, and then closing the account to unwrap SOL. However, the account creation uses `system_instruction::create_account`, which fails if the target address already holds a non-zero lamport balance. An attacker can precompute the intermediary account address and send a small amount of lamports to it, rendering it unusable for future orders. This causes the instruction to fail when attempting to create the account, leading to a denial-of-service (DoS) for any order that attempts to unwrap wSOL. The impact is that legitimate users may be unable to execute or receive proceeds from limit orders involving wSOL, undermining the reliability of the system.\n",
+            "severity": "high",
+            "location": [
+                "programs/limo/src/handlers/take_order.rs#214-236",
+                "programs/limo/src/token_operations.rs#166-174"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Potential token discrepancy due to Token-2022 transfer fee extension",
+            "description": "When a user creates a limit order, the input token amount is recorded in the order account and transferred to a vault. However, if the input token uses the Token-2022 standard with the transfer fee extension enabled, a portion of the transferred tokens is automatically deducted as a fee. This means the vault receives less than the recorded amount, creating a discrepancy. During order fulfillment or cancellation, the system relies on the original recorded amount, potentially attempting to transfer more tokens than are available in the vault. This could lead to failed transactions or incorrect accounting, especially during order cancellation or partial fills. Although the admin controls which mints are allowed, human error could allow fee-enabled tokens, making this a medium-risk issue.\n",
+            "severity": "medium",
+            "location": [
+                "programs/limo/src/operations.rs#53-55",
+                "programs/limo/src/handlers/create_order.rs#35-43"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "verify_ata function lacks Token-2022 compatibility",
+            "description": "The `verify_ata` function is used to validate that a provided token account is the correct associated token account (ATA) for a given wallet and mint. However, it only uses `get_associated_token_address`, which is compatible with the legacy SPL Token program and does not support Token-2022 accounts. This means the function cannot correctly validate ATAs for Token-2022 mints, potentially rejecting valid accounts or allowing incorrect ones if bypassed. The root cause is the lack of use of `get_associated_token_address_with_program_id`, which allows specifying the token program ID. This leads to reduced compatibility and potential validation failures when interacting with Token-2022 assets, limiting the system's interoperability.\n",
+            "severity": "low",
+            "location": [
+                "programs/limo/src/utils/constraints.rs#65-77"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-424"
+                ]
+            },
+            "title": "Program whitelist can be bypassed",
+            "description": "The flash take order feature includes a whitelist of allowed program IDs for instructions executed before and after the flash operation, intended to restrict interactions to trusted programs like SPL Token and Token-2022. However, this check does not account for the Token-2022 transfer hook mechanism, which allows arbitrary programs to be invoked during token transfers. An attacker could exploit this by setting up a malicious transfer hook on a Token-2022 mint, allowing execution of unauthorized logic during a flash order without violating the program ID whitelist. This undermines the security model of the flash operation, as arbitrary code can be executed under the guise of a permitted token transfer, potentially leading to asset theft or manipulation.\n",
+            "severity": "low",
+            "location": [
+                "programs/limo/src/utils/flash_ixs.rs#140-146"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "Missing order type validation",
+            "description": "The `create_order` instruction accepts an `order_type` parameter of type `u8` and directly stores it in the order account without validating that the value corresponds to a defined order type. While this does not introduce a direct security vulnerability within the program logic—since the order type is not used in critical security checks—it can lead to inconsistencies in downstream systems such as frontends, analytics tools, or off-chain services that rely on valid order types. The lack of input validation is a poor coding practice and could result in undefined behavior or errors in integrations, reducing system robustness and maintainability.\n",
+            "severity": "informational",
+            "location": [
+                "programs/limo/src/handlers/create_order.rs#11-33",
+                "programs/limo/src/operations.rs#35-68"
+            ],
+            "files": []
+        }
+    ]
+}

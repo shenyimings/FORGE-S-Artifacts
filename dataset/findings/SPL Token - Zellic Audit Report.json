@@ -1,0 +1,141 @@
+{
+    "path": "reports/SPL Token - Zellic Audit Report.pdf",
+    "project_info": {
+        "url": "https://github.com/solana-labs/solana-program-library",
+        "commit_id": "54695b233484722458b18c0e26ebb8334f98422c",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2022-10-07",
+        "project_path": "contracts/SPL Token - Zellic Audit Report.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Missing check in process_transfer leading to inflationary bug",
+            "description": "1. **Description:** The `process_transfer` function in the Confidential Transfer Extension fails to validate the `new_source_ciphertext` field from the zero-knowledge (ZK) argument, which represents the expected encrypted balance of the source account after a transfer. This allows the ZK argument to be decoupled from the actual account state.\n\n2. **Cause:** The token program does not verify that the source account's encrypted balance matches the expected value in the ZK argument. This missing validation enables manipulation of the transfer process without proper cryptographic proof.\n\n3. **Exploitation:** An attacker can construct a malicious transaction with multiple transfer instructions that reuse the same valid ZK argument. Each transfer instruction updates the destination's pending balance without properly reducing the source balance, leading to repeated transfers beyond the source's actual balance.\n\n4. **Impact:** This results in an inflationary bug where tokens are created out of thin air, inflating the total supply. The mint account does not reflect this inflation, breaking the fundamental token supply invariant. The attacker can eventually claim the unfairly obtained tokens by applying the pending balance.\n",
+            "severity": "critical",
+            "files": [
+                "token/program-2022/src/extension/confidential_transfer/processor.rs"
+            ],
+            "location": [
+                "process_transfer"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Missing check in process_withdraw potentially leading to inflationary bug",
+            "description": "1. **Description:** The `process_withdraw` function does not verify that the public key in the ZK argument matches the public key of the source confidential account. This allows an attacker to use a ZK proof tied to a different account or a forged one.\n\n2. **Cause:** The lack of public key validation means the system cannot ensure the ZK argument is bound to the actual account state, enabling potential forgery of withdrawal proofs.\n\n3. **Exploitation:** An attacker could craft a valid ZK argument for a large withdrawal from an account they control and apply it to another account with a smaller balance, effectively withdrawing more than allowed.\n\n4. **Impact:** Successful exploitation would allow creation of tokens from nothing, inflating the supply. The plaintext balance resulting from the withdrawal is fully spendable, posing a critical risk to token integrity.\n",
+            "severity": "critical",
+            "files": [
+                "token/program-2022/src/extension/confidential_transfer/processor.rs"
+            ],
+            "location": [
+                "process_withdraw"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-1293"
+                ]
+            },
+            "title": "Missing public key check in EmptyAccount leading to deflationary bug",
+            "description": "1. **Description:** The `EmptyAccount` instruction, used to close a confidential token account, does not validate that the public key in the ZK argument matches the account being closed. This allows an attacker to submit a proof for a zero balance from a different account.\n\n2. **Cause:** The absence of a public key check means the proof can be sourced from any account, even one with a zero balance, while closing a non-empty account.\n\n3. **Exploitation:** An attacker could close an account with a nonzero encrypted balance by providing a ZK proof of zero balance from another (possibly attacker-controlled) account.\n\n4. **Impact:** This leads to a deflationary bug where tokens are permanently removed from circulation without updating the mint supply. While the impact is low due to lack of clear incentive, it still breaks accounting invariants.\n",
+            "severity": "high",
+            "files": [
+                "token/program-2022/src/extension/confidential_transfer/processor.rs"
+            ],
+            "location": [
+                "EmptyAccount"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-311"
+                ]
+            },
+            "title": "Confidential transfer amounts information leak via transfer fees",
+            "description": "1. **Description:** When transfer fees are enabled for confidential tokens, the fee collector can infer the amount of each confidential transfer by observing changes in the withheld fee balance.\n\n2. **Cause:** The fee amount is calculated as a percentage of the transferred amount and is stored in a decryptable form, leaking information about the transfer value.\n\n3. **Exploitation:** The fee collector can subtract the withheld balance before and after a transfer to determine the exact fee, and thus infer the transferred amount if it is below the fee cap.\n\n4. **Impact:** This breaks the confidentiality guarantee of the transfer, allowing the fee authority to gain insight into transaction amounts, which undermines the privacy model of the extension.\n",
+            "severity": "low",
+            "files": [
+                "token/program-2022/src/extension/confidential_transfer/processor.rs"
+            ],
+            "location": [
+                "ConfidentialTransferExtension"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Confidential transfer fees\u2019 withdrawal instructions ignore constraints",
+            "description": "1. **Description:** The `WithdrawWithheldTokensFromAccounts` and `WithdrawWithheldTokensFromMint` instructions do not respect account-level constraints such as `allow_balance_credits` or `pending_balance_credit_counter`.\n\n2. **Cause:** These instructions directly credit the pending balance without checking configuration flags or incrementing credit counters, bypassing intended restrictions.\n\n3. **Exploitation:** An attacker controlling the fee withdrawal key could credit accounts that have disabled balance credits, potentially causing the pending balance to exceed decryptable limits (e.g., 2^32).\n\n4. **Impact:** This could lead to denial-of-service for the account owner by making the encrypted balance undecryptable, and undermines account-level security policies.\n",
+            "severity": "low",
+            "files": [
+                "token/program-2022/src/extension/confidential_transfer/processor.rs"
+            ],
+            "location": [
+                "WithdrawWithheldTokensFromAccounts",
+                "WithdrawWithheldTokensFromMint"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Confidential token account public key is not validated",
+            "description": "1. **Description:** When initializing a confidential token account, the public key is not validated to be a legitimate point in the correct cryptographic group (i.e., of the form kH). This allows setting invalid public keys with a G-component.\n\n2. **Cause:** No proof of knowledge of the private key is required during account initialization, enabling registration of rogue public keys.\n\n3. **Exploitation:** While full exploitability was not confirmed, invalid public keys could potentially be leveraged in cryptographic attacks, such as breaking the security assumptions of ZK arguments.\n\n4. **Impact:** This introduces an unknown risk that could lead to critical vulnerabilities in the future, especially if combined with other issues. It violates cryptographic best practices and weakens the overall security model.\n",
+            "severity": "low",
+            "files": [
+                "token/program-2022/src/extension/confidential_transfer/processor.rs"
+            ],
+            "location": [
+                "initialize_confidential_transfer_account"
+            ]
+        }
+    ]
+}

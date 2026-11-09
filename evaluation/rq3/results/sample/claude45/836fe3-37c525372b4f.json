@@ -1,0 +1,99 @@
+{
+    "project": "offside-labs-damm-v2-audit-oct-2025.pdf.json",
+    "files": [
+        "dataset/contracts/offside-labs-damm-v2-audit-oct-2025.pdf.json/programs/cp-amm/src/state/pool.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-436",
+        "CWE-435"
+    ],
+    "cwe_detected": [
+        "CWE-664",
+        "CWE-697",
+        "CWE-682",
+        "CWE-691",
+        "CWE-284",
+        "CWE-703"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Inconsistent max_fee_numerator Validation Between Pool Creation and Swaps",
+            "description": "1. **Description:** When creating a pool with version V0, the contract allows `max_fee_numerator` values above `MAX_FEE_NUMERATOR_V0` as long as they are below `MAX_FEE_NUMERATOR_V1`, but during swaps, the value is capped at the V0 limit.\n2. **Cause:** A mismatch in validation logic between pool creation and swap execution, where creation-time checks are less strict than runtime behavior.\n3. **Exploitation:** A malicious or misconfigured pool creator could set a high `max_fee_numerator` that passes creation checks but is silently capped during swaps, leading to unexpected behavior.\n4. **Impact:** Creates inconsistency between configuration and execution, potentially misleading integrators or users about the actual fee parameters in effect, undermining trust and predictability.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After thorough analysis of the provided Solana smart contract code, I have identified several security issues stemming from the candidate CWE root causes:\n\n1. **CWE-284 (Improper Access Control)**: The `validate_authority_to_edit_reward` function has weak access control logic. It allows the pool creator to initialize reward with index 0, but the check `require!(reward_index == 0, PoolError::InvalidRewardIndex)` only validates the index when the signer is the creator. For non-creator signers, it only checks if they are admin without validating the reward_index. This could allow admins to manipulate any reward index without proper constraints.\n\n2. **CWE-682 (Incorrect Calculation)**: In the `get_swap_result_from_partial_input` function, there's a potential calculation error when `amount_left > 0`. The code recalculates fees based on `actual_amount_in` after subtracting `amount_left`, but this recalculation uses `get_total_trading_fee_from_excluded_fee_amount` which may produce different fee rates than the original calculation. This inconsistency could lead to incorrect fee amounts being charged.\n\n3. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: The `update_rate_after_funding` function in `RewardInfo` doesn't validate that `funding_amount` is non-zero before updating the reward rate. If `funding_amount` is 0 and `current_time >= reward_duration_end`, the `total_amount` will be 0, leading to a reward_rate of 0. This could silently disable rewards without proper error handling.\n\n4. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The `claim_ineligible_reward` function resets `cumulative_seconds_with_empty_liquidity_reward` to 0 after calculating the ineligible reward, but there's no validation that the calculated reward can actually be transferred. If the transfer fails later in the transaction, the cumulative seconds are already lost, leading to potential loss of reward tracking.\n\n5. **CWE-691 (Insufficient Control Flow Management)**: In swap functions like `get_swap_result_from_exact_input`, the control flow for fee calculation differs based on `fee_mode.fees_on_input`. However, there's no validation that ensures the fee mode is consistent with the trade direction and collect fee mode settings. This could lead to unexpected behavior where fees are calculated incorrectly.\n\n6. **CWE-697 (Incorrect Comparison)**: The `has_partner` function uses `self.partner != Pubkey::default()` to check if a partner exists. However, this doesn't account for the case where `partner` might be explicitly set to the default pubkey as a valid state. A more robust check would validate against a specific \"no partner\" marker or use an Option type.\n",
+            "findings": [
+                {
+                    "title": "Weak Access Control in Reward Editing",
+                    "description": "The validate_authority_to_edit_reward function allows pool creators to only edit reward index 0, but for admin users, it doesn't validate the reward_index parameter. This means admins can manipulate any reward index without proper constraints, potentially leading to unauthorized reward configuration changes.",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Inconsistent Fee Calculation in Partial Input Swap",
+                    "description": "In get_swap_result_from_partial_input, when amount_left > 0, the code recalculates fees using a different method (get_total_trading_fee_from_excluded_fee_amount vs get_total_trading_fee_from_included_fee_amount). This can lead to different fee rates being applied, resulting in incorrect fee amounts and potential economic exploits.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Missing Validation for Zero Funding Amount",
+                    "description": "The update_rate_after_funding function doesn't validate that funding_amount is non-zero. When funding_amount is 0 and current_time >= reward_duration_end, the reward_rate becomes 0 without any error or warning. This could silently disable rewards and cause confusion for users expecting reward distribution.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Premature State Reset in Ineligible Reward Claim",
+                    "description": "The claim_ineligible_reward function resets cumulative_seconds_with_empty_liquidity_reward to 0 before ensuring the reward transfer succeeds. If the subsequent transfer fails, the tracking data is permanently lost, leading to incorrect reward accounting and potential loss of user rewards.",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Insufficient Fee Mode Validation",
+                    "description": "Swap functions don't validate that the fee_mode is consistent with the pool's collect_fee_mode and trade_direction settings. This lack of validation could allow fees to be calculated on the wrong token or in the wrong direction, leading to incorrect fee collection and potential economic exploits.",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Ambiguous Partner Existence Check",
+                    "description": "The has_partner function uses comparison with Pubkey::default() to determine if a partner exists. This approach is ambiguous because the default pubkey could theoretically be set as a valid partner address. A more explicit state management approach (such as using an Option type or a dedicated flag) would prevent potential confusion and errors.",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Potential Integer Overflow in Reward Calculation",
+                    "description": "In calculate_reward_per_token_stored_since_last_update, the calculation time_period.safe_mul(self.reward_rate.into()) could overflow if reward_rate is very high or time_period is large. While safe_mul is used, the function returns MathOverflow error which might not be handled appropriately by callers, potentially causing transaction failures during normal operations.",
+                    "category": "CWE-682",
+                    "severity": "medium",
+                    "confidence": 0.82
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

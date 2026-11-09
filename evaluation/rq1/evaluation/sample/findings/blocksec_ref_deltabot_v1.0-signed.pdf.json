@@ -1,0 +1,405 @@
+{
+    "path": "reports/blocksec_ref_deltabot_v1.0-signed.pdf",
+    "project_info": {
+        "url": "https://github.com/DeltaBotDev/Contracts",
+        "commit_id": "8962241f48e1b4852c209fb71109760c8a982874",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-02-23",
+        "project_path": "contracts/blocksec_ref_deltabot_v1.0-signed.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-755"
+                ]
+            },
+            "title": "Incorrect Error Message in Function create_bot()",
+            "description": "The function create_bot() returns an incorrect error message when certain validation checks fail, which may mislead users or front-end applications about the actual cause of the failure. Specifically, when the total sum of orders exceeds MAX_GRID_COUNT, the function throws an error but returns the misleading message \"PAUSE_OR_SHUTDOWN\", which does not reflect the actual cause. The root cause is improper error handling logic and the use of a generic or inaccurate error message string in specific validation code paths. An attacker or user could exploit this by triggering the error and interpreting the misleading message to probe system behavior or confuse users. While this does not lead to fund loss or critical system failure, it reduces the clarity of error handling, hinders debugging, and degrades user experience.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/grid/src/grid_bot.rs"
+            ],
+            "location": [
+                "create_bot()",
+                "grid_bot.rs#40",
+                "grid_bot.rs#50"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-430"
+                ]
+            },
+            "title": "Incorrect Target Address of Callback Function",
+            "description": "The callback function in the contract is configured to send execution results to an incorrect target address, which may result in failed state updates or lost data. Specifically, in the function withdraw_unowned_asset(), the callback after_ft_balance_of_for_withdraw_unowned_asset() is directed to self.owner_id instead of the current contract (env::current_account_id()). This is caused by a hardcoded or improperly validated address being used in the callback invocation logic. If the owner address is not the contract itself, the callback will fail silently or be sent to an unintended contract, causing the withdrawal process to halt. An attacker could exploit this by initiating a transaction that triggers the callback, causing the system to update state on a wrong or nonexistent contract instance. The impact is high, as it can lead to inconsistent state, failed operations, and potential loss of user funds or transaction integrity.\n",
+            "severity": "high",
+            "files": [
+                "contracts/grid/src/grid_bot.rs"
+            ],
+            "location": [
+                "Callback Function",
+                "grid_bot.rs#190-206"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-772"
+                ]
+            },
+            "title": "Lack of Storage Release",
+            "description": "The contract does not release storage when certain cleanup operations are performed, leading to unnecessary accumulation of dead data. Specifically, when a user's token balance is reduced to zero in functions like internal_reduce_asset() and internal_reduce_refer_fee(), the corresponding entry remains in the LookupMap or other storage structures instead of being removed. This is due to the absence of explicit storage deallocation logic when removing or closing bot instances. An attacker could exploit this by creating and closing many bots to bloat the contract's storage, increasing costs for the owner. Over time, this leads to inefficient use of blockchain storage, increased storage costs, and may contribute to a denial-of-service scenario if storage limits are approached. This is a common anti-pattern in NEAR/Solana-like contracts where storage fees are user-incentivized.\n",
+            "severity": "low",
+            "files": [
+                "contracts/grid/src/grid_bot_asset.rs"
+            ],
+            "location": [
+                "Lack of Storage Release",
+                "grid_bot_asset.rs#11-24",
+                "grid_bot_asset.rs#355-366"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "Lack of Attached Transfer Fee",
+            "description": "The contract fails to attach the required transfer fee when making certain cross-contract NEAR token transfers. Specifically, the function claim() allows users to withdraw revenue without requiring them to attach 1 yocto NEAR as a transfer fee, which is necessary for cross-contract FT transfers. This issue also exists in internal_create_bot_refund_with_near(). The root cause is the absence of a #[payable] annotation or explicit check for the attached deposit. An attacker could exploit this by initiating transfers that fail silently or revert, potentially disrupting service or causing user fund lockups. If the contract itself does not have sufficient balance to cover the transfer gas, the transaction will fail, leading to a denial of service for withdrawals. Over time, repeated failed transfers could deplete the contract\u2019s operational balance, especially if attackers trigger multiple withdrawals.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/grid/src/grid_bot.rs",
+                "contracts/grid/src/grid_bot_asset.rs"
+            ],
+            "location": [
+                "Lack of Attached Transfer Fee",
+                "grid_bot.rs#109-119",
+                "grid_bot_asset.rs#216-230",
+                "grid_bot_asset.rs#299-302"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "Lack of Check for the Parameter valid_until_time",
+            "description": "The contract does not validate the valid_until_time parameter, allowing it to be set to a past timestamp. Specifically, the function create_bot() does not validate whether the valid_until_time parameter is greater than the current block timestamp. This allows users to create grid bots that are already expired upon creation. The root cause is missing time validation logic when processing the parameter. An attacker could set a past timestamp, causing the bot to be immediately invalid upon creation. The impact is low, as it may lead to user mistakes, failed bot setups, wasted gas, and poor user experience, but does not result in fund loss.\n",
+            "severity": "low",
+            "files": [
+                "contracts/grid/src/grid_bot.rs"
+            ],
+            "location": [
+                "valid_until_time",
+                "grid_bot.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Lack of Check for the Parameter slippage",
+            "description": "The slippage parameter is not validated, allowing it to be set to an extremely high or zero value. Specifically, in create_bot(), the slippage parameter can be set to zero, which increases the likelihood of transaction failure due to strict price matching against oracle values. The root cause is the absence of bounds checking on the slippage input. An attacker could set extreme slippage values to manipulate trade execution prices, potentially leading to unfavorable trades. Although the protocol allows zero slippage by design, this still represents a usability risk and potential economic loss for end users due to frequent failed bot creations, especially in volatile markets.\n",
+            "severity": "low",
+            "files": [
+                "contracts/grid/src/grid_bot.rs"
+            ],
+            "location": [
+                "slippage",
+                "grid_bot.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-404"
+                ],
+                "3": [
+                    "CWE-459"
+                ],
+                "4": [
+                    "CWE-460"
+                ]
+            },
+            "title": "Unrefunded Storage Fee",
+            "description": "The contract collects storage fees but does not refund unused portions when a bot is closed or removed. Specifically, when grid bot creation fails, the STORAGE_FEE paid by the user is not refunded in functions like internal_create_bot_refund(), get_price_for_create_bot_callback(), and after_wrap_near_for_create_bot(). The root cause is missing refund logic in the cleanup and error recovery functions. An attacker could exploit this by creating bots and closing them to force users to lose their storage deposits. Users lose their storage fees even when the bot is not successfully created, which is economically unfair and may deter usage. This is particularly impactful since storage fees on NEAR/Solana-like chains are non-trivial.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/grid/src/grid_bot_internal.rs",
+                "contracts/grid/src/oracle.rs",
+                "contracts/grid/src/wnear.rs"
+            ],
+            "location": [
+                "Unrefunded Storage Fee",
+                "grid_bot.sol",
+                "grid_bot_internal.rs",
+                "wnear.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-405"
+                ],
+                "4": [
+                    "CWE-408"
+                ]
+            },
+            "title": "Lack of Attached Storage Fee in Function add_refer()",
+            "description": "The function add_refer() does not attach the required storage fee when creating new storage entries. This is due to missing fee attachment during storage mutation and the lack of a #[payable] annotation. A malicious actor could exploit this by creating many referral entries, forcing the contract to pay for storage and potentially exhausting its balance. This represents a denial-of-service vector through storage exhaustion. The impact is medium, potentially leading to denial of service for legitimate users and increased operational costs for the contract owner.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/grid/src/grid_bot.rs",
+                "contracts/grid/src/grid_bot_asset.rs"
+            ],
+            "location": [
+                "add_refer()",
+                "grid_bot.rs#144-149",
+                "grid_bot_asset.rs#319-334"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Inappropriate Refund Mechanisms",
+            "description": "The refund mechanisms in the contract are not properly implemented, leading to incorrect or failed refunds. Specifically, when grid bot creation fails, the contract refunds all previously deposited tokens instead of only those from the current transaction, due to the use of internal_withdraw_all() in refund logic. The root cause is flawed logic in refund calculation and transfer execution. An attacker could exploit this by triggering refund paths that fail or return incorrect amounts, potentially trapping user funds. The impact is medium, as it may result in loss of user funds, unnecessary gas costs, degraded trust, and poor user experience due to having to re-deposit all tokens for retrying bot creation.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/grid/src/grid_bot.rs",
+                "contracts/grid/src/grid_bot_internal.rs"
+            ],
+            "location": [
+                "Inappropriate Refund Mechanisms",
+                "grid_bot.rs",
+                "grid_bot_internal.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect refund balance in Function after_wrap_near_for_create_bot()",
+            "description": "The function after_wrap_near_for_create_bot() calculates the refund balance incorrectly after wrapping NEAR tokens. Specifically, if the WNEAR amount check fails, the contract fails to account for the wrapped WNEAR in the refund calculation due to missing state tracking of the wrapped amount. The root cause is a miscalculation in the balance difference after the wrap operation. An attacker could exploit this by creating bots with specific amounts to receive excess refunds, draining the contract. The impact is high, as it can lead to direct loss of funds from the contract and undermines trust in the refund mechanism.\n",
+            "severity": "high",
+            "files": [
+                "contracts/grid/src/wnear.rs"
+            ],
+            "location": [
+                "after_wrap_near_for_create_bot()",
+                "grid_bot.rs",
+                "grid_bot_asset.rs#304-308"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Lack of Check in function close_bot()",
+            "description": "The close_bot() function does not perform necessary state checks before closing a bot. Specifically, it does not verify whether a grid bot is already closed before proceeding with closure logic. This allows a malicious user to re-close an already closed bot, potentially after creating a new one, leading to incorrect state updates such as zero locked balances. The root cause is missing validation of the bot's current state or ownership. An attacker could exploit this to close active bots prematurely or corrupt the contract state, disrupting trading operations and leading to a denial of service for legitimate operations.\n",
+            "severity": "high",
+            "files": [
+                "contracts/grid/src/grid_bot_internal.rs"
+            ],
+            "location": [
+                "close_bot()",
+                "grid_bot_internal.rs#102-127"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ],
+                "3": [
+                    "CWE-252"
+                ]
+            },
+            "title": "Lack of State Rollback in Callback Function",
+            "description": "The callback function does not implement proper state rollback in case of failure, leaving the contract in an inconsistent state. Specifically, in register_pair(), the function internal_storage_deposit() initiates a cross-contract call to deposit storage fees, but the callback after_storage_deposit() does not roll back the state if the promise fails. The root cause is the absence of defensive programming patterns like checkpoints or require statements and missing failure handling logic. An attacker could exploit this by causing a callback to fail and leaving the contract in a corrupted state. The impact is high, as it may result in permanent state inconsistency, logic errors, and fund loss.\n",
+            "severity": "high",
+            "files": [
+                "contracts/grid/src/grid_bot_internal.rs",
+                "contracts/grid/src/token.rs"
+            ],
+            "location": [
+                "Callback Function",
+                "grid_bot_internal.rs#308-317",
+                "token.rs#39-55"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant Refund Logic in Function internal_check_bot_amount()",
+            "description": "The function internal_check_bot_amount() contains redundant refund logic that is already handled elsewhere. Specifically, it triggers a refund via internal_create_bot_refund(), and then the caller function invokes internal_create_bot_refund_with_near() again, resulting in duplicate refund operations. The root cause is duplicated code paths for refund handling and overlapping error handling paths. While not directly exploitable, it increases code complexity, leads to unnecessary gas consumption, and raises the risk of future bugs. The impact is low, primarily affecting code maintainability, gas efficiency, and transaction costs.\n",
+            "severity": "low",
+            "files": [
+                "contracts/grid/src/grid_bot_check.rs"
+            ],
+            "location": [
+                "internal_check_bot_amount()",
+                "gird_bot.rs",
+                "gird_bot_check.rs",
+                "gird_bot_asset.rs#299-302",
+                "gird_bot_asset.rs#304-308"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "Lack of Proper Handling of Token Decimals",
+            "description": "The contract does not properly handle token decimals, leading to incorrect amount calculations across different tokens. Specifically, in functions like internal_check_order_match(), the contract does not scale token amounts by decimals when performing calculations, leading to precision loss when tokens with different decimals (e.g., 6 vs 18) are involved. The root cause is missing normalization of token amounts based on their decimal precision. An attacker could exploit this by using tokens with different decimals to manipulate trade or deposit amounts. The impact is high, as it can result in significant financial loss due to miscalculations, prevent valid orders from being executed, or lead to incorrect revenue distribution, undermining the core trading logic.\n",
+            "severity": "high",
+            "files": [
+                "contracts/grid/src/orderbook_internal.rs"
+            ],
+            "location": [
+                "Lack of Proper Handling of Token Decimals",
+                "orderbook_internal.rs"
+            ]
+        },
+        {
+            "id": 14,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Gas Waste due to Redundant Checks in Function internal_create_bot()",
+            "description": "The function internal_create_bot() performs redundant checks that have already been validated earlier in the call stack. Specifically, both create_bot() and internal_create_bot() perform the same check to verify that the DeltaBot contract is in \"Running\" status. The root cause is lack of coordination between function layers and poor code structure. An attacker could exploit this by repeatedly calling the function to increase gas costs for the system or users. The impact is low, mainly resulting in higher transaction fees and gas inefficiency, but no security breach.\n",
+            "severity": "low",
+            "files": [
+                "contracts/grid/src/grid_bot_internal.rs",
+                "contracts/grid/src/grid_bot.rs"
+            ],
+            "location": [
+                "internal_create_bot()",
+                "gird_bot.rs",
+                "grid_bot_internal.rs"
+            ]
+        },
+        {
+            "id": 15,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Unreasonable Logic in Function internal_check_near_amount()",
+            "description": "The function internal_check_near_amount() contains unreasonable logic that may reject valid NEAR amounts. Specifically, it requires users to deposit the full NEAR amount needed for bot creation even if they already have partial WNEAR balance. The root cause is overly strict or incorrect validation conditions and flawed logic in amount validation. An attacker could exploit this to block legitimate transactions or manipulate bot creation conditions. The impact is medium, as it may prevent valid usage, force unnecessary re-deposits, increase gas costs, and degrade user experience.\n",
+            "severity": "medium",
+            "files": [
+                "contracts/grid/src/grid_bot_check.rs"
+            ],
+            "location": [
+                "internal_check_near_amount()",
+                "grid_bot.rs",
+                "grid_bot_check.rs"
+            ]
+        },
+        {
+            "id": 16,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect Revenue Token Returned in Forward Order",
+            "description": "The contract returns the wrong revenue token in forward order trades, sending the input token instead of the expected output. Specifically, in internal_calculate_bot_revenue(), when a forward order is executed, the function incorrectly returns token_sell of the opposite order as the revenue token. The correct behavior should return token_buy of the opposite order. The root cause is a logic error in the token routing or swap result handling. An attacker could exploit this by executing trades to receive unintended tokens and profit from the misrouting. The impact is low, as it may cause incorrect token distribution and accounting errors, but is likely bounded by other checks and does not lead to large-scale fund loss.\n",
+            "severity": "low",
+            "files": [
+                "contracts/grid/src/orderbook_internal.rs"
+            ],
+            "location": [
+                "Incorrect Revenue Token Returned in Forward Order",
+                "orderbook_internal.sol"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,53 @@
+{
+    "project": "tensor_foundation_audit_final.pdf.json",
+    "files": [
+        "dataset/contracts/tensor_foundation_audit_final.pdf.json/marketplace/program/src/instructions/mpl_core/delist.rs",
+        "dataset/contracts/tensor_foundation_audit_final.pdf.json/marketplace/program/src/instructions/mpl_core/close_expired_listing.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+    },
+    "cwe_ground_truth": [
+        "CWE-669",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-435"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Utilization of Improper Payer Account",
+            "description": "In `process_close_expired_listing_core`, the `list_state` account is used as the payer for a CPI transfer, but it is a program-owned account with minimal lamports, likely insufficient for transaction fees. This can cause transaction failure and prevent cleanup of expired listings. Similarly, in `process_delist_core`, the `rent_destination` account is incorrectly required to be a signer and payer, even though its role is only to receive rent refunds. This introduces unnecessary constraints and increases the risk of transaction failure. The root cause is incorrect assignment of payer responsibilities in CPI calls.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The analysis of the provided Rust source code files `delist.rs` and `close_expired_listing.rs` revealed one potential vulnerability in `close_expired_listing.rs`. The issue arises from using the `list_state` account (a PDA) as the payer for the Metaplex Core transfer instruction. This account is about to be closed and only has rent-exempt lamports. If the transfer instruction requires the payer to provide lamports (for example, to create a new account), the transfer would fail due to insufficient lamports, preventing the closing of expired listings. This is inconsistent with the `delist` function which uses a separate `rent_destination` signer account as the payer. This vulnerability is categorized under CWE-435 (Improper Interaction Between Multiple Correctly-Behaving Entities) because the transfer instruction and the state of the `list_state` account interact in a way that may cause failure.\n",
+            "findings": [
+                {
+                    "title": "Potential Transfer Failure Due to Insufficient Lamports in Payer Account",
+                    "description": "The function `process_close_expired_listing_core` in `close_expired_listing.rs` uses the `list_state` account as the payer for the Metaplex Core transfer instruction. This account is a PDA that holds only rent-exempt lamports and is being closed. If the transfer instruction requires the payer to provide lamports (e.g., for account creation), the transfer will fail because the `list_state` account lacks sufficient lamports. This issue may result in denial of service for closing expired listings. The vulnerability stems from improper interaction between the transfer instruction and the state of the `list_state` account (CWE-435).",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.8
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ]
+    ]
+}

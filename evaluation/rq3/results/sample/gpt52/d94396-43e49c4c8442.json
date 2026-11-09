@@ -1,0 +1,112 @@
+{
+    "project": "zenith-dbc-audit-june-2025.pdf.json",
+    "files": [
+        "dataset/contracts/zenith-dbc-audit-june-2025.pdf.json/dynamic-bonding-curve/programs/dynamic-bonding-curve/src/instructions/initialize_pool/ix_initialize_virtual_pool_with_token2022.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.16666666666666666,
+        "recall": 0.3333333333333333,
+        "f1": 0.2222222222222222
+    },
+    "cwe_ground_truth": [
+        "CWE-284",
+        "CWE-863",
+        "CWE-285"
+    ],
+    "cwe_detected": [
+        "CWE-435",
+        "CWE-923",
+        "CWE-284",
+        "CWE-282",
+        "CWE-693",
+        "CWE-1270"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "TokenMetadata is always mutable by pool creator",
+            "description": "1. **Description:** The `initialize_virtual_pool_with_token2022` instruction sets the MetadataPointer extension's update authority based on configuration, but fails to set the TokenMetadata extension's update authority correctly, leaving it under control of the pool creator.\n2. **Cause:** The code uses the creator's account as the update authority for the TokenMetadata extension during initialization, regardless of the intended configuration (e.g., partner or immutable).\n3. **Exploitation:** An attacker who is the pool creator could exploit this by calling `token_metadata_update_field` to modify metadata fields such as name, symbol, or URI, even when the system is configured to restrict such changes.\n4. **Impact:** This could lead to misleading or malicious metadata being associated with a token, undermining trust and potentially enabling phishing or spoofing attacks.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The instruction correctly uses PDAs for the pool and vaults, but several authority/validation choices can create security-relevant weaknesses.\n\nThe most concrete issue is that metadata is initialized with `update_authority = creator`, and the subsequent `set_authority(..., AuthorityType::MetadataPointer, ...)` only changes the *metadata pointer extension authority*, not the *metadata update authority* itself. If the intent is for `token_update_authority` (derived from config policy) to control post-initialization metadata changes, this mechanism is misapplied and leaves the creator able to modify token metadata.\n\nAdditionally, there is no explicit access-control check that the `creator` is authorized (per `config`) to create a new pool/mint. If pool creation is intended to be permissioned (common for protocols), any signer can create new pools under an existing config, which may enable spam, brand impersonation via metadata, or creation of undesirable pools.\n\nFinally, the quote token program is provided as an interface (`token_quote_program: Interface<TokenInterface>`). While Anchor constrains `quote_mint` to be owned by the passed program, if a configuration can ever reference a mint governed by a non-standard/malicious token-like program, the pool will integrate with it without further allowlisting, potentially breaking assumptions elsewhere in the protocol.\n",
+            "findings": [
+                {
+                    "title": "Metadata update authority likely remains with creator due to wrong authority type being updated",
+                    "description": "The instruction initializes Token-2022 metadata with:\n- `update_authority: ctx.accounts.creator`\n\nAfterwards it attempts to apply config-driven policy via:\n- `set_authority(..., AuthorityType::MetadataPointer, token_update_authority)`\n\nFor Token-2022 metadata, changing the *metadata pointer authority* does not necessarily change the *metadata's update authority* (the entity allowed to change name/symbol/uri). As written, the creator may retain the ability to update metadata indefinitely, even if `config.get_token_authority()` intends otherwise. This can enable post-launch metadata tampering (brand/URI swapping), misleading users and downstream integrations.\n",
+                    "category": "CWE-693",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Pool initialization appears permissionless without enforcing creator authorization from config",
+                    "description": "`handle_initialize_virtual_pool_with_token2022` does not check that `creator` is an authorized actor (e.g., admin/whitelisted) for the referenced `config`. The only binding is `#[account(has_one = quote_mint)]` on `config`, which does not restrict *who* may create pools.\n\nIf the protocol intends pool creation to be restricted, any signer can:\n- create a new `base_mint` (with metadata initialized in this instruction),\n- create a new pool PDA for (base, quote) under the config,\n- mint the initial supply into the pool vault,\npotentially leading to spam pools, phishing/impersonation via metadata, or ecosystem confusion.\n\nIf permissionless pool creation is intended, this is not a vulnerability; otherwise it is an access control gap.\n",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Quote token program is not allowlisted; integration risks if config ever points to a non-standard token program",
+                    "description": "The instruction accepts `token_quote_program: Interface<TokenInterface>` and uses it to initialize the quote vault and to constrain `quote_mint` ownership (`mint::token_program = token_quote_program`).\n\nIf a `PoolConfig` can be created/modified to reference a `quote_mint` owned by a non-standard or malicious token-like program, the pool will integrate with it without additional checks (e.g., allowlisting SPL Token / Token-2022 program IDs). This can lead to unexpected behavior in later instructions that assume standard token semantics (transfers, freezing, extensions, etc.), creating cross-component interaction failures.\n",
+                    "category": "CWE-435",
+                    "severity": "medium",
+                    "confidence": 0.55
+                }
+            ]
+        },
+        {
+            "reasoning": "The instruction initializes a new Token-2022 mint and two vault token accounts (base + quote), mints an initial supply into the base vault, and sets some mint authorities. From the listed root causes, two main issue classes appear:\n(1) the program accepts an arbitrary `token_quote_program` (TokenInterface) and then uses it as the token program endpoint for initializing the quote vault, without restricting it to the real SPL Token programs. This is a classic “confused deputy” CPI endpoint validation problem.\n(2) authority/ownership for metadata updates is set inconsistently: metadata is initialized with `update_authority = creator`, but later the code computes a `token_update_authority` from config and only applies it to the MetadataPointer authority, not the metadata update authority itself. If the config intends a different update authority (e.g., fee_claimer or none), the creator retains unintended control over mutable metadata, reflecting improper ownership/privilege assignment and effectively “incorrect token/authority” generation relative to policy.\n",
+            "findings": [
+                {
+                    "title": "Unvalidated `token_quote_program` allows CPI to arbitrary endpoint when creating quote vault",
+                    "description": "The account `token_quote_program: Interface<TokenInterface>` is not restricted to known SPL Token program IDs (SPL Token / Token-2022). It is then used in account constraints for `quote_mint` (`mint::token_program = token_quote_program`) and for initializing `quote_vault` (`token::token_program = token_quote_program`).\n\nAs a result, the instruction can be coerced into performing CPIs into an attacker-controlled program that merely conforms to the expected interface shape. Because the transaction includes a real signer (`payer`) and passes system/token-related accounts, a malicious quote \"token program\" can abuse the CPI to execute unintended privileged actions (e.g., drain payer lamports/tokens) under the guise of “token account initialization”. This is a confused-deputy/origin validation issue: the program does not ensure it is communicating with the intended token program endpoint.\n",
+                    "category": "CWE-923",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Metadata update authority remains `creator`, potentially violating configured authority policy",
+                    "description": "During metadata initialization, the code sets:\n  - `update_authority: ctx.accounts.creator`\nvia `token_metadata_initialize(...)`.\n\nLater, it computes `token_update_authority` from `config.get_token_authority()` and calls `set_authority(..., AuthorityType::MetadataPointer, token_update_authority)`, which only changes the *MetadataPointer* authority, not the metadata update authority set at initialization.\n\nIf `config` is intended to enforce that only a specific key (e.g., `fee_claimer`, or no one) can update metadata, the current flow leaves the creator with continuing ability to mutate token metadata. This is an authority/ownership assignment mismatch that can grant unintended privileges and undermine any policy relying on metadata immutability or controlled updates (e.g., token identity/trust).\n",
+                    "category": "CWE-282",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Authority policy mismatch can produce incorrect/unsafe authority tokens for metadata control",
+                    "description": "The program derives `token_update_authority` from `config` (using both `creator` and `config.fee_claimer`) suggesting a policy-driven authority scheme. However, the actual “security token” governing metadata edits is effectively the `update_authority` set during `token_metadata_initialize`, which is always `creator` here.\n\nThis can result in the system generating/embedding the wrong authority identity for a security-relevant capability (metadata edits), contrary to the configured token authority model.\n",
+                    "category": "CWE-1270",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-282",
+            "CWE-1270",
+            "CWE-285",
+            "CWE-286",
+            "CWE-1280",
+            "CWE-1267",
+            "CWE-749",
+            "CWE-287",
+            "CWE-269",
+            "CWE-923",
+            "CWE-346",
+            "CWE-1283"
+        ]
+    ]
+}

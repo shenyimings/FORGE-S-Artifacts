@@ -1,0 +1,159 @@
+{
+    "path": "reports/claynosaurz_solana_staking_audit_final.pdf",
+    "project_info": {
+        "url": "https://github.com/Claynosaurz-Inc/staking-smart-contract",
+        "commit_id": "b47a8df",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-02-24",
+        "project_path": "contracts/claynosaurz_solana_staking_audit_final.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ]
+            },
+            "title": "Bypassing of NFT Collection Integrity Checks",
+            "description": "The staking function fails to validate the `verified` field of the NFT's collection metadata, only checking that the `collection.key` matches the expected collection address (CLAYNO_COLLECTION_ADDRESS). This allows an attacker to stake an NFT that has a matching collection key but is not officially verified, effectively bypassing collection integrity checks. The root cause is the lack of validation for the `verified` flag in the metadata, which is required to confirm official endorsement by the collection authority. An attacker could exploit this by minting a fake NFT with the correct collection key but without verification, then staking it to gain unauthorized rewards or privileges. The impact includes potential inflation of rewards, degradation of collection exclusivity, and loss of trust in the staking system.\n",
+            "severity": "high",
+            "files": [
+                "programs/claynosaurz-staking/src/instructions/staking_action.rs"
+            ],
+            "location": [
+                "staking_action::stake#105-110"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "Uncapped Level Progression",
+            "description": "The `calculate_points_for_level` function does not enforce a maximum level cap for values above MAX_LEVEL (25), only handling the case when `level == MAX_LEVEL`. This allows users to accumulate experience points beyond the intended limit and progress to levels as high as 256 due to unchecked arithmetic. The root cause is the absence of a validation check to reject levels exceeding MAX_LEVEL. An attacker could exploit this by continuously accumulating points to reach extremely high levels, potentially unlocking unintended benefits or disrupting game balance. The impact includes economic imbalance, unfair advantage, and potential manipulation of level-dependent mechanics.\n",
+            "severity": "medium",
+            "files": [
+                "programs/claynosaurz-staking/src/state.rs"
+            ],
+            "location": [
+                "state::calculate_points_for_level#25"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Failure to Update Multiplier",
+            "description": "The `add_multiplier` and `remove_multiplier` functions in `GodMode` do not update the `last_claimed` timestamp when modifying multipliers. This causes incorrect point calculations when `update_points` is later called, as it computes rewards over an incorrect time interval based on outdated timestamps. The root cause is the omission of a `last_claimed` update during multiplier adjustments. This is especially exploitable for users who have never staked (where `last_claimed` is zero), as the system will calculate rewards from the Unix epoch, resulting in an abnormally large point accrual. The impact includes unfair distribution of points and potential abuse by inactive users to claim excessive rewards.\n",
+            "severity": "medium",
+            "files": [
+                "programs/claynosaurz-staking/src/instructions/admin/godmode.rs",
+                "programs/claynosaurz-staking/src/state.rs"
+            ],
+            "location": [
+                "state::update_points#25"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ]
+            },
+            "title": "Inability to Modify Admin Account",
+            "description": "The `admin` account in `GodMode` is not marked as mutable, which prevents the transfer of lamports to or from the account during account resizing operations. This affects both `add_ephemeral_multiplier`, which attempts to transfer lamports to the staking account, and `reclaim_rent`, which tries to return excess lamports to the admin. The root cause is the missing `mut` designation for the admin account in the instruction context. An attacker or admin could trigger a failure in these functions, leading to denial of service for account resizing or rent reclamation. The impact includes inability to manage account size and lamport balance, potentially blocking critical administrative functions.\n",
+            "severity": "medium",
+            "files": [
+                "programs/claynosaurz-staking/src/instructions/admin/godmode.rs"
+            ],
+            "location": [
+                "godmode::reclaim_rent#15",
+                "godmode::add_ephemeral_multiplier#20"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "Incorrect Account Size Calculation",
+            "description": "The `update_points` function uses `std::mem::size_of::<EphemeralMultiplier>` to calculate the new account size during reallocation. However, this returns the in-memory size of the struct, which may not account for padding or alignment requirements enforced by the Solana runtime, leading to incorrect account sizing. The root cause is the reliance on `size_of` instead of a defined constant like `INIT_SPACE` that reflects the actual serialized size. An attacker could potentially trigger memory corruption or allocation errors by manipulating the multiplier count, leading to failed transactions or inconsistent state. The impact includes potential runtime errors during account resizing and instability in state management.\n",
+            "severity": "low",
+            "files": [
+                "programs/claynosaurz-staking/src/state.rs"
+            ],
+            "location": [
+                "state::update_points#30"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "Possibility of Underflow Due to Misconfiguration",
+            "description": "The `create_class` and `modify_class` functions do not validate the `token_mint_record`, allowing an admin to misconfigure a class with an incorrect record. This can result in the multiplier not being properly applied, causing `current_multiplier` in the staking account to be less than the class multiplier. During `unstake`, the system attempts to subtract the class multiplier from `current_multiplier`, which can result in an underflow if the values are mismatched. The root cause is insufficient validation of input data when modifying class configurations. An attacker who gains admin access or exploits a misconfigured call could prevent users from unstaking their NFTs by triggering the underflow error. The impact includes denial of service for unstaking, locking user funds indefinitely.\n",
+            "severity": "low",
+            "files": [
+                "programs/claynosaurz-staking/src/instructions/staking_action.rs"
+            ],
+            "location": [
+                "staking_action::unstake#45"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Inconsistency in Solana Realloc",
+            "description": "The `add_ephemeral_multiplier` function calls `transfer` to add lamports before calling `realloc`, which violates the correct order recommended by Solana. Due to a known runtime behavior, reallocating after transferring lamports can lead to failures or undefined behavior because the account's balance is modified before the size change is committed. The root cause is the incorrect sequence of CPI calls: `realloc` should occur before `transfer`. An attacker could exploit this by triggering account resize operations that fail unpredictably, leading to denial of service for adding multipliers. The impact includes transaction failures during administrative operations and potential loss of funds if lamports are transferred but the realloc fails.\n",
+            "severity": "low",
+            "files": [
+                "programs/claynosaurz-staking/src/instructions/admin/godmode.rs"
+            ],
+            "location": [
+                "godmode::add_ephemeral_multiplier#50"
+            ]
+        }
+    ]
+}

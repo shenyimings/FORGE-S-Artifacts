@@ -1,0 +1,246 @@
+{
+    "project": "04_10_2025_Texture2.0-MR-FV.pdf.json",
+    "files": [
+        "dataset/contracts/04_10_2025_Texture2.0-MR-FV.pdf.json/super-lendy/program/src/processor/reserve.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.23076923076923078,
+        "recall": 0.5,
+        "f1": 0.3157894736842105
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-697",
+        "CWE-345",
+        "CWE-20",
+        "CWE-1287",
+        "CWE-693"
+    ],
+    "cwe_detected": [
+        "CWE-1285",
+        "CWE-707",
+        "CWE-664",
+        "CWE-190",
+        "CWE-682",
+        "CWE-1286",
+        "CWE-691",
+        "CWE-118",
+        "CWE-1289",
+        "CWE-20",
+        "CWE-834",
+        "CWE-1287",
+        "CWE-191"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "fees.curator_borrow_fee_rate_bps or fees.curator_performance_fee_rate_bps can't be set to 50% even though the comments say it should be",
+            "description": "1. **Description:** The code uses a strict greater-than check (`> 5000`) instead of greater-than-or-equal, preventing the fee from being set to exactly 50% (5000 basis points), despite comments indicating this should be allowed.\n\n2. **Cause:** A logic inconsistency between the code and its documentation due to the use of `> 5000` instead of `>= 5000`.\n\n3. **Exploitation:** Not exploitable in a malicious sense, but leads to confusion and incorrect configuration expectations.\n\n4. **Impact:** Misalignment between documentation and behavior can lead to incorrect fee settings and user confusion, reducing clarity and maintainability.\n"
+        },
+        {
+            "title": "reserve_mode or flash_loans_enabled can be set to arbitrary value",
+            "description": "1. **Description:** The `alter_reserve` function allows setting `mode` and `flash_loans_enabled` to any `u8` value without validation, even though only specific values (e.g., 0, 1) are meaningful.\n\n2. **Cause:** Lack of input validation on configuration parameters that are treated as enums or booleans in downstream logic.\n\n3. **Exploitation:** Setting invalid values could lead to undefined behavior or misinterpretation of the reserve state.\n\n4. **Impact:** Increases risk of configuration errors and potential logic bugs due to unvalidated inputs.\n"
+        },
+        {
+            "title": "Switchboard confidence interval is not utilized",
+            "description": "1. **Description:** The code checks for price staleness but does not use the confidence interval provided by the Switchboard oracle, which indicates the reliability of the price.\n\n2. **Cause:** Missing integration of the confidence interval in price validation logic.\n\n3. **Exploitation:** An attacker could influence or submit prices with high variance that pass staleness checks but are unreliable.\n\n4. **Impact:** Increases risk of using low-confidence prices in critical operations, potentially leading to incorrect financial decisions.\n"
+        },
+        {
+            "title": "The reward rule can be set to an arbitrary value",
+            "description": "1. **Description:** The `set_reward_rules` function does not validate the `reason` field of reward rules, which should only be 0 (borrowing) or 1 (liquidity).\n\n2. **Cause:** Missing input validation allows arbitrary values to be set for reward rule types.\n\n3. **Exploitation:** Setting invalid rule types could lead to undefined behavior or misattribution of rewards.\n\n4. **Impact:** Could result in incorrect reward distribution logic or future bugs if new code assumes valid values.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The reviewed `reserve.rs` code is generally careful about PDA derivations, mint matching, and staleness checks. However, there are several security-relevant edge cases and invariant gaps that stem from the candidate root causes:\n(1) arithmetic on timestamps uses unchecked `i64` addition/subtraction, creating overflow/underflow edge cases that can break timelock/staleness protections (CWE-682/CWE-703);\n(2) the flash-repay instruction scan decrements an unsigned index without guarding against `0`, which is a classic control-flow/exceptional-condition hazard (CWE-691/CWE-703);\n(3) `alter_reserve` accepts unvalidated raw `u8` state flags (`mode`, `flash_loans_enabled`), allowing storage of unexpected values that other logic may not anticipate (CWE-707/CWE-710);\n(4) `delete_reserve` drains lamports but does not actually close/retire the reserve account state, which is a resource lifetime/control issue and can lead to “dangling” program state (CWE-664).\n",
+            "findings": [
+                {
+                    "title": "Unchecked timestamp arithmetic may overflow, bypassing timelocks or staleness checks",
+                    "description": "The program performs security-relevant time arithmetic using plain `i64` addition/subtraction without checked math.\n\nInstances:\n- `propose_config`: `can_be_applied_at = clock.unix_timestamp + max_time_lock;`\n  If `max_time_lock` is large enough (or otherwise attacker-influenced through proposal fields), `i64` addition can overflow and wrap, producing a `can_be_applied_at` in the past. This can allow prematurely applying time-locked configuration changes.\n- `refresh_reserve`: `clock.unix_timestamp - unpacked_price_feed.update_timestamp`\n  Even though there is a guard `if clock.unix_timestamp < update_timestamp`, subtraction can still overflow in extreme cases (e.g., `update_timestamp == i64::MIN`). Overflow here can corrupt the price age computation and potentially defeat the stale-price protection.\n\nOn Solana BPF builds (release), integer overflow typically wraps rather than panicking, making these edge cases exploitable as logic bugs rather than clean failures.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Unsigned index underflow in flash_repay instruction scanning",
+                    "description": "In `flash_repay`, the code scans prior instructions using:\n`let mut i = current_index; loop { i -= 1; ... }` where `i` is `usize`.\n\nIf `current_index == 0`, `i -= 1` underflows (wraps to `usize::MAX` in release builds). While the subsequent `load_instruction_at_checked(i, ...)` likely errors and the code returns `No matching flash borrow found`, this is still unsafe control-flow management:\n- it relies on downstream error behavior to recover from an invalid index,\n- it creates brittle logic that can change behavior across build profiles/toolchains,\n- it complicates reasoning about correctness of the flash-loan coupling checks.\n\nA robust approach is to explicitly check `if current_index == 0 { return Err(...) }` or use checked subtraction / bounded loops.\n",
+                    "category": "CWE-691",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Unvalidated reserve state flags allow unexpected modes/values to be stored",
+                    "description": "`alter_reserve` writes `mode` and `flash_loans_enabled` directly from instruction data:\n- `unpacked_reserve.mode = mode;`\n- `unpacked_reserve.flash_loans_enabled = flash_loans_enabled;`\n\nThere is no validation that:\n- `mode` is one of the supported constants (e.g., `RESERVE_MODE_NORMAL`, `RESERVE_MODE_RETAIN_LIQUIDITY`),\n- `flash_loans_enabled` is restricted to `{0,1}`.\n\nThis is an input neutralization / invariant enforcement issue: later code often compares against specific constants (e.g., withdraw only blocks when `mode == RESERVE_MODE_RETAIN_LIQUIDITY`) and may silently treat unknown values as “normal”, or future logic may assume the field is boolean and misbehave. Even if only the curator can call this, storing invalid state can create unexpected behavior and increase the chance of privilege-impacting bugs when integrated with other components/upgrades.\n",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "delete_reserve drains lamports without closing/retiring reserve state (dangling resource lifetime)",
+                    "description": "`delete_reserve` transfers all lamports out of the `reserve` account:\n`transfer_lamports(reserve, curator_pools_authority, balance)?;`\nbut does not:\n- close the account (assign to system program and/or zero data / set data length to 0),\n- mark the reserve state as deleted,\n- ensure associated PDAs (liquidity supply, collateral supply, lp mint) are closed/retired.\n\nThis is improper resource lifetime control: the reserve account remains a program-owned state account (with its data still present) but is now non–rent-exempt and can be reclaimed by rent/cleanup mechanics or later become a confusing “zombie” reserve if it is re-funded. This can lead to operational and security surprises (unexpected state resurrection, indexers/users treating it as valid, etc.).\n",
+                    "category": "CWE-664",
+                    "severity": "low",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The reviewed Solana program code is generally defensive about account key verification and staleness checks, but there are several security-relevant issues stemming from the provided CWE root causes.\n\nThe most concrete issues are in the flash-loan instruction scanning logic:\n- `flash_repay` decrements a `usize` index (`i -= 1`) without checking for `0`, which can underflow/wrap in release builds.\n- Both `flash_borrow` and `flash_repay` index into `ixn.accounts[...]` without validating the accounts array length, which can trigger an out-of-bounds panic.\n\nAdditionally, time-lock computation in `propose_config` performs an unchecked signed addition that can overflow, potentially allowing a timelock bypass depending on the bounds enforced by `proposal.max_time_lock(...)` and configuration.\n\nFinally, `alter_reserve` accepts state-like parameters (`mode`, `flash_loans_enabled`) as unconstrained `u8` values without validating them against known/allowed states, increasing the chance of inconsistent or unintended reserve behavior.\n",
+            "findings": [
+                {
+                    "title": "Integer underflow in flash_repay when scanning previous instructions",
+                    "description": "In `flash_repay`, the code scans backwards through the instruction sysvar:\n\n- `let mut i = current_index;`\n- `loop { i -= 1; ... }`\n\nIf `current_index == 0`, the subtraction `i -= 1` underflows/wraps (in Solana BPF release builds, integer overflow checks are typically disabled), producing `usize::MAX`. This is a correctness/safety bug and can lead to unexpected control-flow in the scan (immediate failure on out-of-range load, or other unintended behavior if surrounding logic changes).\n",
+                    "category": "CWE-191",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Out-of-bounds access to ixn.accounts during flash-loan coupling checks",
+                    "description": "In both `flash_borrow` and `flash_repay`, the code accesses specific account metas without checking `ixn.accounts.len()`:\n\n- `flash_borrow`: `ixn.accounts[1].pubkey` (for FlashRepay) and `ixn.accounts[0].pubkey` (for FlashBorrow)\n- `flash_repay`:  `ixn.accounts[1].pubkey` (for FlashRepay) and `ixn.accounts[0].pubkey` (for FlashBorrow)\n\nIf an instruction addressed to this program (and successfully deserialized as `SuperLendyInstruction::FlashBorrow`/`FlashRepay`) contains fewer account metas than expected, these array accesses can panic (range error) and abort the program execution for the entire transaction.\n",
+                    "category": "CWE-118",
+                    "severity": "medium",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Unchecked signed addition may overflow when computing config proposal apply time",
+                    "description": "In `propose_config`, the timelock deadline is computed as:\n`can_be_applied_at = clock.unix_timestamp + max_time_lock;`\n\nBoth operands are signed (`i64`), and the addition is unchecked. If `max_time_lock` is large enough (or if inputs/limits in `proposal.max_time_lock(...)` / `reserve_timelock` are misconfigured), this can overflow and wrap, potentially producing a timestamp in the past and allowing immediate application of an otherwise time-locked proposal.\n",
+                    "category": "CWE-190",
+                    "severity": "high",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Reserve mode and flash_loans_enabled accept arbitrary u8 values (state confusion risk)",
+                    "description": "`alter_reserve` assigns `mode` and `flash_loans_enabled` directly:\n- `unpacked_reserve.mode = mode;`\n- `unpacked_reserve.flash_loans_enabled = flash_loans_enabled;`\n\nThere is no validation that:\n- `mode` is one of the supported constants (e.g., `RESERVE_MODE_NORMAL` or `RESERVE_MODE_RETAIN_LIQUIDITY`)\n- `flash_loans_enabled` is restricted to expected values (e.g., 0/1)\n\nUsing unconstrained state-like values increases the risk of inconsistent internal state interpretation across the codebase (e.g., other handlers checking only `== RESERVE_MODE_RETAIN_LIQUIDITY` will treat any unknown value as “normal”).\n",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Potential compute DoS via unbounded instruction scanning loops in flash_borrow/flash_repay",
+                    "description": "`flash_borrow` scans forward and `flash_repay` scans backward over the transaction’s instructions until a matching counterpart is found. While Solana transactions have an upper bound on instruction count, an attacker can still pack many instructions to increase compute usage and make flash-loan operations more expensive/unreliable under tight compute budgets.\n\nThis is a resource-consumption risk due to iteration cost scaling with transaction size.\n",
+                    "category": "CWE-834",
+                    "severity": "low",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The reviewed code primarily suffers from input/account validation gaps that can be mapped to the provided CWE root causes. The most impactful issue is that several CPI “program id” accounts (most notably `lp_token_program`) are treated as trusted identifiers but are not strictly validated to be the canonical SPL Token program. Because the program then performs security-critical CPIs (mint/burn) through that untrusted program id, an attacker can supply a malicious program that simply returns success without performing the burn/mint, allowing reserve state transitions (withdraw) to proceed and ultimately enabling liquidity theft.\n\nAdditional issues include (a) missing “account type/owner” validation before deserializing structured state (e.g., `PriceFeed`, `Curve`, `TextureConfig`, `Pool`), which allows a curator (or any party able to influence config) to point the reserve at attacker-controlled accounts that merely match the expected byte layout; (b) unsafe fixed indexing into instruction account arrays during flash-loan instruction scanning, which can panic on malformed instructions; (c) insufficient domain validation for small “enum-like” inputs such as `mode` and `flash_loans_enabled`; and (d) Token-2022 incompatibility when attempting to interpret a Token-2022 account using the legacy SPL Token `Account` layout for `MAX_AMOUNT` deposits.\n",
+            "findings": [
+                {
+                    "title": "Unvalidated `lp_token_program` allows malicious CPI that can bypass burn/mint semantics and drain liquidity",
+                    "description": "Multiple instructions accept `lp_token_program` from remaining accounts but never verify it equals the canonical SPL Token program id (`spl_token::id()`), despite comments stating LP tokens are “ALWAYS of classic token standard”.\n\nImpact:\n- In `withdraw_liquidity`, the program:\n  1) updates reserve state via `unpacked_reserve.withdraw_liquidity(lp_amount)?;`\n  2) calls `lp_spl_token.burn(...)` using the *user-supplied* `lp_token_program`\n  3) then transfers real liquidity from the reserve PDA to the user.\n\n  If an attacker supplies a malicious `lp_token_program` that simply returns `Ok(())` without burning (no-op CPI), the reserve state update still occurs and the subsequent liquidity transfer can succeed. This can allow withdrawing without owning/burning LP tokens (up to reserve/limit-derived bounds), effectively draining the reserve.\n\n- In `deposit_liquidity`, a malicious `lp_token_program` could no-op `mint_to`, causing users to deposit liquidity without receiving LP tokens (user loss / griefing), while reserve state is still updated as if LP were minted.\n\n- In `create_reserve`, `lp_token_program` is also used as the owner when creating LP mint / collateral supply, so a malicious program id could be set at initialization time as well.\n\nAffected code paths:\n- `create_reserve`: uses `lp_token_program` as owner and for `init_mint2`, `init_account3`\n- `deposit_liquidity`: uses `lp_token_program` for `mint_to`\n- `withdraw_liquidity`: uses `lp_token_program` for `burn`\n",
+                    "category": "CWE-1289",
+                    "severity": "critical",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Missing owner/type checks for deserialized accounts (PriceFeed/IRM/Pool/TextureConfig) enable spoofed state via attacker-controlled accounts",
+                    "description": "The code deserializes several accounts into structured types (e.g., `PriceFeed`, `Curve`, `Pool`, `TextureConfig`) without explicitly validating that:\n- the account is owned by the expected program, and/or\n- the account’s discriminator/type marker matches the expected type.\n\nExamples:\n- `check_price_feed` calls `PriceFeed::try_from_bytes(&price_feed_data)?` with no explicit `market_price_feed.owner` check.\n- `refresh_reserve` calls `Curve::try_from_bytes(irm_data.as_ref())?` with no explicit `irm.owner` check.\n- `alter_reserve`/`propose_config` read `TextureConfig::try_from_bytes(...)` with no explicit `texture_config.owner` check.\n- `check_price_feed` reads and parses `Pool::try_from_bytes(&pool_data)?` with no explicit `pool.owner` check here.\n\nIf `try_from_bytes` does not enforce strong type/owner verification internally, a party that can set or influence config fields (notably curator-controlled configuration during `create_reserve` / config changes) could point `market_price_feed` or `irm` to accounts they control that contain syntactically valid bytes but semantically malicious values (e.g., manipulated price, manipulated curve), undermining pricing, interest accrual, and risk parameters.\n\nEven if governance/curator is trusted, this is still a correctness/safety gap: the program is relying on external discipline rather than enforcing account type invariants on-chain.\n",
+                    "category": "CWE-1287",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Flash-loan instruction scanning uses unchecked fixed indices into `ixn.accounts`, risking out-of-bounds panic",
+                    "description": "In `flash_borrow` and `flash_repay`, the program scans `sysvar_instructions` and inspects `ixn.accounts[...]` with hardcoded indices without validating `ixn.accounts.len()` first, e.g.:\n- `flash_borrow`: `ixn.accounts[1].pubkey` for `FlashRepay`, `ixn.accounts[0].pubkey` for `FlashBorrow`\n- `flash_repay`: `ixn.accounts[1].pubkey` and `ixn.accounts[0].pubkey`\n\nA malformed instruction addressed to the program (or an instruction that successfully deserializes into the enum variant but supplies fewer accounts than expected) can cause an out-of-bounds access and panic, aborting the instruction.\n\nWhile this is typically self-DoS within the attacker’s own transaction, it is still an avoidable safety issue and can break assumptions about graceful error handling for unexpected inputs.\n",
+                    "category": "CWE-1285",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Token-2022 deposits with `MAX_AMOUNT` may fail due to legacy SPL account unpack (type mismatch)",
+                    "description": "In `deposit_liquidity`, when `amount == MAX_AMOUNT`, the code reads the user's balance by unpacking the source token account using the legacy SPL Token layout:\n- `spl_token::state::Account::unpack(&source_liquidity_wallet.data.borrow())`\n\nHowever, the program otherwise appears to support Token-2022 mints (e.g., `create_reserve` computes Token-2022 account lengths and initializes with `init_account3`). Token-2022 accounts may include extensions, and their account data length/layout can differ from `spl_token::state::Account::LEN`.\n\nResult:\n- For Token-2022 source accounts, `MAX_AMOUNT` deposits can fail (DoS for that UX path), or in worst cases, misinterpretation could occur if a non-standard layout is partially accepted.\n",
+                    "category": "CWE-1287",
+                    "severity": "low",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Insufficient domain validation for `mode` and `flash_loans_enabled` allows inconsistent reserve state",
+                    "description": "In `alter_reserve`, the inputs `mode: u8` and `flash_loans_enabled: u8` are written directly into reserve state without validating that they are within an allowed set (e.g., `{RESERVE_MODE_NORMAL, RESERVE_MODE_RETAIN_LIQUIDITY}` and `{0,1}`).\n\nConsequences:\n- Any non-zero `flash_loans_enabled` is treated as enabled, even if values other than 1 are unintended.\n- `withdraw_liquidity` only blocks withdrawals when `mode == RESERVE_MODE_RETAIN_LIQUIDITY`. Any other unexpected value will allow withdrawals, potentially bypassing intended operational controls if other modes are added or assumed elsewhere.\n\nThis is primarily a robustness/safety issue; exploitability depends on who is authorized to call `alter_reserve` (curator path).\n",
+                    "category": "CWE-1286",
+                    "severity": "low",
+                    "confidence": 0.7
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-431",
+            "CWE-221",
+            "CWE-116",
+            "CWE-911",
+            "CWE-1339",
+            "CWE-495",
+            "CWE-369",
+            "CWE-118",
+            "CWE-170",
+            "CWE-1229",
+            "CWE-240",
+            "CWE-372",
+            "CWE-404",
+            "CWE-191",
+            "CWE-841",
+            "CWE-673",
+            "CWE-704",
+            "CWE-670",
+            "CWE-1335",
+            "CWE-913",
+            "CWE-834",
+            "CWE-228",
+            "CWE-669",
+            "CWE-410",
+            "CWE-580",
+            "CWE-501",
+            "CWE-463",
+            "CWE-1426",
+            "CWE-172",
+            "CWE-190",
+            "CWE-665",
+            "CWE-20",
+            "CWE-362",
+            "CWE-662",
+            "CWE-496",
+            "CWE-1265",
+            "CWE-666",
+            "CWE-768",
+            "CWE-706",
+            "CWE-193",
+            "CWE-1329",
+            "CWE-668",
+            "CWE-922",
+            "CWE-128",
+            "CWE-400",
+            "CWE-487",
+            "CWE-610",
+            "CWE-705",
+            "CWE-135",
+            "CWE-138",
+            "CWE-74",
+            "CWE-430",
+            "CWE-799"
+        ],
+        [
+            "CWE-1287",
+            "CWE-179",
+            "CWE-1286",
+            "CWE-1288",
+            "CWE-1285",
+            "CWE-1284",
+            "CWE-1173",
+            "CWE-1289"
+        ]
+    ]
+}

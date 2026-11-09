@@ -1,0 +1,271 @@
+{
+    "path": "reports-without-source/sec3_keel-solana-psm_report_final.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/keelfi/solana-psm/"
+        ],
+        "commit_id": [
+            "de3823a2d2f2ecbbe61eecdd4d7341c373f8ab96"
+        ],
+        "address": null,
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-09-24",
+        "project_path": null
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "[M-01] Incomplete transferFee handling",
+            "description": "The PSM program supports Token-2022 standard tokens, some of which may have the TransferFees extension enabled. When this extension is active, the actual amount received by the destination account is less than the amount transferred from the source due to fees. Currently, only the `process_swap` instruction handles this extension correctly by adjusting the input amount. The other four instructions—`process_deposit_all_token_types`, `process_withdraw_all_token_types`, `process_deposit_single_token_type_exact_amount_in`, and `process_withdraw_single_token_type_exact_amount_out`—do not account for transfer fees. This omission causes incorrect accounting in the pool, as the contract assumes the full amount is received when it is not. As a result, during a deposit, the user may pay more than expected (after fees), but the pool mints liquidity tokens based on the pre-fee amount, leading to unfair dilution of existing LPs or incorrect slippage checks. This can be exploited by an attacker using high-fee tokens to manipulate pool balances and gain unfair advantages.\n",
+            "severity": "medium",
+            "location": [
+                "program/src/processor.rs::process_swap#415",
+                "program/src/processor.rs::process_deposit_all_token_types",
+                "program/src/processor.rs::process_withdraw_all_token_types",
+                "program/src/processor.rs::process_deposit_single_token_type_exact_amount_in",
+                "program/src/processor.rs::process_withdraw_single_token_type_exact_amount_out"
+            ],
+            "files": []
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "[M-02] Incorrect withdraw all token amount calculation",
+            "description": "In the `process_withdraw_all_token_types` function, the amount of underlying tokens a user receives when burning LP tokens is calculated using the `pool_tokens_to_trading_tokens` function in both the redemption_rate and constant_price curves. The calculation uses `total_value`, which is derived from the normalized value of the pool's reserves, and then computes each token amount as `(pool_tokens * total_value) / pool_token_supply`, clamped by the `.min()` of the current reserve. However, because `total_value` is only half the total pool value in the redemption_rate curve, and due to the min clamping, users can receive significantly less value than their burned LP tokens are worth. For example, if a user burns 10 LP tokens in a 50-supply pool with reserves of 1000 A and 10 B (price 1), they receive only 101 A and 10 B (total value 111), while the actual LP value is 202. This results in silent user losses, especially when slippage parameters are not set tightly. The same flaw exists in the constant_price curve. This miscalculation undermines user trust and can lead to economic loss during withdrawals.\n",
+            "severity": "medium",
+            "location": [
+                "program/src/processor.rs::process_withdraw_all_token_types#780",
+                "program/src/curve/redemption_rate.rs::pool_tokens_to_trading_tokens#268",
+                "program/src/curve/redemption_rate.rs::normalized_value#402",
+                "program/src/curve/constant_price.rs"
+            ],
+            "files": []
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1288"
+                ]
+            },
+            "title": "[L-01] Ensure the mints of the pool and tokens are different",
+            "description": "The `process_initialize` function includes checks to prevent `token_a.mint` and `token_b.mint` from being the same and ensures non-zero supply for both tokens. It also requires that `pool_mint.supply == 0`. These conditions implicitly prevent `pool_mint` from being the same as `token_a.mint` in most cases. However, for curve implementations like ConstantPriceCurve, OffsetCurve, and RedemptionRateCurve, the `validate_supply` function only checks that `token_a_amount > 0`, ignoring `token_b_amount`. This allows a scenario where `token_b.mint` is the same as `pool_mint`, as long as `token_a.amount > 0`. This could lead to unexpected behavior or vulnerabilities, such as minting LP tokens that are indistinguishable from underlying assets or enabling malicious pool configurations. An explicit check should be added to ensure that neither `token_a.mint` nor `token_b.mint` equals `pool_mint` during initialization to prevent such edge cases.\n",
+            "severity": "low",
+            "location": [
+                "program/src/processor.rs::process_initialize#245",
+                "program/src/curve/calculator.rs::validate_supply#164",
+                "program/src/curve/constant_price.rs::validate_supply#203",
+                "program/src/curve/offset.rs::validate_supply#137",
+                "program/src/curve/redemption_rate.rs::validate_supply#391"
+            ],
+            "files": []
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "[L-02] Missing owner fee handling in single sided deposit and withdrawal",
+            "description": "In the `deposit_single_token_type` and `withdraw_single_token_type_exact_out` functions, the owner fee is correctly calculated using `fees.owner_trading_fee(half_source_amount)`. However, unlike the `process_swap` function, there is no subsequent logic to mint or transfer these owner fees to the designated fee accounts (e.g., `host_fee_account` or `pool_fee_account`). As a result, although the fee is deducted from the user's input amount, it remains in the pool as additional liquidity rather than being distributed to the fee recipient. This breaks the intended economic model where the protocol owner should collect a portion of trading fees. While the funds are not lost, they are misallocated, depriving the owner of rightful revenue and potentially affecting fee accounting and governance incentives. The same minting logic used in `process_swap` should be applied to ensure proper fee distribution.\n",
+            "severity": "low",
+            "location": [
+                "program/src/curve/base.rs::deposit_single_token_type#118",
+                "program/src/curve/base.rs::withdraw_single_token_type_exact_out#150",
+                "program/src/processor.rs::process_swap#415"
+            ],
+            "files": []
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-826"
+                ]
+            },
+            "title": "[L-03] Prevent burning pool initial supply",
+            "description": "During pool initialization, the `process_initialize` function mints an initial supply of LP tokens (1 billion) to the `destination_info` account provided by the pool creator. This mechanism is intended to bootstrap liquidity and prevent inflation attacks, similar to Uniswap V2. However, there is no restriction preventing the creator from burning these initial LP tokens. If the creator burns most or all of the initial supply, they can later deposit underlying tokens into the pool, drastically inflating the value of the remaining LP tokens. This could lock out future liquidity providers or allow the creator to manipulate the pool unfairly. The security benefit of the initial supply is nullified if it can be burned. To mitigate this, the protocol should ensure that the initial LP tokens are sent to an unburnable account (e.g., a burn address) or include a check that prevents the total supply from dropping below the initial amount.\n",
+            "severity": "low",
+            "location": [
+                "program/src/processor.rs::process_initialize#245",
+                "program/src/curve/calculator.rs::new_pool_supply#102"
+            ],
+            "files": []
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "[L-04] Validate token2022 extensions in the initialization",
+            "description": "The `process_initialize` function currently checks that the `pool_mint` does not have the `MintCloseAuthority` extension enabled, which is good practice. However, it does not validate other critical Token-2022 extensions that could compromise security. For tokens A and B, the `PermanentDelegate` extension should be prohibited, as it allows a delegate to transfer or burn tokens from any account, including the pool's reserves, without owner consent. For the `pool_mint`, the `NonTransferable` extension must be rejected because it prevents LP token transfers, which are essential for liquidity operations. Additionally, the `PermanentDelegate` extension on the `pool_mint` could allow unauthorized minting or burning. The initialization logic should include comprehensive extension validation for all three mints, possibly using a whitelist approach similar to Kamino Finance’s implementation.\n",
+            "severity": "low",
+            "location": [
+                "program/src/processor.rs::process_initialize#245",
+                "program/src/processor.rs::unpack_mint_with_extensions#77"
+            ],
+            "files": []
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ]
+            },
+            "title": "[I-01] Inconsistent signer requirement in the comment and code",
+            "description": "The documentation for the `Initialize` instruction specifies that the `swap_info` account (the new token-swap account) must be a signer (`[writable, signer]`). However, the implementation in `process_initialize` does not enforce this requirement with a runtime check. This discrepancy means that the instruction could theoretically be called without `swap_info` being a signer, which contradicts the assumed security model. If the design intent is that only an entity capable of making `swap_info` sign can initialize the pool, then the code should reflect that by verifying the signer status. Without this check, there is a risk of misuse or confusion in client implementations, potentially leading to incorrect assumptions about authorization. Adding a simple `if !swap_info.is_signer { return Err(...); }` check would align the code with the documented interface.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/instruction.rs::Initialize",
+                "program/src/processor.rs::process_initialize#245"
+            ],
+            "files": []
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-570"
+                ]
+            },
+            "title": "[I-02] Redundant overflow check",
+            "description": "In the `normalized_value` function of the `ConstantPriceCurve`, a complex condition is used to avoid overflow when adding `swap_token_a_amount` and `swap_token_b_value`. The condition checks `swap_token_b_value.saturating_sub(u64::MAX.into()) - (u128::MAX.saturating_sub(u64::MAX.into()))`, which is intended to detect near-overflow scenarios. However, this check is redundant because `swap_token_b_value` is the product of two `u64` values (`swap_token_b_amount` and `token_b_price`), so its maximum value is (2^64 - 1)^2 = 2^128 - 2^65 + 1. Adding `swap_token_a_amount` (also `u64`) results in a maximum sum of less than 2^128, which is within the `u128` range. Therefore, overflow is mathematically impossible, and the special branch is never taken. The entire conditional logic can be removed, simplifying the code and improving readability without affecting correctness.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/curve/constant_price.rs::normalized_value#219"
+            ],
+            "files": []
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-369"
+                ]
+            },
+            "title": "[I-03] The ray is not validated in RedemptionRateCurve",
+            "description": "The `RedemptionRateCurve`'s `validate` function checks that `token_b_price` is non-zero but does not validate that `self.ray` is non-zero. The `ray` parameter is used as a divisor in the `get_conversion_rate` function when calculating the rate as `rate = _rpow(...) * chi / ray`. If `ray` is zero, this would cause a division by zero error at runtime, leading to a program panic and potential denial of service. Although the function returns early if `timestamp == rho`, returning `chi`, this does not eliminate the risk because `ray` could still be zero in other cases. The validation should include an explicit check that `ray != 0`, and ideally that it is set to a known constant (e.g., 1e27), to ensure safe arithmetic operations.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/curve/redemption_rate.rs::validate#377",
+                "program/src/curve/redemption_rate.rs::get_conversion_rate#82"
+            ],
+            "files": []
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-358"
+                ]
+            },
+            "title": "[I-04] Incorrect source_token_mint_info.owner parameter",
+            "description": "In the `process_swap` function, when validating the `destination_token_mint_info` account using `unpack_mint_with_extensions`, the function incorrectly passes `source_token_mint_info.owner` as the owner parameter instead of `destination_token_mint_info.owner`. Although the SPL token program's CPI later enforces correct mint ownership (preventing direct exploitation), this bug could lead to incorrect validation if the token program check were bypassed or in future refactors. It creates a discrepancy between expected and actual behavior, increasing the risk of logic errors. The correct owner should be passed to ensure robust and secure validation. This is a code correctness issue that should be fixed to maintain consistency and prevent potential vulnerabilities in edge cases.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/processor.rs::process_swap#415",
+                "program/src/processor.rs::unpack_mint_with_extensions#77"
+            ],
+            "files": []
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ]
+            },
+            "title": "[I-05] Duplicated owner fee in pool token amount calculation",
+            "description": "The system is designed to mint pool tokens equivalent to the owner_fee during a swap, calculated using the formula: pool_token_amount = pool_supply * owner_fee / (x + price_b * y), where x and y are pre-swap token amounts in the pool. However, the actual calculation uses new_swap_source_amount and new_swap_destination_amount (which already include the owner_fee), leading to an inflated denominator: pool_token_amount = pool_supply * owner_fee / (x + owner_fee + price_b * y). This causes a slight underestimation of the minted pool tokens. As a result, the pool owner receives fewer LP tokens than expected, with the shortfall being distributed among existing LPs. While this does not pose a direct security risk, it results in a minor economic loss for the owner over time.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/curve/base.rs::swap#107-108",
+                "program/src/processor.rs::process_swap#592-604"
+            ],
+            "files": []
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "[I-06] Potential fee overcharge during token swap",
+            "description": "During a token swap, the trade and owner fees are calculated based on the original source_amount before fees are subtracted. The actual amount swapped (source_amount_used) is later recalculated in swap_without_fees using the redemption_rate curve, which may result in a value less than source_amount_less_fees due to rounding (floor and ceil operations). For example, with source_amount=100, token_b_price=11, and ray=10, destination_amount becomes 90 (floor), and source_amount_used becomes 99 (ceil). The final new_swap_source_amount becomes 99 + total_fees, which is less than the original source_amount. However, fees are still computed on the full 100, leading to an overcharge. This discrepancy, though small, results in users paying slightly more in fees than justified by the actual tokens swapped. The root cause is the failure to recalculate fees after determining the actual source amount used in the swap.\n",
+            "severity": "informational",
+            "location": [
+                "program/src/curve/base.rs::swap#088-092",
+                "program/src/curve/redemption_rate.rs::swap_without_fees#227-255"
+            ],
+            "files": []
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ]
+            },
+            "title": "[I-07] Profitable sandwich attack on rate update transaction",
+            "description": "A permissioned user can update the redemption rate curve via process_curve_update, modifying chi and ssr values that directly affect the token_b price through get_conversion_rate. Although checks exist to prevent chi from exceeding max_chi and to ensure chi and rho are non-decreasing, small price changes are still allowed. An attacker can exploit this by first swapping token_a into token_b, then triggering a rate update that increases token_b's price, and finally swapping token_b back at the higher rate for a profit. This sequence constitutes a sandwich attack on the rate update transaction. The economic impact is potential loss of value from the pool due to arbitrage, especially when liquidity is high. The vulnerability stems from allowing permissioned but unbounded small price updates without safeguards against exploitable arbitrage windows.\n",
+            "severity": "medium",
+            "location": [
+                "program/src/redemption_rate_processor.rs::process_curve_update#026-062",
+                "program/src/curve/redemption_rate.rs::get_conversion_rate#082-092",
+                "program/src/curve/redemption_rate.rs::set_rates#163-211"
+            ],
+            "files": []
+        }
+    ]
+}

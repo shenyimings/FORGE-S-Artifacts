@@ -1,0 +1,169 @@
+{
+    "project": "blocksec_burrow_v1.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_burrow_v1.0_signed.pdf.json/contract/src/asset_config.rs",
+        "dataset/contracts/blocksec_burrow_v1.0_signed.pdf.json/contract/src/config.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.2,
+        "recall": 1.0,
+        "f1": 0.33333333333333337
+    },
+    "cwe_ground_truth": [
+        "CWE-20",
+        "CWE-707"
+    ],
+    "cwe_detected": [
+        "CWE-707",
+        "CWE-1288",
+        "CWE-682",
+        "CWE-240",
+        "CWE-179",
+        "CWE-1284",
+        "CWE-703",
+        "CWE-20"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Incomplete asset configuration check",
+            "description": "1. **Description:** The `assert_valid` function in `AssetConfig` does not validate all critical fields, such as `extra_decimal` and `volatility_ratio`.\n2. **Cause:** Missing assertions allow configuration parameters to be changed in ways that could break system invariants.\n3. **Exploitation:** A privileged user (e.g., owner) could update an asset with invalid decimals or volatility settings, disrupting pricing or risk models.\n4. **Impact:** Risk of inconsistent or unsafe asset configurations, potentially leading to financial loss or system instability.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The reviewed code mainly handles configuration and interest-rate derivation. While owner-only gating is present on mutating methods, several security-relevant invariants are not enforced and exceptional conditions are handled via panics (`assert!`/`unwrap()`), which can brick public methods or destabilize downstream accounting. The most material risk is in `AssetConfig::get_rate`: utilization (`borrowed_balance / total_supplied_balance`) is not clamped to 100%, so if borrowed temporarily exceeds supplied (possible due to rounding, asynchronous updates, or other integrated components), the formula will extrapolate above `max_utilization_rate`, potentially causing runaway interest/fees and breaking economic assumptions. Additionally, `AssetConfig::assert_valid` does not ensure that the provided compounding rates are >= 1, allowing negative-interest behavior that can cascade into incorrect balance updates elsewhere.\n",
+            "findings": [
+                {
+                    "title": "Interest rate can exceed configured maximum due to unclamped utilization",
+                    "description": "In `AssetConfig::get_rate`, utilization is computed as:\n`pos = borrowed_balance / total_supplied_balance` (as a `BigDecimal`) and then used directly in the piecewise linear function.\n\nThere is no clamp to ensure `pos <= 1.0` (100% utilization). If `borrowed_balance > total_supplied_balance` (which can happen transiently due to rounding, sequencing across multiple components, or other integration behavior), the else-branch extrapolates beyond `max_utilization_rate`:\n`target_rate + (pos - target) * (max - target_rate) / (1 - target)`\n\nFor `pos > 1`, this yields a rate strictly greater than `max_utilization_rate`, contradicting the documented meaning of \"max\" and potentially leading to runaway interest accrual and downstream accounting failures.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Exceptional-condition panics via unwrap/assert can brick public methods if config state is unset/invalid",
+                    "description": "`internal_config()` uses `self.config.get().unwrap()`. If the contract state is deployed/migrated without initializing `config`, any call that reaches `internal_config()` (including the public `get_config()` and any method calling `assert_owner()`) will panic.\n\nAdditionally, multiple functions use `assert!` for validation. In NEAR, a panic reverts the transaction, but repeated panics can still create a denial-of-service for public/view methods (e.g., `get_config`) and complicate safe migration/upgrade paths if state becomes inconsistent.\n",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.74
+                },
+                {
+                    "title": "Insufficient validation of rate parameters allows negative-interest or non-sensical rate curves",
+                    "description": "`AssetConfig::assert_valid()` checks:\n- `target_utilization_rate <= max_utilization_rate`\nbut does NOT ensure either rate is >= 1 (the neutral compounding baseline returned elsewhere as `BigDecimal::one()`).\n\nIf `target_utilization_rate < 1` (and thus `max_utilization_rate` can also be < 1), `get_rate()` may return values < 1 for some utilizations, implying negative interest. Downstream balance updates that assume non-decreasing indexes/rates can underflow, mis-account, or enable economic manipulation.\n\nThis is an input validation gap for a structured, security-critical configuration object.\n",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code primarily exposes configuration and parameter-setting entrypoints. From the candidate CWE root causes, the main risk surface is improper/insufficient validation of externally supplied parameters (CWE-20), and failure to enforce consistency relationships between related fields (CWE-240). Several fields are accepted from the owner without sanity bounds (e.g., decimals, reward rates, log base, max asset counts, oracle timing windows). These values are later likely used in arithmetic (power-of-10 scaling, reward math, utilization/interest math) where out-of-range or inconsistent values can lead to panics (DoS), invariant breakage, or economically unsafe behavior (e.g., interest rates exceeding intended caps). No credible instances of CWE-463/138/116/74/170/1426 are evidenced in these snippets.\n",
+            "findings": [
+                {
+                    "title": "Config update lacks consistency checks between related timing fields",
+                    "description": "`update_config` stores the caller-provided `Config` without validating consistency between\n`maximum_recency_duration_sec` and `maximum_staleness_duration_sec`.\nThese fields are structurally related (recency of oracle call vs staleness of price timestamp),\nand allowing inconsistent combinations (e.g., staleness < recency, or extreme/zero values) can\nbreak downstream assumptions in oracle freshness checks and lead to incorrect acceptance/rejection\nof prices or unexpected panics/DoS in logic that assumes an ordering/invariant.\n",
+                    "category": "CWE-240",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Max assets limit not enforced and can be made inconsistent with current state",
+                    "description": "The contract stores `max_num_assets` in `Config`, but:\n- `add_asset` does not check that the current number of assets is below `max_num_assets`.\n- `update_config` does not prevent setting `max_num_assets` below the number of already-registered assets.\nThis allows creating or persisting an inconsistent state relative to the intended capacity constraint, which\ncan cause later logic (e.g., iterating over assets, assumptions about upper bounds) to misbehave or become\neconomically/griefing-relevant (e.g., storage/gas blowups if other code relies on the limit).\n",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Unbounded decimals fields can trigger overflow/DoS in downstream scaling math",
+                    "description": "`AssetConfig.extra_decimals` and `Config.booster_decimals` are accepted without any upper bound.\nAlthough `extra_decimals` changes are restricted when balances are non-zero, the value itself can still be\nset to an extreme `u8` (e.g., 255). In typical token math, decimals are used to compute scaling factors\nlike `10^decimals`; large exponents can overflow integer types, panic, or cause excessive computation.\nThis can lead to denial-of-service or broken accounting wherever these fields are later used.\n",
+                    "category": "CWE-20",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Utilization-based rate calculation does not clamp utilization and can exceed intended max rate",
+                    "description": "`AssetConfig::get_rate` computes `pos = borrowed_balance / total_supplied_balance` and uses it directly\nin the \"above target\" branch. If, due to rounding, accounting drift, interest accrual ordering, or other\nbugs elsewhere, `borrowed_balance > total_supplied_balance`, then `pos > 1` and the linear extrapolation\nwill produce a rate higher than `max_utilization_rate` (despite the name suggesting it is a cap at 100%\nutilization). This is an inconsistency between structural elements (the definition of \"max\" vs the computed\nvalue) and can create unintended economic behavior (excessive interest).\n",
+                    "category": "CWE-240",
+                    "severity": "medium",
+                    "confidence": 0.6
+                },
+                {
+                    "title": "Farm reward parameter setters lack basic validation (zero/overflow/invalid base)",
+                    "description": "`add_asset_farm_reward` accepts `new_reward_per_day`, `new_booster_log_base`, and `reward_amount` with no\nsanity checks beyond available reserved balance for `reward_amount`.\nIn particular, allowing `new_booster_log_base = 0` (or other invalid values) can cause downstream math\n(e.g., logarithms/divisions/normalization) to panic or behave unexpectedly, and allowing extreme values can\noverflow reward distribution computations elsewhere. These parameters should be validated against explicit\nbounds and invariants required by the reward formula implementation.\n",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.65
+                }
+            ]
+        },
+        {
+            "reasoning": "The code performs some basic range checks in `AssetConfig::assert_valid`, but several externally-supplied configuration values are persisted without sufficient bounds/consistency validation. This can lead to invalid economic parameters (e.g., nonsensical rates), downstream arithmetic edge cases (overflow/div-by-zero/log invalid) in other parts of the protocol that consume these fields, or protocol-wide DoS by setting mutually-inconsistent config values. Additionally, some validation is executed before access-control checks, which is an “early validation” ordering pattern (albeit with limited practical impact on NEAR since the caller pays gas).\n",
+            "findings": [
+                {
+                    "title": "Incomplete validation of AssetConfig numeric quantities (rates/extra_decimals)",
+                    "description": "`AssetConfig::assert_valid()` validates only:\n- `reserve_ratio <= 10000`\n- `target_utilization < 10000`\n- `target_utilization_rate <= max_utilization_rate`\n- `volatility_ratio < 10000`\n\nBut it does not validate other critical quantity constraints that are typically required for safe downstream math/logic, for example:\n- `extra_decimals` is unbounded (u8 up to 255). Many token/balance implementations scale by `10^extra_decimals`; large values can overflow or create extreme precision/DoS conditions in later computations.\n- `target_utilization_rate` / `max_utilization_rate` are not validated to be within an expected domain (e.g., >= 1.0 in the protocol’s fixed-point representation, non-zero, and within a sane upper bound). Values like 0 or extremely large numbers can lead to negative/invalid interest behavior or overflow in later calculations that assume a bounded compounding factor.\n\nBecause these fields come from external input (owner/admin calls, or potentially bridged governance), insufficient quantity validation can cause protocol malfunction or DoS in code paths that use these parameters.\n",
+                    "category": "CWE-1284",
+                    "severity": "high",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Contract-wide config can be set to inconsistent/unsafe values (no invariants enforced)",
+                    "description": "`update_config` persists `Config` without validating basic invariants among fields. Examples of missing consistency checks:\n- `maximum_staleness_duration_sec` vs `maximum_recency_duration_sec`: if these are inconsistent (e.g., staleness < recency, or either is 0/too large), oracle freshness checks elsewhere may become trivially failing (DoS) or overly permissive (accepting stale prices), depending on how these values are interpreted.\n- `max_num_assets` can be set to 0 or an extremely large value, potentially breaking assumptions or increasing storage/looping costs in other parts of the system.\n- `booster_decimals` is not checked against expected token metadata constraints.\n\nThese fields form a complex configuration where elements must remain consistent with each other; failing to enforce such invariants at the boundary risks creating invalid protocol states.\n",
+                    "category": "CWE-1288",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Asset farm reward parameters lack syntactic/domain validation (log base / reward rate)",
+                    "description": "`add_asset_farm_reward` accepts `new_reward_per_day` and `new_booster_log_base` (both U128) and stores them without validating that they are in a valid domain for subsequent calculations.\n\nTypical missing validations include:\n- `new_booster_log_base` must be > 1 (and often within a reasonable range) if later used as a logarithm base; values 0 or 1 can cause undefined math (division by zero / log invalid) or degenerate reward curves.\n- `new_reward_per_day` should be bounded to prevent overflow in reward accrual calculations or unintended extreme emissions.\n\nWhile this snippet does not show the consumption code, the absence of input quantity validation at the point of entry is a common root cause of downstream arithmetic faults.\n",
+                    "category": "CWE-1284",
+                    "severity": "medium",
+                    "confidence": 0.65
+                },
+                {
+                    "title": "Validation executed before access-control check in asset configuration endpoints",
+                    "description": "In `add_asset` and `update_asset`, `asset_config.assert_valid()` is called before `self.assert_owner()`.\nThis is an early-validation ordering pattern: a non-owner can trigger the validation code (and any panics within it) before the authorization barrier is enforced.\n\nPractical impact is limited on NEAR because the caller pays gas, and `assert_valid()` is currently simple; however, if validation expands (e.g., heavier checks, cross-contract calls, or more complex parsing), this ordering can become a measurable griefing/DoS vector.\n",
+                    "category": "CWE-179",
+                    "severity": "low",
+                    "confidence": 0.6
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-463",
+            "CWE-240",
+            "CWE-138",
+            "CWE-172",
+            "CWE-116",
+            "CWE-74",
+            "CWE-170",
+            "CWE-228",
+            "CWE-20",
+            "CWE-1426"
+        ],
+        [
+            "CWE-1173",
+            "CWE-1286",
+            "CWE-1285",
+            "CWE-1288",
+            "CWE-1287",
+            "CWE-1284",
+            "CWE-1289",
+            "CWE-179"
+        ]
+    ]
+}

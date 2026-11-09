@@ -1,0 +1,223 @@
+{
+    "project": "blocksec_ref_token-locker-v2.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_token-locker-v2.0-signed.pdf.json/contracts/contract/src/account.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.35714285714285715,
+        "recall": 1.0,
+        "f1": 0.5263157894736842
+    },
+    "cwe_ground_truth": [
+        "CWE-664",
+        "CWE-666",
+        "CWE-405",
+        "CWE-400",
+        "CWE-408"
+    ],
+    "cwe_detected": [
+        "CWE-406",
+        "CWE-664",
+        "CWE-697",
+        "CWE-682",
+        "CWE-666",
+        "CWE-770",
+        "CWE-610",
+        "CWE-372",
+        "CWE-400",
+        "CWE-405",
+        "CWE-826",
+        "CWE-408",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Lack of charging NEAR in function withdraw",
+            "description": "The `withdraw()` function initiates token transfers via `transfer_token()`, which requires attaching 1 yocto NEAR. However, the contract—not the user—bears this cost because no NEAR is required from the caller. The `withdraw()` function does not enforce the user to attach a minimal amount of NEAR, leaving the contract to cover transaction fees for token transfers. An attacker could repeatedly call `withdraw()` to drain the contract’s NEAR balance, especially in scenarios with high gas costs or frequent withdrawals. The contract may deplete its NEAR balance, preventing future token transfers and disrupting service for all users.\n"
+        },
+        {
+            "title": "Incorrect update on unlock_time_sec in function after_token_burn()",
+            "description": "In the `after_token_burn()` callback function, when a token transfer fails and the system rolls back the state, the `unlock_time_sec` is incorrectly set to the current timestamp if all tokens were burned. The rollback logic fails to preserve the original `unlock_time_sec` value, instead overwriting it with the current time, which breaks the intended lock-up duration. An attacker could trigger a failed burn transaction (e.g., by making the recipient reject funds), causing the unlock time to reset to the present, thereby bypassing the time lock. Users could prematurely withdraw locked assets by exploiting the incorrect state rollback, undermining the core time-locking functionality of the contract.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code implements a timelocked-token withdrawal flow with an async FT/MFT transfer and a callback that restores balances on failure. Several security-relevant issues stem from arithmetic safety, protection mechanisms typical for NEAR withdrawal-like methods, and lifetime/ownership of funds when callback recovery cannot re-associate balances. Additionally, one boundary check uses a length comparison that can incorrectly block legitimate updates (replacing an existing lock) when the map is at capacity.\n",
+            "findings": [
+                {
+                    "title": "Unchecked u128 addition can overflow locked balances",
+                    "description": "Multiple places add to `locked_balance` using plain `+` on `u128`:\n- `LockInfo::append_lock`: `self.locked_balance.0 + amount.0`\n- `after_token_transfer` failure path: `lock_info.locked_balance.0 + amount.0`\nIn Rust release builds, integer overflow wraps, which can reduce balances unexpectedly. This can corrupt accounting and enable withdrawing more/less than intended (e.g., a wrapped-down balance could later pass checks incorrectly or permanently lock funds due to bad state).\nUse `checked_add` (and handle failure) for all balance arithmetic.\n",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Withdraw lacks 1-yocto deposit gate (protection mechanism failure)",
+                    "description": "`withdraw` performs a sensitive state change and initiates an outbound token transfer, but does not require an attached deposit (commonly `assert_one_yocto()` on NEAR).\nWithout a 1-yocto gate, function-call access keys (or other unintended callers) may be able to invoke `withdraw` in scenarios where the dApp expects only full-access signed calls, weakening a standard NEAR protection mechanism used to mitigate certain delegated-key/cross-contract-call abuse patterns.\nAdd a 1-yocto requirement (or an explicit policy) at the start of `withdraw`.\n",
+                    "category": "CWE-693",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Funds can become orphaned if transfer fails and account record is missing",
+                    "description": "In `after_token_transfer`, on transfer failure the contract attempts to restore the withdrawn amount back into `account.locked_tokens`. If `internal_get_account(&account_id)` returns `None`, it only emits `WithdrawLostfound` and does not persist any recoverable record tying the funds to a claimant.\nSince a failed FT/MFT transfer means the tokens likely remain in the contract’s custody, this creates a lifetime/ownership gap: funds can be stuck in the contract without any on-chain mapping enabling the original owner (or an admin) to reclaim them.\nConsider persisting a dedicated \"lost+found\" ledger keyed by `account_id/token_id`, or preventing account deletion while pending withdrawals exist.\n",
+                    "category": "CWE-664",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "MAX_LOCK_NUM length check can incorrectly reject updating an existing lock entry",
+                    "description": "`Account::add_lock` enforces `self.locked_tokens.len() < MAX_LOCK_NUM` before inserting. If the map already contains `MAX_LOCK_NUM` entries, attempting to add a lock for an already-present `token_id` (a replace/update that would not increase `len`) will still be rejected.\nThis is an incorrect comparison for the intended invariant (\"no more than MAX distinct locks\") and can cause unexpected denial of service for legitimate updates.\nFix by allowing replacement when `token_id` already exists (e.g., check `contains_key` and only enforce the limit on new keys).\n",
+                    "category": "CWE-697",
+                    "severity": "low",
+                    "confidence": 0.8
+                }
+            ]
+        },
+        {
+            "reasoning": "The contract contains several issues related to “resource/sphere” boundaries and async lifetime management.\n\n1) `withdraw()` ultimately calls `transfer_token()`, which parses the user-supplied `token_id` and performs a cross-contract call with an attached deposit (1 yoctoNEAR) to whatever `contract_id` the string resolves to. There is no allowlist/validation that the resolved contract is an expected FT/MFT contract. This lets an attacker force the contract to interact with arbitrary external contracts and (at minimum) spend the contract’s NEAR balance on required attached deposits, potentially draining its balance over many calls and/or invoking unintended external behavior.\n\n2) The `MAX_LOCK_NUM` cap is enforced in `Account::add_lock`, but the async failure path `after_token_transfer()` can (re)insert a lock entry without enforcing the same cap. Because NEAR calls are asynchronous, an attacker can create a race where they withdraw (temporarily reducing lock count), add new locks up to `MAX_LOCK_NUM` before the callback executes, and then (if the transfer fails) the callback inserts the refunded lock and exceeds `MAX_LOCK_NUM`. This breaks the intended storage bound and can lead to unbounded state growth relative to the intended policy.\n\n3) In `after_token_transfer()`, if the token transfer fails and the account no longer exists (`internal_get_account` returns `None`), the contract only emits `WithdrawLostfound` and does not store the refunded amount anywhere for later recovery. This is an operation in the wrong phase of the resource lifecycle: the contract has already mutated state (deducted the lock) and scheduled an external transfer; on failure, it may be unable to restore accounting, resulting in stranded tokens under the contract’s control with no on-chain recovery mechanism beyond logs/events.\n\n4) `Account::add_lock()` overwrites any existing lock for the same `token_id` without enforcing monotonic unlock time (unlike `LockInfo::append_lock`). If any external/public path uses `add_lock` to “add more lock” for an already-locked token, a caller could overwrite an existing longer lock with a shorter future timestamp, effectively reducing the lock duration and enabling earlier withdrawals than intended. This reflects an incomplete distinction between “new lock” vs “extending existing lock”.\n",
+            "findings": [
+                {
+                    "title": "User-controlled token_id triggers arbitrary cross-contract calls with attached deposit",
+                    "description": "`transfer_token()` derives `contract_id` from the user-provided `token_id` and performs `ft_transfer`/`mft_transfer` to that external contract with an attached deposit of 1 yoctoNEAR paid from this contract.\nBecause there is no validation/allowlist of acceptable token contracts, an attacker can point `token_id` at an arbitrary contract and force this contract to spend its own NEAR on repeated calls (and potentially invoke unintended external behaviors).\nThis is a trust/sphere boundary issue: an externally controlled reference is used to access resources (external contracts) outside the intended control sphere.\n",
+                    "category": "CWE-610",
+                    "severity": "high",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "MAX_LOCK_NUM storage bound can be bypassed via async failure callback",
+                    "description": "`Account::add_lock()` enforces `locked_tokens.len() < MAX_LOCK_NUM`, but `after_token_transfer()` can insert a new `locked_tokens` entry on transfer failure without checking this bound.\nDue to NEAR async execution, a user can:\n  1) withdraw a lock (temporarily decreasing the map size),\n  2) add new locks back up to `MAX_LOCK_NUM`,\n  3) cause/experience transfer failure,\n  4) have the callback insert the refunded lock, exceeding `MAX_LOCK_NUM`.\nThis breaks the intended resource limit and can lead to unexpected storage growth / state bloat.\n",
+                    "category": "CWE-400",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Failed transfer may strand funds if account is missing at callback time",
+                    "description": "If `after_token_transfer()` observes failure and `internal_get_account(&account_id)` returns `None`, the contract only emits `WithdrawLostfound` and does not restore the lock state or record the refundable balance in any recoverable structure.\nThis can leave tokens effectively stranded under the contract’s custody with no on-chain recovery mechanism (beyond logs), because the withdrawal already decremented/removes the lock before the external transfer attempt.\n",
+                    "category": "CWE-666",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Existing locks can be overwritten with shorter unlock time (lock shortening)",
+                    "description": "`Account::add_lock()` uses `locked_tokens.insert(token_id.clone(), LockInfo { ... })` unconditionally, overwriting any existing lock for the same `token_id` and only checking that `unlock_time_sec` is in the future.\nUnlike `LockInfo::append_lock()`, it does not enforce non-decreasing unlock times. If any callable flow uses `add_lock` for a token that is already locked, this enables replacing a longer lock with a shorter one (still in the future), reducing the effective lock period and enabling earlier-than-intended withdrawals.\n",
+                    "category": "CWE-372",
+                    "severity": "medium",
+                    "confidence": 0.6
+                }
+            ]
+        },
+        {
+            "reasoning": "The code is a NEAR smart contract (not Solana). From the provided CWE candidate list, the main security-relevant root causes present are resource-amplification and unbounded resource allocation patterns stemming from:\n(1) the contract attaching deposits on cross-contract calls from its own balance (not the caller’s), enabling an attacker to asymmetrically drain contract funds with repeated calls (CWE-405);\n(2) an async state-machine gap where `withdraw()` removes an entry before the external transfer completes, and the failure callback can re-insert without re-checking `MAX_LOCK_NUM`, allowing the per-account lock limit to be exceeded via concurrent calls (CWE-770);\n(3) “optimistic” state updates that rely on `after_token_transfer` executing; if the callback does not run (insufficient gas, callback failure, upgrade/race), state may remain in the “withdrawn” state even though the transfer did not happen (prematurely releasing the lock bookkeeping) (CWE-826).\n",
+            "findings": [
+                {
+                    "title": "Contract balance can be drained via contract-paid 1 yocto deposits on token transfers",
+                    "description": "`transfer_token()` attaches `NearToken::from_yoctonear(1)` to `ft_transfer`/`mft_transfer`, which is paid out of the contract’s own balance (not the caller’s).\n\n`withdraw()` does not require the caller to attach 1 yocto (or otherwise reimburse the contract), so an attacker can repeatedly trigger `withdraw()` to make the contract spend 1 yocto each time. This can be done even with `amount = Some(0)`:\n- `checked_sub(0)` succeeds,\n- the lock remains in place,\n- a cross-contract call is still executed with 1 yocto attached.\n\nResult: asymmetric resource consumption where the attacker’s cost is mainly gas (paid by attacker), but the contract’s balance is steadily reduced, potentially reaching a point where the contract cannot perform operations requiring balance/storage.\n",
+                    "category": "CWE-405",
+                    "severity": "high",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Per-account lock limit (MAX_LOCK_NUM) can be bypassed via async withdraw/failure callback re-insert",
+                    "description": "`add_lock()` enforces `self.locked_tokens.len() < MAX_LOCK_NUM`, but the failure path in `after_token_transfer()` can insert into `account.locked_tokens` without checking `MAX_LOCK_NUM`.\n\nBecause `withdraw()` removes `token_id` from `locked_tokens` *before* the external token transfer completes, there is an async window:\n1) Account starts with `len == MAX_LOCK_NUM`.\n2) User calls `withdraw(token_id=X)`, which removes X, making `len == MAX_LOCK_NUM - 1`.\n3) Before the transfer resolves, user calls `add_lock()` to add a new token lock (allowed because `len < MAX_LOCK_NUM`), bringing `len == MAX_LOCK_NUM`.\n4) If the token transfer fails, `after_token_transfer()` observes X missing and inserts it back, making `len == MAX_LOCK_NUM + 1`.\n\nOver time, repeated exploitation can grow `locked_tokens` beyond the intended cap, increasing state size and serialization/deserialization costs and potentially increasing the contract’s storage burden.\n",
+                    "category": "CWE-770",
+                    "severity": "high",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Optimistic state update can permanently drop/alter lock bookkeeping if callback is not executed",
+                    "description": "`withdraw()` updates state first (removes the lock entry, subtracts the amount, and persists the modified `Account` via `internal_set_account`) and only then initiates the external token transfer, relying on `after_token_transfer()` to restore state on failure.\n\nIf the callback does not execute (e.g., insufficient gas attached for the callback, callback execution failure/panic, unexpected control-flow interruption), the contract may never restore `locked_tokens` even though the token transfer did not succeed. This is effectively a premature release of the internal “lock” resource during an expected lifetime, creating an inconsistent state and potentially “stuck” balances from the contract’s perspective.\n",
+                    "category": "CWE-826",
+                    "severity": "medium",
+                    "confidence": 0.7
+                }
+            ]
+        },
+        {
+            "reasoning": "The code is mostly simple (single-account read/modify/write plus a single cross-contract transfer), with no obvious loops or range scans. However, the public `withdraw` endpoint can be abused to trigger cross-contract calls and attached deposits at the contract’s expense without meaningful economic friction, especially because `amount` can be set to zero. This enables an attacker who has (or can create) any lock entry to spam `withdraw` calls that do not meaningfully change state but still generate promises/logs and burn the contract’s balance (1 yoctoNEAR attached deposit) and gas. This maps to network/message amplification and early-amplification style issues: expensive operations (promise creation + external call) can be triggered before enforcing conditions that would make the call “meaningful” (e.g., amount > 0 / caller funds the required deposit).\n",
+            "findings": [
+                {
+                    "title": "Zero-amount withdraw allows cross-contract call/promise spam paid by the contract",
+                    "description": "`withdraw(token_id, amount)` allows `amount` to be `Some(U128(0))`. In that case:\n- `checked_sub(0)` succeeds, leaving `locked_balance` unchanged.\n- The lock entry is re-inserted (since balance remains > 0).\n- `transfer_token(..., amount=0)` is still executed, creating an external promise and attaching `NearToken::from_yoctonear(1)` from the contract’s own balance.\nThis lets an attacker repeatedly call `withdraw` with `amount=0` to force the contract to generate network messages (promises) and spend its own funds on attached deposits and gas, potentially draining contract balance and consuming block resources.\nMitigations: require `amount > 0`, or require the caller to attach the 1 yoctoNEAR (and/or charge fees), and/or rate-limit withdrawals per account/token.\n",
+                    "category": "CWE-406",
+                    "severity": "high",
+                    "confidence": 0.84
+                },
+                {
+                    "title": "Expensive external transfer executed without sufficient preconditions/economic friction (contract-funded deposit)",
+                    "description": "`transfer_token` always attaches 1 yoctoNEAR from the contract balance for `ft_transfer`/`mft_transfer`. The public `withdraw` method does not require the caller to attach deposit to cover this cost, and does not enforce conditions that prevent meaningless calls (e.g., `amount > 0`).\nAs a result, an attacker can trigger a legitimate but expensive operation (cross-contract call + attached deposit + callback) many times at the contract’s expense. This is an early-amplification pattern: the contract performs costly external work without enforcing sufficient “payment”/friction from the caller first.\nMitigations: require `assert_one_yocto()`/attached deposit from caller, require positive amount, and consider additional throttling.\n",
+                    "category": "CWE-408",
+                    "severity": "medium",
+                    "confidence": 0.78
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-669",
+            "CWE-913",
+            "CWE-1229",
+            "CWE-400",
+            "CWE-665",
+            "CWE-410",
+            "CWE-668",
+            "CWE-580",
+            "CWE-221",
+            "CWE-1329",
+            "CWE-662",
+            "CWE-666",
+            "CWE-118",
+            "CWE-404",
+            "CWE-704",
+            "CWE-610",
+            "CWE-496",
+            "CWE-501",
+            "CWE-706",
+            "CWE-673",
+            "CWE-911",
+            "CWE-487",
+            "CWE-922",
+            "CWE-372",
+            "CWE-495"
+        ],
+        [
+            "CWE-1246",
+            "CWE-771",
+            "CWE-779",
+            "CWE-826",
+            "CWE-405",
+            "CWE-1235",
+            "CWE-605",
+            "CWE-593",
+            "CWE-920",
+            "CWE-415",
+            "CWE-770",
+            "CWE-672"
+        ],
+        [
+            "CWE-408",
+            "CWE-407",
+            "CWE-1176",
+            "CWE-1050",
+            "CWE-1094",
+            "CWE-776",
+            "CWE-406",
+            "CWE-1084",
+            "CWE-1072",
+            "CWE-409"
+        ]
+    ]
+}

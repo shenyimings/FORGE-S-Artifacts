@@ -1,0 +1,246 @@
+{
+    "project": "blocksec_phoenix_bonds_v1.0.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_phoenix_bonds_v1.0.pdf.json/contracts/phoenix-bonds/src/lib.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.1875,
+        "recall": 0.3,
+        "f1": 0.23076923076923075
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-664",
+        "CWE-223",
+        "CWE-691",
+        "CWE-284",
+        "CWE-221",
+        "CWE-799",
+        "CWE-269",
+        "CWE-20",
+        "CWE-266"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-664",
+        "CWE-697",
+        "CWE-404",
+        "CWE-682",
+        "CWE-691",
+        "CWE-435",
+        "CWE-670",
+        "CWE-287",
+        "CWE-666",
+        "CWE-284",
+        "CWE-668",
+        "CWE-362",
+        "CWE-703",
+        "CWE-662",
+        "CWE-400"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Potential Centralization Problem",
+            "description": "1. **Description:** The contract design grants excessive privileges to a single owner, including the ability to pause the contract, modify system parameters, and withdraw funds.\n2. **Cause:** Centralized control is implemented without safeguards such as multi-signature or DAO governance.\n3. **Exploitation:** A compromised owner key or malicious owner could disrupt operations or steal funds.\n4. **Impact:** High risk of single point of failure, undermining trust and decentralization principles.\n"
+        },
+        {
+            "title": "Lack of Check of Price for LiNEAR",
+            "description": "1. **Description:** The `get_linear_price()` function retrieves the price of LiNEAR tokens from an external contract but does not validate that the returned price is within expected bounds (e.g., greater than 1).\n2. **Cause:** Missing input validation on external price data.\n3. **Exploitation:** If the external oracle returns an invalid or manipulated price (e.g., zero or negative), it could distort internal calculations and lead to incorrect redemption values.\n4. **Impact:** Potential economic loss due to incorrect token valuations during redemption or accounting.\n"
+        },
+        {
+            "title": "Lack of Validation for Owner when Upgrading",
+            "description": "1. **Description:** During contract upgrades, the `get_summary()` function does not return or validate the current owner, which could prevent recovery if an upgrade fails.\n2. **Cause:** Incomplete state validation in the upgrade process.\n3. **Exploitation:** A failed or incorrect migration could leave the contract in a state where the owner cannot re-initiate the upgrade, leading to a potential lockout.\n4. **Impact:** Risk of permanent loss of upgrade capability or governance control.\n"
+        },
+        {
+            "title": "No Restriction of Redeem Time",
+            "description": "1. **Description:** Users can redeem pNEAR tokens for LiNEAR at any time without time-based restrictions, which could lead to unexpected economic behavior.\n2. **Cause:** Absence of cooldown periods or time-locked redemption logic.\n3. **Exploitation:** While not directly exploitable, this could enable short-term manipulation or suboptimal user behavior if market conditions change rapidly.\n4. **Impact:** Potential for user losses due to premature redemption and destabilization of token economics.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "After thorough analysis of the Solana smart contract code (which is actually a NEAR Protocol contract in Rust), I've identified several security issues stemming from the provided CWE root causes:\n\n1. **CWE-284 (Improper Access Control)**: The `bond()`, `cancel()`, `commit()`, and `redeem()` functions lack proper access control checks beyond basic authentication. While they check if the contract is paused, there's no validation of user permissions or rate limiting.\n\n2. **CWE-682 (Incorrect Calculation)**: In the `on_get_linear_price_for_commit()` function, there's a complex calculation involving treasury amounts, permanent pool amounts, and accrued amounts. The calculation `treasury_gained_near_amount += linear2near(self.linear_balance, linear_price.0) - self.pending_pool_near_amount` during the first commit could potentially underflow if `linear2near(self.linear_balance, linear_price.0)` is less than `self.pending_pool_near_amount`, leading to incorrect state.\n\n3. **CWE-703 (Improper Check or Handling of Exceptional Conditions)**: The `on_linear_transferred()` callback function handles transfer failures by moving tokens to a lost-and-found pool, but this doesn't properly handle the case where the user's state has already been updated. This could lead to inconsistent state if the transfer fails after state changes.\n\n4. **CWE-691 (Insufficient Control Flow Management)**: The contract uses multiple cross-contract calls with callbacks (`bond()` -> `on_staked()`, `cancel()` -> `on_get_linear_price_for_cancel()`, etc.). If any intermediate step fails, the control flow may not properly revert all state changes, potentially leaving the contract in an inconsistent state.\n\n5. **CWE-664 (Improper Control of a Resource Through its Lifetime)**: The `linear_balance` and pool amounts are updated in multiple places without atomic guarantees. For example, in `on_get_linear_price_for_cancel()`, `self.linear_balance` is decreased before the transfer is confirmed successful, which could lead to accounting errors if the transfer fails.\n\n6. **CWE-697 (Incorrect Comparison)**: In the `redeem()` function, the check `self.pnear_total_supply() - amount.0 > ONE_PNEAR` could be problematic if `amount.0` is greater than `self.pnear_total_supply()`, causing an underflow in unsigned arithmetic (though Rust would panic, this is still a logic error).\n\n7. **CWE-435 (Improper Interaction Between Multiple Correctly-Behaving Entities)**: The contract interacts with the LiNEAR contract through multiple cross-contract calls. The assumption that LiNEAR price remains constant between the price query and the actual operation could lead to race conditions or front-running attacks.\n",
+            "findings": [
+                {
+                    "title": "Potential Integer Underflow in First Commit Treasury Calculation",
+                    "description": "In the `on_get_linear_price_for_commit()` function, when calculating `treasury_gained_near_amount` for the first commit, the expression `linear2near(self.linear_balance, linear_price.0) - self.pending_pool_near_amount` could underflow if the converted linear balance is less than the pending pool amount. This would cause a panic in Rust but indicates a logical error in the calculation that could lead to incorrect treasury amounts.",
+                    "category": "CWE-682",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Inconsistent State Due to Failed Linear Transfer",
+                    "description": "The `on_linear_transferred()` callback handles transfer failures by moving tokens to lost-and-found, but the contract state (linear_balance, pool amounts) has already been updated before the transfer. If the transfer fails, the contract's accounting becomes inconsistent as the balance was already decreased but tokens weren't actually transferred. This violates the atomicity principle.",
+                    "category": "CWE-664",
+                    "severity": "critical",
+                    "confidence": 0.92
+                },
+                {
+                    "title": "Race Condition in Price-Dependent Operations",
+                    "description": "Functions like `cancel()`, `commit()`, and `redeem()` fetch the LiNEAR price in one transaction and use it in a callback. Between these two steps, the actual LiNEAR price could change significantly, leading to users receiving incorrect amounts. This is an improper interaction between the contract and the LiNEAR price oracle.",
+                    "category": "CWE-435",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Potential Underflow in Redeem Amount Validation",
+                    "description": "In the `redeem()` and `on_get_linear_price_for_redeem()` functions, the check `self.pnear_total_supply() - amount.0 > ONE_PNEAR` performs subtraction before comparison. If `amount.0` is greater than `self.pnear_total_supply()`, this would cause an underflow panic in Rust. While Rust's safety prevents exploitation, this represents incorrect comparison logic that should validate `amount.0 < self.pnear_total_supply() - ONE_PNEAR` instead.",
+                    "category": "CWE-697",
+                    "severity": "medium",
+                    "confidence": 0.78
+                },
+                {
+                    "title": "Insufficient Control Flow Management in Multi-Step Operations",
+                    "description": "Operations like `bond()`, `cancel()`, `commit()`, and `redeem()` involve multiple cross-contract calls with callbacks. If any intermediate step fails (e.g., `on_staked()` receives an error), some state changes may not be properly reverted. For example, in `bond()`, if the staking fails, the function refunds the user but doesn't handle potential state inconsistencies if any internal state was modified before the external call.",
+                    "category": "CWE-691",
+                    "severity": "high",
+                    "confidence": 0.81
+                },
+                {
+                    "title": "Missing Access Control for Critical State Transitions",
+                    "description": "While the contract checks if it's paused, there are no additional access controls or rate limiting on critical functions like `bond()`, `commit()`, and `redeem()`. Any user can call these functions repeatedly, potentially leading to DoS attacks or manipulation of the accrual parameters through rapid bond creation and cancellation.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.72
+                },
+                {
+                    "title": "Improper Exception Handling in Callback Functions",
+                    "description": "The callback functions like `on_staked()`, `on_get_linear_price_for_cancel()`, etc., use `.expect()` to unwrap results, which will panic if the external call fails. While the contract does handle some failure cases (e.g., refunding in `on_staked()`), the use of `.expect()` in price-fetching callbacks means that if the LiNEAR contract returns an error, the entire transaction will fail without proper cleanup or user notification.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.76
+                }
+            ]
+        },
+        {
+            "reasoning": "After thoroughly analyzing the Solana smart contract code provided, I need to clarify that this is actually a NEAR Protocol smart contract (using near_sdk), not a Solana contract. However, I will proceed with the security analysis based on the provided CWE candidates.\n\nKey security issues identified:\n\n1. **CWE-362 (Race Condition)**: The contract has multiple asynchronous operations (bond, cancel, commit, redeem) that modify shared state variables (linear_balance, pending_pool_near_amount, etc.). Between the initial call and the callback, the contract state could be modified by other transactions, leading to race conditions. For example, in `cancel()`, the bond note status is checked initially, but by the time `on_get_linear_price_for_cancel()` executes, another transaction could have modified the note.\n\n2. **CWE-666 (Operation on Resource in Wrong Phase of Lifetime)**: In the `on_linear_transferred()` callback, if the transfer fails, the LiNEAR tokens are moved to lost_and_found, but the contract state (linear_balance) was already decreased before the transfer. This means the resource (LiNEAR balance) is being operated on in the wrong phase - it's decremented optimistically before confirming the transfer succeeded.\n\n3. **CWE-404 (Improper Resource Shutdown or Release)**: When `on_staked()` fails, it refunds the user but doesn't properly handle the storage deposit. The BOND_STORAGE_DEPOSIT is refunded along with the bond_amount, but this storage was meant to cover the bond note storage. If the bond creation fails, this storage deposit should potentially be handled differently.\n\n4. **CWE-670 (Always-Incorrect Control Flow Implementation)**: In `on_get_linear_price_for_commit()`, when `is_first_commit` is true, the contract assigns all staking profits to treasury. However, this calculation `linear2near(self.linear_balance, linear_price.0) - self.pending_pool_near_amount` could be incorrect if there are multiple pending bonds, as it doesn't account for the specific bond being committed.\n\n5. **CWE-400 (Uncontrolled Resource Consumption)**: The contract doesn't limit the number of bond notes a user can create. While each bond requires BOND_STORAGE_DEPOSIT, a malicious user could create many small bonds (just above MINIMUM_BOND_AMOUNT) to consume storage and potentially cause DoS by making the bond_notes data structure very large.\n\n6. **CWE-662 (Improper Synchronization)**: The contract uses callbacks for asynchronous operations, but there's no mechanism to prevent the same bond note from being operated on concurrently. For example, a user could call `cancel()` and `commit()` on the same note_id simultaneously, and both might pass the initial `BondStatus::Pending` check before either callback executes.\n\n7. **CWE-287 (Improper Authentication)**: The `on_staked()`, `on_get_linear_price_for_cancel()`, `on_get_linear_price_for_commit()`, `on_get_linear_price_for_redeem()`, and `on_linear_transferred()` callbacks are marked as `#[private]`, which only checks that the caller is the current contract. However, there's no verification that these callbacks are being called in the correct context or that the parameters match the original request.\n\n8. **CWE-665 (Improper Initialization)**: The contract requires `bootstrap_ends > current_timestamp_ms()` during initialization, but there's no validation that the bootstrap period is reasonable. An extremely long bootstrap period could lock users' funds indefinitely.\n\n9. **CWE-668 (Exposure of Resource to Wrong Sphere)**: The `linear_lost_and_found` mechanism exposes LiNEAR tokens that failed to transfer. While this is intentional, there's no time limit or mechanism to prevent these tokens from being stuck indefinitely if a user's account becomes inaccessible.\n",
+            "findings": [
+                {
+                    "title": "Race Condition in Bond Note Operations",
+                    "description": "The contract performs asynchronous operations (bond, cancel, commit) that check bond note status initially but execute state changes in callbacks. Between the initial check and callback execution, another transaction could modify the bond note status, leading to inconsistent state. For example, a user could call cancel() and commit() on the same note_id, and both might pass the initial BondStatus::Pending check before either callback executes.",
+                    "category": "CWE-362",
+                    "severity": "high",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Premature Resource State Modification in Transfer Operations",
+                    "description": "In cancel() and redeem() operations, the contract decreases linear_balance before confirming the LiNEAR transfer succeeded. The transfer happens in transfer_linear(), but linear_balance is already decremented. If the transfer fails, tokens are moved to lost_and_found, but the balance was already reduced, creating a mismatch between actual holdings and recorded state during the transfer window.",
+                    "category": "CWE-666",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Improper Storage Deposit Handling on Bond Failure",
+                    "description": "When on_staked() fails and refunds the user, it returns both bond_amount and BOND_STORAGE_DEPOSIT. However, the storage deposit was intended to cover bond note storage. If bond creation fails repeatedly, the contract doesn't properly account for storage costs, potentially leading to storage exhaustion or incorrect storage economics.",
+                    "category": "CWE-404",
+                    "severity": "low",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Incorrect First Commit Treasury Calculation",
+                    "description": "In on_get_linear_price_for_commit(), when is_first_commit is true, the contract calculates treasury_gained_near_amount as 'linear2near(self.linear_balance, linear_price.0) - self.pending_pool_near_amount'. This calculation is incorrect when multiple bonds are pending, as it assigns profits from all pending bonds to the first committer's treasury calculation, rather than just the profits attributable to the specific bond being committed.",
+                    "category": "CWE-670",
+                    "severity": "medium",
+                    "confidence": 0.8
+                },
+                {
+                    "title": "Unbounded Bond Note Creation Enabling Storage DoS",
+                    "description": "The contract doesn't limit the number of bond notes a user can create. While each bond requires BOND_STORAGE_DEPOSIT (0.01 NEAR) and MINIMUM_BOND_AMOUNT (0.1 NEAR), a malicious actor could create thousands of small bonds to consume contract storage. The bond_notes data structure could grow unbounded, potentially causing performance degradation or storage exhaustion.",
+                    "category": "CWE-400",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Concurrent Operations on Same Bond Note Not Prevented",
+                    "description": "The contract uses asynchronous callbacks but lacks synchronization mechanisms to prevent concurrent operations on the same bond note. A user could simultaneously call cancel() and commit() on the same note_id. Both would pass the initial BondStatus::Pending check, and both callbacks could execute, leading to double-spending or inconsistent state modifications.",
+                    "category": "CWE-662",
+                    "severity": "high",
+                    "confidence": 0.88
+                },
+                {
+                    "title": "Insufficient Callback Context Validation",
+                    "description": "Callback functions (on_staked, on_get_linear_price_for_cancel, etc.) are marked #[private] but only verify the caller is the contract itself. There's no validation that callback parameters (user_id, note_id, amounts) match the original request or that the callback is being invoked in the correct sequence. This could potentially be exploited if the contract's cross-contract call logic has vulnerabilities.",
+                    "category": "CWE-287",
+                    "severity": "medium",
+                    "confidence": 0.7
+                },
+                {
+                    "title": "Unbounded Bootstrap Period Lock",
+                    "description": "During initialization, the contract only validates that bootstrap_ends > current_timestamp_ms(), but doesn't enforce a maximum bootstrap period. An administrator could set an extremely long bootstrap period (e.g., years in the future), effectively locking users' bonded funds indefinitely since commit() and redeem() are disabled during bootstrapping.",
+                    "category": "CWE-665",
+                    "severity": "medium",
+                    "confidence": 0.82
+                },
+                {
+                    "title": "Indefinite Token Lock in Lost and Found",
+                    "description": "The linear_lost_and_found mechanism stores LiNEAR tokens that failed to transfer, but there's no time limit, expiration, or alternative recovery mechanism. If a user's account becomes permanently inaccessible or the user is unaware of the lost_and_found, these tokens could be locked indefinitely with no way to recover or redistribute them.",
+                    "category": "CWE-668",
+                    "severity": "low",
+                    "confidence": 0.78
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-410",
+            "CWE-487",
+            "CWE-118",
+            "CWE-269",
+            "CWE-670",
+            "CWE-1280",
+            "CWE-346",
+            "CWE-501",
+            "CWE-911",
+            "CWE-282",
+            "CWE-768",
+            "CWE-1283",
+            "CWE-705",
+            "CWE-610",
+            "CWE-704",
+            "CWE-400",
+            "CWE-834",
+            "CWE-673",
+            "CWE-362",
+            "CWE-1270",
+            "CWE-668",
+            "CWE-749",
+            "CWE-404",
+            "CWE-666",
+            "CWE-913",
+            "CWE-923",
+            "CWE-1329",
+            "CWE-580",
+            "CWE-662",
+            "CWE-496",
+            "CWE-669",
+            "CWE-431",
+            "CWE-372",
+            "CWE-287",
+            "CWE-922",
+            "CWE-285",
+            "CWE-799",
+            "CWE-430",
+            "CWE-1267",
+            "CWE-841",
+            "CWE-1229",
+            "CWE-495",
+            "CWE-1265",
+            "CWE-286",
+            "CWE-706",
+            "CWE-665",
+            "CWE-221"
+        ]
+    ]
+}

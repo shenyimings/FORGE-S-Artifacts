@@ -1,0 +1,170 @@
+{
+    "project": "blocksec_memefarming_v1.0-signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_memefarming_v1.0-signed.pdf.json/contracts/boost-farming/src/storage_impl.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.3333333333333333,
+        "recall": 0.6,
+        "f1": 0.42857142857142855
+    },
+    "cwe_ground_truth": [
+        "CWE-707",
+        "CWE-1288",
+        "CWE-1164",
+        "CWE-710",
+        "CWE-20"
+    ],
+    "cwe_detected": [
+        "CWE-20",
+        "CWE-707",
+        "CWE-285",
+        "CWE-284",
+        "CWE-703",
+        "CWE-654",
+        "CWE-693"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Lack of Check in storage_unregister()",
+            "description": "1. **Description:** The function `storage_unregister()` allows users to unregister their accounts and withdraw the deposited storage fee. It checks that no staked tokens or rewards remain in the internal account before removal but fails to verify the `withdraws` field.\n2. **Cause:** The function does not include a validation step to ensure that the `withdraws` field of the account is empty before proceeding with account removal.\n3. **Exploitation:** An attacker could leave funds in the `withdraws` field, unregister the account, and permanently lose access to those funds due to the lack of validation.\n4. **Impact:** Users may lose funds that are left in the `withdraws` field upon account unregistration, leading to irreversible loss of assets.\n"
+        },
+        {
+            "title": "Redundant Check in storage_withdraw()",
+            "description": "1. **Description:** The function `storage_withdraw()` contains checks for `assert_one_yocto()` and `assert_contract_running()`, but the function immediately panics with `env::panic_str(E005_NOT_IMPLEMENTED)` after these checks.\n2. **Cause:** Since the function is effectively disabled, the preliminary checks serve no practical purpose and are never meaningfully executed.\n3. **Exploitation:** No direct exploit exists, but the redundant code may confuse auditors or developers into believing the function is partially functional.\n4. **Impact:** Code clarity and maintainability are reduced due to unnecessary and misleading assertions.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The contract implements the `StorageManagement` trait for managing user storage in a NEAR-based smart contract. Upon reviewing the code, several security concerns arise from the provided CWE categories.\n\n1. **CWE-284: Improper Access Control** is present in the `storage_deposit` function. While it checks if the contract is running, it does not validate whether the `account_id` being registered is a valid or authorized account beyond basic existence checks. Additionally, the function allows any caller to register another account by specifying the `account_id`, potentially enabling unauthorized sponsorship or registration unless `env::predecessor_account_id()` is properly enforced elsewhere. However, the use of `env::predecessor_account_id()` as a fallback may mitigate this slightly, but the ability to specify any `account_id` opens potential abuse vectors.\n\n2. **CWE-703: Improper Check or Handling of Exceptional Conditions** is observed in the `storage_withdraw` function, which unconditionally panics with \"E006_NOT_IMPLEMENTED\". This means any attempt to withdraw storage will cause the transaction to fail abruptly without graceful handling. This could lead to denial-of-service conditions or unexpected failures for users expecting partial or safe fallback behaviors. A proper implementation should either implement the logic or at least return a meaningful error or refund if needed.\n\n3. **CWE-693: Protection Mechanism Failure** is evident because the contract relies on `assert_one_yocto()` and runtime panics for access control and state management, but does not enforce strict ownership or authorization checks in all paths. For instance, in `storage_unregister`, while it checks that the caller has no rewards or seeds, it does not verify that the caller is the actual owner of the data — though it uses `predecessor_account_id()`, which is standard on NEAR, the lack of explicit validation combined with the use of `panic_str` instead of structured error returns reduces robustness and auditability.\n\n4. **CWE-707: Improper Neutralization** is present in the use of `env::panic_str`, which terminates execution abruptly and does not return structured, safe responses. This can interfere with composability and safe interaction from external contracts or frontend systems. Proper error handling via structured results (e.g., Result types) would improve safety and interoperability.\n",
+            "findings": [
+                {
+                    "title": "Lack of Access Control on Account Registration in storage_deposit",
+                    "description": "The `storage_deposit` function allows any user to register another account by specifying an `account_id` parameter, without verifying if the caller is authorized to register on behalf of that account. This could lead to unauthorized registrations or spam. Although `sponsor_id` is recorded, there is no validation that the sponsor has permission to register the target account, leading to potential abuse.",
+                    "category": "CWE-284",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Unimplemented Function Causes Abrupt Panic",
+                    "description": "The `storage_withdraw` function is marked as not implemented and triggers `env::panic_str(E006_NOT_IMPLEMENTED)`, which causes the entire transaction to abort. This is a poor practice as it prevents graceful degradation or informative error reporting. Users lose gas and experience poor UX, and it could be exploited in denial-of-service attacks against integrators expecting recoverable errors.",
+                    "category": "CWE-703",
+                    "severity": "medium",
+                    "confidence": 0.98
+                },
+                {
+                    "title": "Protection Mechanism Failure Due to Overreliance on Panic",
+                    "description": "The contract uses `env::panic_str` for error conditions instead of returning structured errors or using safe control flow. This constitutes a protection mechanism failure because it provides no defense against predictable conditions like unimplemented functions or invalid states, and makes the contract less composable and more fragile under edge cases.",
+                    "category": "CWE-693",
+                    "severity": "medium",
+                    "confidence": 0.93
+                },
+                {
+                    "title": "Improper Neutralization of Input and Error Conditions",
+                    "description": "The contract fails to properly neutralize or sanitize error conditions and user inputs by using raw panics instead of validating and handling exceptional cases safely. For example, `storage_withdraw` and `storage_unregister` use panics or assertions that terminate execution, which can disrupt interacting systems. Proper input validation and structured error responses should be used to ensure safe message handling.",
+                    "category": "CWE-707",
+                    "severity": "medium",
+                    "confidence": 0.9
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code implements storage management for a NEAR smart contract, specifically handling user registration, unregistration, and storage balance queries. Upon reviewing the code, several potential security issues were identified based on the provided CWE list.\n\nFirst, in the `storage_unregister` function, the contract allows a user to unregister only if they have no rewards or seeds left. However, the contract does not verify whether the caller has already withdrawn all their tokens — it only checks that the `rewards` and `seeds` maps are empty. This could allow a malicious actor to bypass intended withdrawal procedures if those fields are cleared through other means, potentially leading to loss of funds. This relates to improper validation of state before allowing a sensitive operation.\n\nSecond, the `storage_withdraw` function is marked as not implemented and immediately panics when called. While this is safe in the sense that it blocks unintended behavior, it may mislead developers or users into thinking partial withdrawals are supported. This could become a vulnerability if later modified without proper access control or checks.\n\nThird, the `storage_deposit` function allows any account to register as a farmer, and upon registration, it transfers excess deposit back to the caller. However, there is no validation that the `sponsor_id` (set as the predecessor) is a valid or authorized sponsor. This could allow for spoofing or unintended sponsorship relationships, especially if `sponsor_id` is used later for privilege assignment.\n\nAdditionally, while not directly exploitable here, the use of `env::panic_str` with static strings may leak implementation details or be less informative than structured error handling, but this is more of a usability concern.\n\nAfter careful analysis, the most relevant CWEs relate to improper validation and authorization checks.\n",
+            "findings": [
+                {
+                    "title": "Improper Authorization Check in Farmer Registration",
+                    "description": "The `storage_deposit` function sets the `sponsor_id` to the predecessor account ID without validating whether the account is authorized to act as a sponsor. This could allow any user to register with an arbitrary sponsor, potentially leading to privilege escalation or incorrect attribution in sponsorship-based reward systems.",
+                    "category": "CWE-285",
+                    "severity": "medium",
+                    "confidence": 0.95
+                },
+                {
+                    "title": "Incomplete Validation of Farmer State Before Unregistration",
+                    "description": "The `storage_unregister` function only checks that the farmer's rewards and seeds are empty but does not ensure that all associated tokens have been withdrawn through proper channels. A malicious user might manipulate internal state (e.g., via reentrancy or other exploits) to clear these fields without actually withdrawing funds, then unregister and reclaim storage deposit. This could interfere with expected economic behavior.",
+                    "category": "CWE-20",
+                    "severity": "medium",
+                    "confidence": 0.9
+                },
+                {
+                    "title": "Unimplemented Function with No Access Control Fallback",
+                    "description": "The `storage_withdraw` function is not implemented and panics when called. While currently safe, this creates a technical debt risk. If implemented later without proper access control or validation, it could introduce vulnerabilities. The lack of a clear access control model in the stub increases the likelihood of future errors.",
+                    "category": "CWE-654",
+                    "severity": "low",
+                    "confidence": 0.85
+                }
+            ]
+        },
+        {
+            "reasoning": "The provided code implements storage management for a NEAR smart contract, focusing on user registration, unregistration, and balance handling. After analyzing the code with respect to the specified CWEs, no direct evidence of improper input validation related to syntactic correctness, type, quantity, index, consistency, equivalence, or validation framework usage was found. The function `storage_deposit` properly validates attached deposit and account state before registration, and panics if minimum storage requirements are not met. The `storage_unregister` function correctly checks that the caller has no remaining rewards or seeds before allowing unregistration. The `storage_balance_of` and `storage_balance_bounds` functions provide correct balance information without user input mutation.\n\nNotably:\n- All inputs like `account_id` are handled via NEAR's `AccountId` type, which is inherently validated upon deserialization.\n- Arithmetic operations involving deposit amounts use unsigned integers and include explicit checks (e.g., `amount < STORAGE_BALANCE_MIN_BOUND`).\n- The unused `amount` parameter in `storage_withdraw` leads to a panic with \"NOT_IMPLEMENTED\", but this is intentional and does not represent an input validation flaw.\n- There is no parsing or decoding of complex structures where consistency or syntax validation would be required.\n\nTherefore, no vulnerabilities from the listed CWEs were identified in this code.\n",
+            "findings": []
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-269",
+            "CWE-287",
+            "CWE-286",
+            "CWE-346",
+            "CWE-655",
+            "CWE-345",
+            "CWE-393",
+            "CWE-1426",
+            "CWE-778",
+            "CWE-654",
+            "CWE-116",
+            "CWE-807",
+            "CWE-358",
+            "CWE-74",
+            "CWE-1270",
+            "CWE-357",
+            "CWE-923",
+            "CWE-311",
+            "CWE-1267",
+            "CWE-326",
+            "CWE-757",
+            "CWE-184",
+            "CWE-228",
+            "CWE-397",
+            "CWE-327",
+            "CWE-424",
+            "CWE-172",
+            "CWE-656",
+            "CWE-463",
+            "CWE-170",
+            "CWE-282",
+            "CWE-749",
+            "CWE-285",
+            "CWE-1283",
+            "CWE-138",
+            "CWE-1280",
+            "CWE-330",
+            "CWE-754",
+            "CWE-20",
+            "CWE-182",
+            "CWE-755",
+            "CWE-240"
+        ],
+        [
+            "CWE-1286",
+            "CWE-1288",
+            "CWE-1285",
+            "CWE-1284",
+            "CWE-179",
+            "CWE-1289",
+            "CWE-1173",
+            "CWE-1287"
+        ]
+    ]
+}

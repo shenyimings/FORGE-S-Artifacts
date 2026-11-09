@@ -1,0 +1,167 @@
+{
+    "path": "reports/REP-Soda-Protocol-2021-10-26.pdf",
+    "project_info": {
+        "url": "https://github.com/soda-protocol/soda-contract-lending",
+        "commit_id": "1c12d55ade82906dfe3f6a3af4517918f7d29a4f",
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2021-10-26",
+        "project_path": "contracts/REP-Soda-Protocol-2021-10-26.pdf.json"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1076"
+                ],
+                "3": [
+                    "CWE-1109"
+                ]
+            },
+            "title": "MOS-01 : Max Parameter Used Inconsistently",
+            "description": "The functions `calculate_amount` and `calculate_amount_and_decimal` use `u64::MAX` as a flag to return the maximum possible value, which is inconsistent and non-intuitive. \nThe root cause is the use of a magic number (`u64::MAX`) as a control flow signal instead of using proper type-level semantics like `Option<u64>`. \nWhile this does not lead to direct exploitation, it can cause confusion in code interpretation and integration, especially for external developers. \nThe impact is limited to potential misuse or misunderstanding of the API, but no direct financial loss or security breach is possible under normal operation.\n",
+            "severity": "medium",
+            "files": [
+                "program/src/math/mod.rs"
+            ],
+            "location": [
+                "mod.calculate_amount#160-162",
+                "mod.calculate_amount_and_decimal#169-170"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1068"
+                ]
+            },
+            "title": "PRO-01 : Approve Instead of Transfer for Liquidation",
+            "description": "The code comments indicate that a transfer should occur during liquidation, but the implementation uses an SPL token `approve` instruction instead of `transfer`. \nThe cause is a mismatch between documentation and actual logic, possibly due to incomplete implementation or oversight. \nAn attacker could potentially exploit this by manipulating approval rights, leading to unauthorized token movements if the approve is not properly revoked. \nThe impact includes potential token loss if approvals are left dangling and later exploited, though the actual risk is mitigated if proper cleanup occurs.\n",
+            "severity": "medium",
+            "files": [
+                "program/src/processor.rs"
+            ],
+            "location": [
+                "processor.process_liquidation#1867-1875"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "PRO-02 : Accruing Interest Right After Borrow",
+            "description": "Interest is accrued on the loan market immediately after a flash loan is borrowed, which may unfairly burden the flash loan caller with interest they did not intend to accrue. \nThe root cause is incorrect ordering of operations in the loan processing logic. \nAn attacker could exploit this by triggering flash loans in a way that manipulates interest accrual timing to their advantage. \nThe impact is potential economic unfairness or manipulation of interest distribution, though no direct fund theft occurs.\n",
+            "severity": "low",
+            "files": [
+                "program/src/processor.rs"
+            ],
+            "location": [
+                "processor.process_flash_loan#1849-1851"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "PRO-03 : No Amount Validation for Borrow Liquidity By Unique Credit",
+            "description": "The function lacks validation for the input `amount`, allowing zero-value inputs to proceed. \nThe cause is missing input validation checks, which is inconsistent with other similar functions in the codebase. \nAn attacker could exploit this by submitting zero-amount transactions to manipulate state or waste gas/resources. \nThe impact is limited to inefficiency or potential state bloat, but no direct fund loss occurs.\n",
+            "severity": "low",
+            "files": [
+                "program/src/processor.rs"
+            ],
+            "location": [
+                "processor.process_borrow_liquidity_by_unique_credit#2134"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1284"
+                ]
+            },
+            "title": "PRO-04 : No Amount Validation for Reduce Insurance",
+            "description": "Similar to PRO-03, there is no validation to ensure the input `amount` is non-zero when reducing insurance. \nThe root cause is the absence of a basic input check, which could lead to unintended behavior. \nAn attacker could exploit this by calling the function with zero amount to trigger unnecessary state changes. \nThe impact is minimal, limited to wasted computation and potential confusion in state tracking.\n",
+            "severity": "low",
+            "files": [
+                "program/src/processor.rs"
+            ],
+            "location": [
+                "processor.process_reduce_insurance#2398"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-1339"
+                ]
+            },
+            "title": "USE-01 : Division Before Multiplication",
+            "description": "The code performs division before multiplication in several mathematical calculations, which can lead to loss of precision due to integer truncation. \nThe cause is suboptimal arithmetic ordering in financial calculations. \nWhile not directly exploitable for fund theft, an attacker could leverage the precision loss in edge cases to gain unfair advantages in token distribution or interest calculation. \nThe impact is potential economic imbalance over time, especially in high-volume or high-precision scenarios.\n",
+            "severity": "low",
+            "files": [
+                "program/src/state/user_obligation.rs"
+            ],
+            "location": [
+                "user_obligation.rs#647-654",
+                "user_obligation.rs#609-615",
+                "user_obligation.rs#564-571",
+                "user_obligation.rs#506-509"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "USE-02 : Redundant Statement",
+            "description": "The code reconstructs a vector after calling `find_and_remove`, which updates the vector in place, making the reconstruction redundant. \nThe cause is unnecessary code that does not affect functionality but reduces clarity and efficiency. \nThis cannot be exploited by an attacker but reflects poor code hygiene. \nThe impact is purely on code maintainability and performance, with no security implications.\n",
+            "severity": "informational",
+            "files": [
+                "program/src/state/user_obligation.rs"
+            ],
+            "location": [
+                "user_obligation.rs#344"
+            ]
+        }
+    ]
+}

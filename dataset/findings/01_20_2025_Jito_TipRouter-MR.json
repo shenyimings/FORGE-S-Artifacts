@@ -1,0 +1,331 @@
+{
+    "path": "reports/certora/01_20_2025_Jito_TipRouter-MR.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/jito-foundation/jito-tip-router"
+        ],
+        "commit_id": [
+            "443368a",
+            "ac76352"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-12-23",
+        "project_path": "contracts/01_20_2025_Jito_TipRouter-MR.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-666"
+                ],
+                "3": [
+                    "CWE-672"
+                ]
+            },
+            "title": "Ballot’s weight for previous vote doesn’t decrement on vote change, allowing attacker to vote multiple times",
+            "description": "1. **Description:** The system allows operators to change their vote before consensus is reached. However, when a vote is changed, the weight from the previous ballot is not decremented, enabling a single operator to cast multiple votes.\n2. **Cause:** The root cause is the missing decrement operation on the previous ballot's weight during a vote change, which breaks the integrity of vote tallying.\n3. **Exploitation:** A malicious operator can change their vote to a new ballot without removing their weight from the old one, effectively doubling their voting power and potentially reaching false consensus.\n4. **Impact:** This allows an attacker to manipulate the voting outcome, leading to theft of MEV tip funds by directing them to a malicious Merkle root.\n",
+            "severity": "critical",
+            "location": [
+                "core/src/ballot_box.rs"
+            ],
+            "files": [
+                "jito-tip-router/core/src/ballot_box.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-400"
+                ],
+                "3": [
+                    "CWE-770"
+                ],
+                "4": [
+                    "CWE-1325"
+                ]
+            },
+            "title": "Ballot Box can be DoS-ed by filling it up with fake ballots",
+            "description": "1. **Description:** The system creates a new ballot whenever an operator votes for a Merkle root not yet present in the ballot box. There is no limit or cleanup mechanism for ballots.\n2. **Cause:** The absence of a mechanism to remove unused or invalid ballots allows a malicious operator to flood the ballot_tallies array with fake entries.\n3. **Exploitation:** An attacker can fill the ballot_tallies array with invalid Merkle roots, preventing legitimate ballots from being added and blocking consensus on valid roots.\n4. **Impact:** MEV tips cannot be distributed to eligible users, resulting in a denial-of-service condition that halts the reward distribution process.\n",
+            "severity": "critical",
+            "location": [
+                "core/src/ballot_box.rs"
+            ],
+            "files": [
+                "jito-tip-router/core/src/ballot_box.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1285"
+                ],
+                "4": [
+                    "CWE-129"
+                ]
+            },
+            "title": "Snapshot can be created for future epochs, assigning wrong stake weights",
+            "description": "1. **Description:** The snapshot mechanism does not validate that the target epoch is the current one, allowing snapshots to be created for future epochs.\n2. **Cause:** Missing validation checks enable an attacker to pre-register stake weights for future epochs, even after withdrawing funds.\n3. **Exploitation:** An attacker can snapshot their stake for many future epochs and then withdraw their funds, retaining voting and reward rights in epochs where they no longer have economic stake.\n4. **Impact:** Future epochs will reflect inaccurate stake weights, giving illegitimate voting and reward power to attackers and preventing new vaults from joining those epochs.\n",
+            "severity": "critical",
+            "location": [
+                "snapshot_vault_operator_delegation.rs",
+                "initialize_weight_table.rs"
+            ],
+            "files": [
+                "jito-tip-router/core/src/epoch_snapshot.rs"
+            ]
+        },
+        {
+            "id": 3,
+            "category": {
+                "1": [
+                    "CWE-703"
+                ],
+                "2": [
+                    "CWE-754"
+                ]
+            },
+            "title": "Snapshotting can’t be completed if empty vault-operator delegations exist",
+            "description": "1. **Description:** The snapshotting process requires loading every vault-operator delegation account, including empty ones, but attempts to load them unconditionally.\n2. **Cause:** The code calls `VaultOperatorDelegation::load()` without checking if the account is empty, causing the instruction to fail when encountering empty delegation accounts.\n3. **Exploitation:** If any vault-operator pair has no delegation, the snapshotting process will revert, even if the account is meant to be empty.\n4. **Impact:** Snapshotting cannot complete, which blocks the entire MEV tip distribution pipeline.\n",
+            "severity": "critical",
+            "location": [
+                "snapshot_vault_operator_delegation.rs"
+            ],
+            "files": [
+                "jito-tip-router/core/src/epoch_snapshot.rs"
+            ]
+        },
+        {
+            "id": 4,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-705"
+                ]
+            },
+            "title": "Reward distribution might be skipped to some operators during routing",
+            "description": "1. **Description:** When routing rewards in batches due to compute unit limits, the system saves the last processed vote index and incorrectly reuses it across subsequent groups upon resumption.\n2. **Cause:** The `starting_vote_index` is not reset to zero after the first group is processed, causing the router to skip earlier votes in subsequent groups.\n3. **Exploitation:** After a partial routing operation, resuming causes the system to skip valid votes that occur before the saved index in later groups.\n4. **Impact:** Some operators are deprived of their rightful rewards, leading to unfair distribution and potential loss of income.\n",
+            "severity": "critical",
+            "location": [
+                "core/src/base_reward_router.rs"
+            ],
+            "files": [
+                "jito-tip-router/core/src/base_reward_router.rs"
+            ]
+        },
+        {
+            "id": 5,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-841"
+                ]
+            },
+            "title": "Voting can be done after routing started, leading to a DoS for the router",
+            "description": "1. **Description:** Voting remains permitted for a number of slots after consensus, even while reward routing has already begun.\n2. **Cause:** The system does not enforce a strict ordering where voting must end before routing starts, creating a race condition.\n3. **Exploitation:** An attacker can initiate routing with a low iteration limit, then submit a new vote, causing an underflow when the router attempts to distribute more rewards than available.\n4. **Impact:** Any attempt to finalize routing fails due to arithmetic underflow, resulting in a denial of service that prevents reward distribution.\n",
+            "severity": "critical",
+            "location": [
+                "route_base_rewards.rs"
+            ],
+            "files": [
+                "jito-tip-router/core/src/ballot_box.rs",
+                "jito-tip-router/core/src/config.rs",
+                "jito-tip-router/core/src/base_reward_router.rs"
+            ]
+        },
+        {
+            "id": 6,
+            "category": {
+                "1": [
+                    "CWE-664"
+                ],
+                "2": [
+                    "CWE-221"
+                ],
+                "3": [
+                    "CWE-223"
+                ]
+            },
+            "title": "Base router resumes with wrong rewards, distributing low amounts for operators",
+            "description": "1. **Description:** When resuming partial reward routing, the system recalculates the current ncn fee group rewards instead of using the saved value from before the pause.\n2. **Cause:** The `ncn_fee_group_rewards()` value changes as rewards are distributed, but the router does not save this value when pausing, leading to incorrect calculations upon resumption.\n3. **Exploitation:** After resuming, the router uses a reduced reward balance, causing operators to receive less than their entitled amount.\n4. **Impact:** Operators receive lower rewards than expected, with leftover funds stuck in the router until another routing cycle occurs.\n",
+            "severity": "high",
+            "location": [
+                "core/src/base_reward_router.rs"
+            ],
+            "files": [
+                "jito-tip-router/core/src/base_reward_router.rs"
+            ]
+        },
+        {
+            "id": 7,
+            "category": {
+                "1": [
+                    "CWE-707"
+                ],
+                "2": [
+                    "CWE-20"
+                ],
+                "3": [
+                    "CWE-1287"
+                ]
+            },
+            "title": "restaking_config isn’t verified, allowing to supply a fake account",
+            "description": "1. **Description:** The `register_vault` instruction accepts a `restaking_config` account without verifying its ownership or discriminator.\n2. **Cause:** Missing account validation allows an attacker to pass a maliciously crafted account with arbitrary data, such as a manipulated epoch length.\n3. **Exploitation:** An attacker can bypass the vault activity check by providing a fake config account that reports an incorrect epoch length, making an inactive vault appear active.\n4. **Impact:** Inactive vaults can be registered, compromising the integrity of the vault registry and potentially enabling unauthorized participation in reward distribution.\n",
+            "severity": "medium",
+            "location": [
+                "program/src/register_vault.rs"
+            ],
+            "files": [
+                "jito-tip-router/program/src/register_vault.rs"
+            ]
+        },
+        {
+            "id": 8,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-799"
+                ]
+            },
+            "title": "Attacker can DoS reward distribution by starting routing again",
+            "description": "1. **Description:** The system allows anyone to start reward routing by sending a minimal new balance, even if no real distribution is needed.\n2. **Cause:** Lack of a minimum balance requirement makes it cost-effective for an attacker to repeatedly initiate routing with zero or minimal iterations.\n3. **Exploitation:** An attacker can continuously start routing with max iterations set to zero, forcing legitimate users to finish routing before they can proceed, thereby stalling the system.\n4. **Impact:** Reward distribution is delayed or prevented, creating a denial-of-service condition that disrupts normal operations.\n",
+            "severity": "medium",
+            "location": [
+                "route_ncn_rewards.rs",
+                "route_base_rewards.rs"
+            ],
+            "files": [
+                "jito-tip-router/program/src/route_ncn_rewards.rs"
+            ]
+        },
+        {
+            "id": 9,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-193"
+                ]
+            },
+            "title": "Router does one less iteration than it should",
+            "description": "1. **Description:** The iteration counter is incremented before the max_iterations check, causing the loop to exit before executing the first iteration when max_iterations is set to 1.\n2. **Cause:** The logic error lies in the order of operations: incrementing the counter before checking against the limit.\n3. **Exploitation:** Any caller setting a specific iteration count will get one fewer execution than intended, potentially leaving routing incomplete.\n4. **Impact:** The routing process may terminate prematurely, requiring additional transactions to complete, increasing cost and complexity.\n",
+            "severity": "low",
+            "location": [
+                "core/src/base_reward_router.rs",
+                "core/src/ncn_reward_router.rs"
+            ],
+            "files": [
+                "jito-tip-router/core/src/base_reward_router.rs"
+            ]
+        },
+        {
+            "id": 10,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-834"
+                ]
+            },
+            "title": "CU consumption can be saved by providing hints",
+            "description": "1. **Description:** Several functions perform linear searches over arrays (e.g., finding an operator in reward routes) without allowing optimization hints.\n2. **Cause:** The absence of index hints forces the program to scan entire arrays, consuming unnecessary compute units.\n3. **Exploitation:** While not directly exploitable, inefficient searches increase transaction costs and reduce scalability.\n4. **Impact:** Higher compute unit consumption leads to increased fees and reduced throughput, affecting overall system efficiency.\n",
+            "severity": "informational",
+            "location": [
+                "core/src/base_reward_router.rs",
+                "And more"
+            ],
+            "files": [
+                "jito-tip-router/core/src/base_reward_router.rs"
+            ]
+        },
+        {
+            "id": 11,
+            "category": {
+                "1": [
+                    "CWE-693"
+                ],
+                "2": [
+                    "CWE-345"
+                ],
+                "3": [
+                    "CWE-346"
+                ]
+            },
+            "title": "Inconsistency in the way the restaking program is treated",
+            "description": "1. **Description:** Some instructions verify that the restaking program matches the expected deployed address, while others do not.\n2. **Cause:** Inconsistent security policies across instructions lead to uneven validation of critical dependencies.\n3. **Exploitation:** While not currently exploitable due to other checks, this inconsistency could lead to vulnerabilities if assumptions change.\n4. **Impact:** Reduces code reliability and maintainability; a unified policy would improve security assurance.\n",
+            "severity": "informational",
+            "location": [
+                "Distribute_ncn_vault_rewards.rs",
+                "Snapshot_vault_operator_delegation.rs",
+                "And more"
+            ],
+            "files": [
+                "jito-tip-router/program/src/distribute_ncn_vault_rewards.rs"
+            ]
+        },
+        {
+            "id": 12,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1041"
+                ]
+            },
+            "title": "Redundant discriminator check in admin_set_new_admin",
+            "description": "1. **Description:** The `admin_set_new_admin` instruction manually checks the account discriminator even though this is already done inside `NcnConfig::load()`.\n2. **Cause:** Duplicate validation logic that provides no additional security.\n3. **Exploitation:** No direct exploit, but redundant code increases complexity and maintenance burden.\n4. **Impact:** Unnecessary code bloat and potential confusion for auditors or developers.\n",
+            "severity": "informational",
+            "location": [
+                "admin_set_new_admin.rs"
+            ],
+            "files": [
+                "jito-tip-router/program/src/admin_set_new_admin.rs"
+            ]
+        },
+        {
+            "id": 13,
+            "category": {
+                "1": [
+                    "CWE-682"
+                ],
+                "2": [
+                    "CWE-193"
+                ]
+            },
+            "title": "Out of bounds check is off by one at epoch snapshot",
+            "description": "1. **Description:** The `EpochSnapshot::insert_vault_operator_stake_weight()` function checks if the current count exceeds `MAX_VAULTS`, but this occurs before adding the new entry.\n2. **Cause:** The comparison uses `>` instead of `>=`, meaning the check fails only *after* exceeding the limit, not when reaching it.\n3. **Exploitation:** When exactly `MAX_VAULTS` are registered, the next insertion triggers a raw out-of-bounds error instead of the intended custom error.\n4. **Impact:** Less informative error messages during edge cases, reducing debuggability and user experience.\n",
+            "severity": "informational",
+            "location": [
+                "core/src/epoch_snapshot.rs"
+            ],
+            "files": [
+                "jito-tip-router/core/src/epoch_snapshot.rs"
+            ]
+        }
+    ]
+}

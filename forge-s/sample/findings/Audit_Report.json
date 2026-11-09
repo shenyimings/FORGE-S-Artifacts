@@ -1,0 +1,51 @@
+{
+    "path": "sample/reports/Audit_Report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/OrderlyNetwork/sol-cc",
+            "https://github.com/OrderlyNetwork/solana-vault"
+        ],
+        "commit_id": [
+            "dc99b068cda9a6067b35edf629acd1730e5982a3",
+            "bd8b6dbeb3300319fd9dad262298ec0cd1152344"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2024-10-15",
+        "project_path": {
+            "contracts": "sample/contracts/Audit_Report.pdf-source"
+        }
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {},
+            "title": "Missing Deposit Token Validation in solana_vault::deposit",
+            "description": "1. **Description:** The deposit function in the solana-vault program does not validate that the token being deposited matches the allowed token (e.g., USDC). This allows an attacker to deposit any token while claiming it is the allowed one.\n2. **Cause:** The Deposit struct and associated functions (deposit and apply) lack a constraint to verify that deposit_token.key() matches allowed_token.mint_account. The deposit_params.token_hash is user-controlled and not tied to the actual mint of the deposited token.\n3. **Exploitation:** An attacker can deposit a low-value or worthless token (e.g., WIF) while providing a token_hash corresponding to USDC. The system accepts this as a valid USDC deposit due to the missing validation.\n4. **Impact:** The attacker receives an equivalent amount of USDC on the destination chain, while the vault holds devalued or worthless tokens. This leads to direct financial loss for the protocol and potential draining of the vault.\n",
+            "severity": "High",
+            "location": [
+                "solana_vault::deposit",
+                "deposit.rs::apply",
+                "Deposit struct"
+            ],
+            "files": [
+                "bd8b6dbeb3300319fd9dad262298ec0cd1152344/solana-vault/packages/solana/contracts/programs/solana-vault/src/instructions/vault_instr/deposit.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {},
+            "title": "Unauthorized Withdrawal Due to Shared Vault Authority PDA",
+            "description": "1. **Description:** The OAppLzReceive function uses a shared PDA (vault_authority_seeds) for signing withdrawals, allowing any user to execute a withdrawal on behalf of another user.\n2. **Cause:** The vault authority PDA is not user-specific, and there is no validation that the recipient of the withdrawal matches the intended user in the withdrawal message. The system only verifies the message sender, not the beneficiary.\n3. **Exploitation:** If User B initiates a withdrawal, User A can intercept or observe the valid withdrawal message and call the function first, redirecting the funds to their own account.\n4. **Impact:** User A can steal the entire withdrawn amount from User B, leading to direct loss of funds for legitimate users and a critical breach of fund segregation.\n",
+            "severity": "High",
+            "location": [
+                "OAppLzReceive",
+                "oapp_lz_receive.rs#113-114"
+            ],
+            "files": [
+                "bd8b6dbeb3300319fd9dad262298ec0cd1152344/solana-vault/packages/solana/contracts/programs/solana-vault/src/instructions/oapp_instr/oapp_lz_receive.rs"
+            ]
+        }
+    ]
+}

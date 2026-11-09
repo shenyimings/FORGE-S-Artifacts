@@ -1,0 +1,125 @@
+{
+    "project": "blocksec_ref_finance_exchange_v1.0_signed.pdf.json",
+    "files": [
+        "dataset/contracts/blocksec_ref_finance_exchange_v1.0_signed.pdf.json/ref-exchange/src/storage_impl.rs"
+    ],
+    "hierarchical_metrics": {
+        "precision": 0.16666666666666666,
+        "recall": 0.3333333333333333,
+        "f1": 0.2222222222222222
+    },
+    "cwe_ground_truth": [
+        "CWE-404",
+        "CWE-459",
+        "CWE-664"
+    ],
+    "cwe_detected": [
+        "CWE-665",
+        "CWE-664",
+        "CWE-284",
+        "CWE-668",
+        "CWE-703",
+        "CWE-400"
+    ],
+    "vuln_ground_truth": [
+        {
+            "title": "Improper Account Unregistration",
+            "description": "The function `storage_unregister()` allows users to unregister their accounts and reclaim their NEAR deposits, but it fails to verify whether the user's `legacy_tokens` mapping is empty before proceeding with unregistration. This flaw arises because the function does not include a validation check on the `legacy_tokens` field, which is used to track tokens from legacy systems. An attacker or regular user could exploit this by unregistering their account while still holding non-zero `legacy_tokens`, effectively causing those tokens to be permanently lost since there is no mechanism to recover or transfer them post-unregistration. The impact is loss of user funds recorded in `legacy_tokens`, leading to financial damage for affected users.\n"
+        }
+    ],
+    "results": [
+        {
+            "reasoning": "The code implements NEP-145-style storage management. The main risks in this snippet come from (1) state-manipulation paths that can affect accounts other than the caller, (2) lifetime/resource-management edge cases around unregister/force handling, and (3) unhandled exceptional conditions via `unwrap()` that can panic if invariants are ever violated by internal helpers.\n\nIn particular, `storage_deposit` allows specifying an arbitrary `account_id` and then calls `internal_register_account(&account_id, amount)` in the non-`registration_only` branch even when the account is already registered. If `internal_register_account` is not strictly additive-only for existing accounts (e.g., if it overwrites near_amount or reinitializes), an attacker can attach a tiny deposit (even 0) and modify another user’s storage state. This is a security-relevant resource lifetime/control issue and potentially an access-control issue depending on the helper’s semantics.\n\n`storage_unregister` ignores the `force` parameter entirely (TODO), which can cause users’ storage deposits to become stuck if they cannot empty `tokens` due to other protocol constraints—an improper control of resources through their lifetime.\n\nMultiple functions end with `.unwrap()` on `storage_balance_of(...)`. If internal state is ever inconsistent (e.g., helper failed to create/update an account as expected), the contract will panic, causing transaction failure/DoS for that call and complicating recovery.\n",
+            "findings": [
+                {
+                    "title": "Arbitrary account storage state modification risk via `storage_deposit` (helper semantics dependent)",
+                    "description": "`storage_deposit` permits the caller to pass any `account_id` (not necessarily the predecessor), and in the `registration_only == false` branch it unconditionally calls `self.internal_register_account(&account_id, amount)` even when the account is already registered.\n\nIf `internal_register_account` is not strictly implemented as an additive “top-up” for existing accounts (e.g., it overwrites `near_amount`, reinitializes the account, or otherwise changes accounting based solely on `amount`), then an attacker could:\n- call `storage_deposit(Some(victim), None)` with a very small attached deposit (even 0, since the `< min_balance` check is skipped for already-registered accounts),\n- and thereby reduce/reset/alter the victim’s recorded storage deposit or other fields.\n\nThis becomes a cross-account state manipulation vector (and can break victim operations or strand funds) stemming from insufficient restriction/validation around modifying resources owned by other accounts.\n",
+                    "category": "CWE-284",
+                    "severity": "high",
+                    "confidence": 0.62
+                },
+                {
+                    "title": "`force` parameter ignored in `storage_unregister` can strand user storage deposits",
+                    "description": "`storage_unregister(&mut self, force: Option<bool>)` ignores `force` entirely (marked TODO) and always asserts that `account_deposit.tokens.is_empty()`.\n\nIf tokens cannot be emptied due to other correct-but-interacting components (e.g., another module leaves dust balances, frozen balances, or an accounting discrepancy), the user cannot unregister and reclaim `near_amount`, effectively losing control over their storage deposit for the lifetime of the contract/account state.\n\nThis is a resource lifetime/control issue: the contract provides an API surface suggesting forced cleanup but does not implement it, creating conditions where funds remain locked unexpectedly.\n",
+                    "category": "CWE-664",
+                    "severity": "medium",
+                    "confidence": 0.85
+                },
+                {
+                    "title": "Uncaught exceptional conditions due to `unwrap()` on post-operation balance queries",
+                    "description": "`storage_deposit` and `storage_withdraw` end with:\n`self.storage_balance_of(...).unwrap()`.\n\nIf internal helpers (`internal_register_account`, `internal_storage_withdraw`) ever fail to ensure the account exists/remains present (e.g., due to a bug, upgrade, or unexpected state), `storage_balance_of` can return `None` and the contract will panic.\n\nWhile a panic reverts state, it still creates a denial-of-service condition for that action and makes the contract brittle to rare edge cases or state corruption. Defensive handling (returning an error instead of panicking) would improve robustness.\n",
+                    "category": "CWE-703",
+                    "severity": "low",
+                    "confidence": 0.78
+                }
+            ]
+        },
+        {
+            "reasoning": "The code implements NEP-145-style storage management, but there are a few security-relevant edge cases centered around (a) who is allowed to create/modify account storage state and (b) unbounded growth of contract-managed state.\n\nThe highest-risk issue is that `storage_deposit` calls `internal_register_account(&account_id, amount)` in the non-`registration_only` path without first guarding `already_registered`. If `internal_register_account` is an initializer (common pattern) that overwrites the existing account struct instead of incrementally topping up `near_amount`, then an attacker can call `storage_deposit(Some(victim), ...)` with a small deposit and clobber the victim’s stored state (their storage deposit and/or token bookkeeping), which is an improper (re-)initialization of an existing resource.\n\nIndependently, the contract allows any caller to register arbitrary `account_id`s (third-party registration) and does not impose any cap/rate-limit on the number of accounts. Even if each registration is paid for, this can still cause uncontrolled growth in the `accounts` map (state bloat), increasing read/write costs and potentially making other instructions that touch/iterate state (elsewhere in the contract) fail due to gas limits or operational overhead. This is a typical resource-consumption/DoS vector in account-registry patterns.\n\nFinally, allowing externally supplied `account_id` to directly drive state creation/modification can be an exposure of a resource boundary if the intended policy is “only an account can create/modify its own storage record” (some protocols require this). If third-party registration is not explicitly intended, it expands control over the account-registry resource to the wrong sphere.\n",
+            "findings": [
+                {
+                    "title": "Possible overwrite/re-initialization of existing account state in storage_deposit",
+                    "description": "In `storage_deposit`, when `registration_only == false`, the code unconditionally calls:\n`self.internal_register_account(&account_id, amount);`\neven if `already_registered == true`.\n\nIf `internal_register_account` behaves like an initializer (e.g., inserts a fresh `Account` struct) rather than a “top-up” function, this can overwrite an existing account record. Because `account_id` can be supplied by the caller, an attacker could potentially clobber another user’s account storage record by depositing a small amount to that victim’s `account_id`, resulting in loss/corruption of bookkeeping (e.g., `near_amount`, token map) or forcing the account into an unexpected state.\n\nThis is especially dangerous if other parts of the contract assume invariants about the account record (e.g., non-empty token map, minimum storage deposit).\n",
+                    "category": "CWE-665",
+                    "severity": "high",
+                    "confidence": 0.55
+                },
+                {
+                    "title": "Unbounded growth of accounts registry enables state-bloat / resource-consumption DoS",
+                    "description": "`storage_deposit` permits registering arbitrary `account_id`s (including accounts unrelated to the caller). There is no cap, throttling, or other control on how many distinct entries can be created in `self.accounts`.\n\nAn attacker can create a very large number of account entries by repeatedly calling `storage_deposit` with different `account_id`s (paying `min_balance` each time). Even if storage is paid, this can still cause:\n- persistent state bloat (larger contract state, higher operational costs),\n- increased gas usage for reads/writes,\n- potential failure of other methods (elsewhere in the contract) that may iterate over accounts or perform heavier state operations, leading to denial of service for normal users.\n",
+                    "category": "CWE-400",
+                    "severity": "medium",
+                    "confidence": 0.75
+                },
+                {
+                    "title": "Third-party registration/modification of storage records may expose account-registry resource to wrong sphere",
+                    "description": "The function `storage_deposit` allows the caller to pass any `account_id` and thereby create or modify the storage record for that account. If the intended policy is that only the account owner should be able to create/modify their own storage record, this is a control-sphere violation: an external actor can affect another user’s registry entry without that user initiating the action.\n\nWhile third-party storage deposits are sometimes intended in NEP-145-like designs, if not explicitly intended here, it expands control over a security-relevant resource (account registration/state) to an unintended sphere and can enable griefing patterns (e.g., forced registration, unexpected state changes).\n",
+                    "category": "CWE-668",
+                    "severity": "medium",
+                    "confidence": 0.6
+                }
+            ]
+        }
+    ],
+    "candidate_cwes": [
+        [
+            "CWE-284",
+            "CWE-435",
+            "CWE-664",
+            "CWE-682",
+            "CWE-691",
+            "CWE-693",
+            "CWE-697",
+            "CWE-703",
+            "CWE-707",
+            "CWE-710"
+        ],
+        [
+            "CWE-669",
+            "CWE-913",
+            "CWE-1229",
+            "CWE-400",
+            "CWE-665",
+            "CWE-410",
+            "CWE-668",
+            "CWE-580",
+            "CWE-221",
+            "CWE-1329",
+            "CWE-662",
+            "CWE-666",
+            "CWE-118",
+            "CWE-404",
+            "CWE-704",
+            "CWE-610",
+            "CWE-496",
+            "CWE-501",
+            "CWE-706",
+            "CWE-673",
+            "CWE-911",
+            "CWE-487",
+            "CWE-922",
+            "CWE-372",
+            "CWE-495"
+        ]
+    ]
+}

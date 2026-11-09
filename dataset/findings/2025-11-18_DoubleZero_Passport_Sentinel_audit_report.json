@@ -1,0 +1,86 @@
+{
+    "path": "reports/adevar/2025-11-18_DoubleZero_Passport_Sentinel_audit_report.pdf",
+    "project_info": {
+        "url": [
+            "https://github.com/doublezerofoundation/doublezero-solana",
+            "https://github.com/doublezerofoundation/doublezero-offchain"
+        ],
+        "commit_id": [
+            "e71c7101a98f71d94dc99831a069dabdee8ee144",
+            "c036b7ecad0e15db8a05d124f7f9c728bb8a0730"
+        ],
+        "address": [],
+        "chain": "solana",
+        "compiler_version": "n/a",
+        "audit_date": "2025-11-18",
+        "project_path": "contracts/2025-11-18_DoubleZero_Passport_Sentinel_audit_report.pdf-source"
+    },
+    "findings": [
+        {
+            "id": 0,
+            "category": {
+                "1": [
+                    "CWE-435"
+                ],
+                "2": [
+                    "CWE-436"
+                ],
+                "3": [
+                    "CWE-115"
+                ]
+            },
+            "title": "Incorrect Use of .first() Instead of .last() in get_signatures_for_address",
+            "description": "The vulnerability arises because the `get_signatures_for_address` function uses `.first()` to retrieve the creation signature of an account, while the Solana RPC method `getSignaturesForAddress` returns signatures in reverse chronological order (newest first). As a result, `.first()` returns the most recent signature, not the oldest (creation) one. This incorrect logic allows an attacker to manipulate the signature list by submitting a new transaction (e.g., a lamport transfer), pushing the true creation signature further back in the list. Consequently, the Sentinel may select the wrong transaction during backfill operations. This can lead to a denial-of-service condition when `deserialize_access_request_ids` fails to find the expected instruction targeting the passport ID, disrupting the access request processing flow.\n",
+            "severity": "high",
+            "location": [
+                "crates/sentinel/src/client/solana.rs#136-141"
+            ],
+            "files": [
+                "c036b7ecad0e15db8a05d124f7f9c728bb8a0730/doublezero-offchain/crates/sentinel/src/client/solana.rs"
+            ]
+        },
+        {
+            "id": 1,
+            "category": {
+                "1": [
+                    "CWE-710"
+                ],
+                "2": [
+                    "CWE-1059"
+                ],
+                "3": [
+                    "CWE-1112"
+                ]
+            },
+            "title": "Lack of Restart Mechanism Documentation for Cross-Network State Synchronization",
+            "description": "The `handle_access_request` function performs non-atomic operations across two blockchain networks (DZ Ledger and Solana). If the Sentinel crashes after successfully calling `issue_access_pass()` on the DZ Ledger but before calling `grant_access()` on Solana, the two networks become desynchronized: the access pass is issued but the Solana PDA remains open with user funds locked. Although the system can recover upon restart (via systemd) by reprocessing the open PDA, this recovery mechanism is not documented in the codebase. Without proper process supervision or documentation, a crash could lead to prolonged desynchronization and require manual intervention, increasing operational risk and potentially leading to user fund lockups if not restarted promptly.\n",
+            "severity": "medium",
+            "location": [
+                "crates/sentinel/src/sentinel/handler.rs#76-98"
+            ],
+            "files": [
+                "c036b7ecad0e15db8a05d124f7f9c728bb8a0730/doublezero-offchain/crates/sentinel/src/sentinel/handler.rs"
+            ]
+        },
+        {
+            "id": 2,
+            "category": {
+                "1": [
+                    "CWE-691"
+                ],
+                "2": [
+                    "CWE-670"
+                ]
+            },
+            "title": "Wrong Service Key Extraction for Multiple Access Requests in Single Transaction",
+            "description": "When a transaction contains multiple `RequestAccess` instructions for different service keys, the `deserialize_access_request_ids` function always processes the first matching instruction due to using `.find()`, which returns only the first occurrence. As a result, when multiple access requests are made in one transaction, all requests are incorrectly mapped to the service key and PDA of the first instruction. This causes subsequent access requests to be processed with incorrect data—issuing access passes for the wrong service key and attempting to close the wrong PDA. Validators do not receive access for their intended services, and their deposits are not refunded, leading to loss of access and potential fund loss. The root cause is the failure to correlate each PDA with its corresponding instruction in the transaction.\n",
+            "severity": "medium",
+            "location": [
+                "crates/sentinel/src/client/solana.rs#221-248"
+            ],
+            "files": [
+                "c036b7ecad0e15db8a05d124f7f9c728bb8a0730/doublezero-offchain/crates/sentinel/src/client/solana.rs"
+            ]
+        }
+    ]
+}
